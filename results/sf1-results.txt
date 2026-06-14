@@ -1,11 +1,23 @@
 
 === LDBC SNB BI — SF1 (real data) ===
-Loaded 2887039 nodes (10295 persons, 1121226 posts, 1739438 comments, 16080 tags)
-       6026780 edges (2860664 hasCreator, 2928064 hasTag, 238052 hasInterest) in 3.9s
+Loaded 2887110 nodes (10295 persons, 1121226 posts, 1739438 comments, 16080 tags, 71 tagclasses)
+       6042860 edges in 2.9s
 
-BI1 tag co-evolution            737.71 ms   (result=3356249)
-BI2 tag person path              11.65 ms   (result=1151)
-BI3 popular topics              220.65 ms   (result=10)
-BI4 top commenters               23.93 ms   (result=10)
-BI5 active users                 20.93 ms   (result=10)
-BI6 tag co-occurrence           168.76 ms   (result=1034827)
+Faithful LDBC BI queries:
+  Q1 posting summary: 12 groups over 691085 messages before 2011-12-01
+     2011 Post    lenCat=2  count=70448  avgLen=105.4
+     2011 Post    lenCat=3  count=8632  avgLen=204.5
+     2011 Comment lenCat=0  count=112566  avgLen=4.2
+     2011 Comment lenCat=1  count=16659  avgLen=76.5
+  Q2 tag evolution (MusicalArtist, 2012-06-01): 100 tags
+     Rick_Springfield               w1=6 w2=1106 diff=1100
+     Enrique_Iglesias               w1=581 w2=932 diff=351
+     Freddie_Mercury                w1=883 w2=1191 diff=308
+
+Timings (median of 5):
+Q1 posting summary                     56.74 ms   (result=12)
+Q2 tag evolution                      153.34 ms   (result=100)
+BI1 tag co-evolution (simpl.)         738.03 ms   (result=3356249)
+BI3 popular topics (simpl.)           216.97 ms   (result=12661)
+BI4 top commenters (simpl.)            20.44 ms   (result=10035)
+BI5 active users (simpl.)              12.71 ms   (result=9592)
