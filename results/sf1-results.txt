@@ -1,0 +1,11 @@
+
+=== LDBC SNB BI — SF1 (real data) ===
+Loaded 2887039 nodes (10295 persons, 1121226 posts, 1739438 comments, 16080 tags)
+       6026780 edges (2860664 hasCreator, 2928064 hasTag, 238052 hasInterest) in 3.9s
+
+BI1 tag co-evolution            737.71 ms   (result=3356249)
+BI2 tag person path              11.65 ms   (result=1151)
+BI3 popular topics              220.65 ms   (result=10)
+BI4 top commenters               23.93 ms   (result=10)
+BI5 active users                 20.93 ms   (result=10)
+BI6 tag co-occurrence           168.76 ms   (result=1034827)
