@@ -219,6 +219,29 @@ def preprocess():
                 w.writerow([a, b, wt])
                 w.writerow([b, a, wt])
 
+    # --- Forum (title + creationDate) + hasModerator + hasMember + containerOf ---
+    with open(f"{IMPORT}/forum.csv", "w", newline="") as out, \
+         open(f"{IMPORT}/forum_hasmoderator.csv", "w", newline="") as hm:
+        w = csv.writer(out, delimiter="|")
+        wm = csv.writer(hm, delimiter="|")
+        w.writerow(["id", "title", "fcdate"])
+        wm.writerow(["from", "to"])  # Forum -> moderator Person
+        for (i, title, cd, mod_) in rows("dynamic/Forum", ["id", "title", "creationDate", "ModeratorPersonId"]):
+            w.writerow([i, title, cd[:10]])
+            if mod_:
+                wm.writerow([i, mod_])
+    with open(f"{IMPORT}/forum_hasmember.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to"])  # Forum -> Person
+        for (f, p) in rows("dynamic/Forum_hasMember_Person", ["ForumId", "PersonId"]):
+            w.writerow([f, p])
+    with open(f"{IMPORT}/forum_containerof.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to"])  # Forum -> Post (a Message)
+        for (pid, fid) in rows("dynamic/Post", ["id", "ContainerForumId"]):
+            if fid:
+                w.writerow([fid, pid])
+
 
 def load():
     for p in (DB, DB + ".wal"):
@@ -246,6 +269,10 @@ def load():
         "CREATE REL TABLE workAt(FROM Person TO Organisation)",
         "CREATE REL TABLE interactsWith(FROM Person TO Person, w DOUBLE)",
         "CREATE REL TABLE cohort(FROM Person TO Person, w DOUBLE)",
+        "CREATE NODE TABLE Forum(id INT64, title STRING, fcdate DATE, PRIMARY KEY(id))",
+        "CREATE REL TABLE hasModerator(FROM Forum TO Person)",
+        "CREATE REL TABLE hasMember(FROM Forum TO Person)",
+        "CREATE REL TABLE containerOf(FROM Forum TO Message)",
     ]
     for stmt in ddl:
         conn.execute(stmt)
@@ -259,6 +286,8 @@ def load():
         ("hasInterest", "hasinterest"), ("isLocatedIn", "person_islocatedin"),
         ("isPartOf", "place_ispartof"), ("Organisation", "organisation"),
         ("workAt", "workat"), ("interactsWith", "interactswith"), ("cohort", "cohort"),
+        ("Forum", "forum"), ("hasModerator", "forum_hasmoderator"),
+        ("hasMember", "forum_hasmember"), ("containerOf", "forum_containerof"),
     ]
     for tbl, f in copies:
         conn.execute(f"COPY {tbl} FROM '{IMPORT}/{f}.csv' (HEADER=true, DELIM='|')")
@@ -530,6 +559,9 @@ def main():
         "workAt": n("MATCH ()-[k:workAt]->() RETURN count(k)"),
         "interactsWith": n("MATCH ()-[k:interactsWith]->() RETURN count(k)"),
         "cohort": n("MATCH ()-[k:cohort]->() RETURN count(k)"),
+        "forums": n("MATCH (f:Forum) RETURN count(f)"),
+        "hasMember": n("MATCH ()-[k:hasMember]->() RETURN count(k)"),
+        "containerOf": n("MATCH ()-[k:containerOf]->() RETURN count(k)"),
     }
     print(f"  loaded in {load_s:.1f}s: " + ", ".join(f"{k}={v}" for k, v in counts.items()) + "\n")
 

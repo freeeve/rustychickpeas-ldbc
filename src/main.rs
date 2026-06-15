@@ -264,6 +264,42 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
         }
     })?;
 
+    // Forums (title + creationDate day) + hasModerator + hasMember, for the
+    // Forum-based queries (Q3/Q4/Q15/Q17). containerOf is added after Posts.
+    let mut forum: HashMap<i64, u32> = HashMap::new();
+    for_each_row(
+        &dynamic.join("Forum"),
+        &["id", "title", "creationDate", "ModeratorPersonId"],
+        |v| {
+            if let Ok(lid) = v[0].parse::<i64>() {
+                let id = next;
+                next += 1;
+                builder.add_node(Some(id), &["Forum"]).unwrap();
+                builder.set_prop_str(id, "title", v[1]).unwrap();
+                if let Some((_, day)) = parse_date(v[2]) {
+                    builder.set_prop_i64(id, "fday", day).unwrap();
+                }
+                forum.insert(lid, id);
+                if let Some(&m) = v[3].parse::<i64>().ok().and_then(|p| person.get(&p)) {
+                    builder.add_relationship(id, m, "hasModerator").unwrap();
+                    stats.edges += 1;
+                }
+            }
+        },
+    )?;
+    for_each_row(
+        &dynamic.join("Forum_hasMember_Person"),
+        &["ForumId", "PersonId"],
+        |v| {
+            let f = v[0].parse::<i64>().ok().and_then(|i| forum.get(&i));
+            let p = v[1].parse::<i64>().ok().and_then(|i| person.get(&i));
+            if let (Some(&f), Some(&p)) = (f, p) {
+                builder.add_relationship(f, p, "hasMember").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
+
     // Posts: node + properties (incl. language for Q12) + hasCreator.
     for_each_row(
         &dynamic.join("Post"),
@@ -291,6 +327,16 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
         },
     )?;
     stats.posts = post.len() as u64;
+
+    // Forum -[containerOf]-> Post (from Post.ContainerForumId).
+    for_each_row(&dynamic.join("Post"), &["id", "ContainerForumId"], |v| {
+        let p = v[0].parse::<i64>().ok().and_then(|i| post.get(&i));
+        let f = v[1].parse::<i64>().ok().and_then(|i| forum.get(&i));
+        if let (Some(&p), Some(&f)) = (p, f) {
+            builder.add_relationship(f, p, "containerOf").unwrap();
+            stats.edges += 1;
+        }
+    })?;
 
     // Comments: node + properties + hasCreator (Person -> Comment).
     for_each_row(
