@@ -429,6 +429,20 @@ ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 1
 """
 
 
+def q3_text():
+    return """
+MATCH (country:Place {name: 'Burma', type: 'Country'})<-[:isPartOf]-(:Place)<-[:isLocatedIn]-(person:Person)<-[:hasModerator]-(forum:Forum)-[:containerOf]->(post:Message)<-[:replyOf*0..30]-(message:Message)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass {name: 'MusicalArtist'})
+RETURN forum.id AS fid, forum.title AS title, forum.fcdate AS fcdate, person.id AS pid, count(DISTINCT message) AS messageCount
+ORDER BY messageCount DESC, fid ASC LIMIT 20
+"""
+
+
+def fday_of(fc):
+    """Kùzu DATE -> days since 1970-01-01 (matches rust's fday)."""
+    s = str(fc)[:10]
+    return (datetime.date(int(s[:4]), int(s[5:7]), int(s[8:10])) - datetime.date(1970, 1, 1)).days
+
+
 def q10_text():
     return """
 MATCH (s:Person {id: 3470})-[e:knows* SHORTEST 1..4]-(expert:Person)
@@ -649,10 +663,13 @@ def emit_crosscheck(conn, outdir):
     n16 = dump("q16", rows16)
     d = conn.execute(q10_text()).get_as_df()  # [eid, tagName, messageCount]
     n10 = dump("q10", [[int(e), str(t), int(c)] for e, t, c in zip(d["eid"], d["tagName"], d["messageCount"])])
+    d = conn.execute(q3_text()).get_as_df()  # [fid, title, fcdate, pid, messageCount]
+    n3 = dump("q3", [[int(f), str(t), fday_of(fc), int(p), int(c)]
+                     for f, t, fc, p, c in zip(d["fid"], d["title"], d["fcdate"], d["pid"], d["messageCount"])])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
+          f"q3={n3}, q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":

@@ -275,6 +275,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 let id = next;
                 next += 1;
                 builder.add_node(Some(id), &["Forum"]).unwrap();
+                builder.set_prop_i64(id, "flid", lid).unwrap(); // LDBC id, for Q3 output
                 builder.set_prop_str(id, "title", v[1]).unwrap();
                 if let Some((_, day)) = parse_date(v[2]) {
                     builder.set_prop_i64(id, "fday", day).unwrap();
@@ -1487,6 +1488,63 @@ fn q10_experts(
     rows
 }
 
+/// Q3 — Popular topics in a country. For forums whose moderator lives in
+/// `country`, count distinct messages in the forums' post reply-trees that carry
+/// a tag of `tagclass`; top 20 by count. Cypher: bi-3.cypher.
+fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_name: &str) -> Vec<(i64, String, i64, i64, i64)> {
+    let country = g
+        .nodes_with_label("Country")
+        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)));
+    let tc = g
+        .nodes_with_label("TagClass")
+        .and_then(|t| t.iter().find(|&x| pstr(g, x, "name") == Some(tagclass_name)));
+    let (Some(country), Some(tc)) = (country, tc) else {
+        return Vec::new();
+    };
+    let class_tags: HashSet<u32> = g
+        .neighbors_by_type(tc, Direction::Incoming, &["hasType"])
+        .into_iter()
+        .collect();
+    let has_class_tag = |msg: u32| {
+        g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"])
+            .iter()
+            .any(|t| class_tags.contains(t))
+    };
+    let mut rows: Vec<(i64, String, i64, i64, i64)> = Vec::new();
+    for city in g.neighbors_by_type(country, Direction::Incoming, &["isPartOf"]) {
+        for person in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
+            for forum in g.neighbors_by_type(person, Direction::Incoming, &["hasModerator"]) {
+                let mut msgs: HashSet<u32> = HashSet::new();
+                for post in g.neighbors_by_type(forum, Direction::Outgoing, &["containerOf"]) {
+                    let mut stack = vec![post];
+                    let mut seen: HashSet<u32> = HashSet::new();
+                    while let Some(n) = stack.pop() {
+                        if !seen.insert(n) {
+                            continue;
+                        }
+                        if has_class_tag(n) {
+                            msgs.insert(n);
+                        }
+                        stack.extend(g.neighbors_by_type(n, Direction::Incoming, &["replyOf"]));
+                    }
+                }
+                if !msgs.is_empty() {
+                    rows.push((
+                        pi64(g, forum, "flid"),
+                        pstr(g, forum, "title").unwrap_or("").to_string(),
+                        pi64(g, forum, "fday"),
+                        pi64(g, person, "plid"),
+                        msgs.len() as i64,
+                    ));
+                }
+            }
+        }
+    }
+    rows.sort_by(|a, b| b.4.cmp(&a.4).then(a.0.cmp(&b.0)));
+    rows.truncate(20);
+    rows
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1861,6 +1919,17 @@ fn main() -> Result<()> {
         }
         s.push(']');
         emit_json(dir, "q10.rust.json", s);
+
+        let q3 = q3_popular_topics(&graph, "Burma", "MusicalArtist");
+        let mut s = String::from("["); // Q3: [forumId, title, fday, moderatorId, messageCount]
+        for (i, (fid, title, fday, pid, c)) in q3.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{fid},{},{fday},{pid},{c}]", jstr(title)));
+        }
+        s.push(']');
+        emit_json(dir, "q3.rust.json", s);
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
