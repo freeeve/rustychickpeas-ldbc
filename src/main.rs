@@ -1297,34 +1297,6 @@ fn main() -> Result<()> {
         println!("     {name:<30} w1={n1} w2={n2} diff={diff}");
     }
 
-    if let Some(dir) = emit.as_deref() {
-        let mut s1 = String::from("[");
-        for (i, (y, c, cat, n, sum)) in q1_rows.iter().enumerate() {
-            if i > 0 {
-                s1.push(',');
-            }
-            s1.push_str(&format!(
-                "[{y},{},{cat},{n},{sum}]",
-                if *c { "true" } else { "false" }
-            ));
-        }
-        s1.push(']');
-        emit_json(dir, "q1.rust.json", s1);
-
-        let mut s2 = String::from("[");
-        for (i, (name, n1, n2, diff)) in q2_rows.iter().enumerate() {
-            if i > 0 {
-                s2.push(',');
-            }
-            s2.push_str(&format!("[{},{n1},{n2},{diff}]", jstr(name)));
-        }
-        s2.push(']');
-        emit_json(dir, "q2.rust.json", s2);
-
-        eprintln!("emitted Q1/Q2 cross-check JSON to {dir}; skipping downstream queries");
-        return Ok(());
-    }
-
     let q7_rows = q7_related_topics(&graph, "Enrique_Iglesias");
     println!(
         "  Q7 related topics (Enrique_Iglesias): {} related tags",
@@ -1357,6 +1329,78 @@ fn main() -> Result<()> {
     );
     for (_p, score) in q6_rows.iter().take(3) {
         println!("     authorityScore={score}");
+    }
+
+    if let Some(dir) = emit.as_deref() {
+        // Canonical column order matches the faithful Kùzu harness's emit.
+        let mut s = String::from("["); // Q1: [year, isComment, cat, cnt, sumLen]
+        for (i, (y, c, cat, n, sum)) in q1_rows.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!(
+                "[{y},{},{cat},{n},{sum}]",
+                if *c { "true" } else { "false" }
+            ));
+        }
+        s.push(']');
+        emit_json(dir, "q1.rust.json", s);
+
+        let mut s = String::from("["); // Q2: [name, w1, w2, diff]
+        for (i, (name, n1, n2, diff)) in q2_rows.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{n1},{n2},{diff}]", jstr(name)));
+        }
+        s.push(']');
+        emit_json(dir, "q2.rust.json", s);
+
+        // Map internal person NodeId -> original LDBC id (stored as `plid`) so
+        // ids line up with Kùzu's person.id.
+        let plid = |n: u32| pi64(&graph, n, "plid");
+        let mut s = String::from("["); // Q5: [pid, messageCount, replyCount, likeCount, score]
+        for (i, (p, m, r, l, score)) in q5_rows.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{m},{r},{l},{score}]", plid(*p)));
+        }
+        s.push(']');
+        emit_json(dir, "q5.rust.json", s);
+
+        let mut s = String::from("["); // Q6: [pid, score]
+        for (i, (p, score)) in q6_rows.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{score}]", plid(*p)));
+        }
+        s.push(']');
+        emit_json(dir, "q6.rust.json", s);
+
+        let mut s = String::from("["); // Q7: [name, count]
+        for (i, (name, c)) in q7_rows.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{c}]", jstr(name)));
+        }
+        s.push(']');
+        emit_json(dir, "q7.rust.json", s);
+
+        let mut s = String::from("["); // Q12: [messageCount, personCount]
+        for (i, (mc, pc)) in q12_rows.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{mc},{pc}]"));
+        }
+        s.push(']');
+        emit_json(dir, "q12.rust.json", s);
+
+        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q12 cross-check JSON to {dir}; skipping downstream queries");
+        return Ok(());
     }
     let q8_start = days_from_civil(2011, 7, 20);
     let q8_end = days_from_civil(2011, 7, 25);

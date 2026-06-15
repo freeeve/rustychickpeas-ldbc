@@ -310,20 +310,36 @@ def main():
 
 
 def emit_crosscheck(conn, outdir):
-    """Dump query result rows as canonical JSON arrays for the rust cross-check."""
+    """Dump query result rows as canonical JSON arrays for the rust cross-check.
+
+    Column order is normalized to match the rust side exactly (compare.py sorts
+    rows, so row *order* doesn't matter, but each row's *columns* must align)."""
     import json
     os.makedirs(outdir, exist_ok=True)
-    d1 = conn.execute(Q1).get_as_df()
-    r1 = [[int(y), bool(ic), int(c), int(cnt), int(sl)]
-          for y, ic, c, cnt, sl in zip(d1["year"], d1["isComment"], d1["cat"], d1["cnt"], d1["sumLen"])]
-    with open(f"{outdir}/q1.kuzu.json", "w") as f:
-        json.dump(r1, f)
-    d2 = conn.execute(q2_text()).get_as_df()
-    r2 = [[str(nm), int(w1), int(w2), int(d)]
-          for nm, w1, w2, d in zip(d2["name"], d2["w1"], d2["w2"], d2["diff"])]
-    with open(f"{outdir}/q2.kuzu.json", "w") as f:
-        json.dump(r2, f)
-    print(f"  emitted Q1/Q2 faithful-Kùzu cross-check JSON to {outdir} (q1={len(r1)}, q2={len(r2)})")
+
+    def dump(name, rows):
+        with open(f"{outdir}/{name}.kuzu.json", "w") as f:
+            json.dump(rows, f)
+        return len(rows)
+
+    d = conn.execute(Q1).get_as_df()  # [year, isComment, cat, cnt, sumLen]
+    n1 = dump("q1", [[int(y), bool(ic), int(c), int(cnt), int(sl)]
+                     for y, ic, c, cnt, sl in zip(d["year"], d["isComment"], d["cat"], d["cnt"], d["sumLen"])])
+    d = conn.execute(q2_text()).get_as_df()  # [name, w1, w2, diff]
+    n2 = dump("q2", [[str(nm), int(w1), int(w2), int(x)]
+                     for nm, w1, w2, x in zip(d["name"], d["w1"], d["w2"], d["diff"])])
+    d = conn.execute(Q5).get_as_df()  # [pid, messageCount, replyCount, likeCount, score]
+    n5 = dump("q5", [[int(p), int(mc), int(rc), int(lc), int(sc)]
+                     for p, rc, lc, mc, sc in zip(d["pid"], d["replyCount"], d["likeCount"], d["messageCount"], d["score"])])
+    d = conn.execute(Q6).get_as_df()  # [pid, score]
+    n6 = dump("q6", [[int(p), int(a)] for p, a in zip(d["pid"], d["authorityScore"])])
+    d = conn.execute(Q7).get_as_df()  # [name, count]
+    n7 = dump("q7", [[str(nm), int(c)] for nm, c in zip(d["name"], d["cnt"])])
+    d = conn.execute(q12_text()).get_as_df()  # [messageCount, personCount]
+    n12 = dump("q12", [[int(mc), int(pc)] for mc, pc in zip(d["messageCount"], d["personCount"])])
+
+    print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
+          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q12={n12})")
 
 
 if __name__ == "__main__":
