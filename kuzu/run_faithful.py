@@ -258,6 +258,20 @@ ORDER BY authorityScore DESC, pid LIMIT 100
 """
 
 
+def q9_text():
+    d0, d1 = datetime.date(2011, 10, 1), datetime.date(2011, 10, 15)
+    return f"""
+MATCH (post:Message)<-[:hasCreator]-(person:Person)
+WHERE post.isComment = false AND post.cdate >= date('{d0}') AND post.cdate <= date('{d1}')
+OPTIONAL MATCH (post)<-[:replyOf*0..30]-(m:Message)
+  WHERE m.cdate >= date('{d0}') AND m.cdate <= date('{d1}')
+WITH person, post, count(DISTINCT m) AS treeMsgs
+WITH person, count(post) AS threads, sum(treeMsgs) AS messages
+RETURN person.id AS pid, threads, messages
+ORDER BY messages DESC, pid LIMIT 100
+"""
+
+
 def q11_text():
     d0, d1 = datetime.date(2012, 9, 29), datetime.date(2013, 1, 1)
     return f"""
@@ -322,6 +336,7 @@ def main():
     time_query(conn, "Q12 message counts", q12_text(), runs=2)
     time_query(conn, "Q5 active posters", Q5)
     time_query(conn, "Q6 authoritative users", Q6)
+    time_query(conn, "Q9 thread initiators", q9_text())
     time_query(conn, "Q11 friend triangles", q11_text())
 
 
@@ -353,11 +368,14 @@ def emit_crosscheck(conn, outdir):
     n7 = dump("q7", [[str(nm), int(c)] for nm, c in zip(d["name"], d["cnt"])])
     d = conn.execute(q12_text()).get_as_df()  # [messageCount, personCount]
     n12 = dump("q12", [[int(mc), int(pc)] for mc, pc in zip(d["messageCount"], d["personCount"])])
+    d = conn.execute(q9_text()).get_as_df()  # [pid, threads, messages]
+    n9 = dump("q9", [[int(p), int(t), int(m)] for p, t, m in zip(d["pid"], d["threads"], d["messages"])])
     d = conn.execute(q11_text()).get_as_df()  # [[count]]
-    dump("q11", [[int(d["cnt"].iloc[0])]])
+    n11 = int(d["cnt"].iloc[0])
+    dump("q11", [[n11]])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
-          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q12={n12}, q11={int(d['cnt'].iloc[0])})")
+          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q9={n9}, q11={n11}, q12={n12})")
 
 
 if __name__ == "__main__":

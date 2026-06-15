@@ -1408,7 +1408,22 @@ fn main() -> Result<()> {
         );
         emit_json(dir, "q11.rust.json", format!("[[{q11}]]"));
 
-        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q11/Q12 cross-check JSON to {dir}; skipping downstream queries");
+        let q9 = q9_thread_initiators(
+            &graph,
+            days_from_civil(2011, 10, 1),
+            days_from_civil(2011, 10, 15),
+        );
+        let mut s = String::from("["); // Q9: [pid, threads, messages]
+        for (i, (p, t, m)) in q9.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{t},{m}]", plid(*p)));
+        }
+        s.push(']');
+        emit_json(dir, "q9.rust.json", s);
+
+        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q9/Q11/Q12 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
     }
     let q8_start = days_from_civil(2011, 7, 20);
