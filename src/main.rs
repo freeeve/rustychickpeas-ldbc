@@ -55,6 +55,23 @@ fn parse_date(s: &str) -> Option<(i64, i64)> {
     Some((y, days_from_civil(y, m, d)))
 }
 
+/// Parse an LDBC creationDate ("2010-02-24T08:06:02.996+00:00") into epoch
+/// milliseconds (for Q17's sub-day timing comparison).
+fn parse_ms(s: &str) -> i64 {
+    let Some((_, day)) = parse_date(s) else {
+        return 0;
+    };
+    let h: i64 = s.get(11..13).and_then(|x| x.parse().ok()).unwrap_or(0);
+    let mi: i64 = s.get(14..16).and_then(|x| x.parse().ok()).unwrap_or(0);
+    let se: i64 = s.get(17..19).and_then(|x| x.parse().ok()).unwrap_or(0);
+    let ms: i64 = if s.len() >= 23 && s.as_bytes()[19] == b'.' {
+        s[20..23].parse().unwrap_or(0)
+    } else {
+        0
+    };
+    day * 86_400_000 + h * 3_600_000 + mi * 60_000 + se * 1_000 + ms
+}
+
 fn pi64(g: &GraphSnapshot, n: u32, k: &str) -> i64 {
     match g.prop(n, k) {
         Some(ValueId::I64(v)) => v,
@@ -162,6 +179,7 @@ fn set_message_props(b: &mut GraphBuilder, id: u32, creation: &str, content: &st
         b.set_prop_i64(id, "year", year).unwrap();
         b.set_prop_i64(id, "day", day).unwrap();
     }
+    b.set_prop_i64(id, "ms", parse_ms(creation)).unwrap();
     b.set_prop_i64(id, "len", length.parse::<i64>().unwrap_or(0))
         .unwrap();
     b.set_prop_bool(id, "content", !content.is_empty()).unwrap();
@@ -1709,6 +1727,107 @@ fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_da
     sp.distance(tgt).filter(|d| d.is_finite()).unwrap_or(-1.0)
 }
 
+/// Q17 — Information propagation. For a tag, count distinct message2 per person1
+/// where: person1's tagged message1 sits in forum1; a forum1 member (person2)
+/// posted a tagged comment replying to message2 (by a different forum1 member
+/// person3, also tagged) in a different forum2; message2 is >delta hours after
+/// message1; and person1 is not a forum2 member. Top 10. Cypher: bi-17.cypher.
+fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i64) -> Vec<(i64, i64)> {
+    let Some(tag) = tag_by_name(g, tag_name) else {
+        return Vec::new();
+    };
+    let delta_ms = delta_hours * 3_600_000;
+    let creator = |m: u32| {
+        g.neighbors_by_type(m, Direction::Incoming, &["hasCreator"])
+            .first()
+            .copied()
+    };
+    let mut root_cache: HashMap<u32, u32> = HashMap::new();
+    let mut forum_of = |g: &GraphSnapshot, m: u32, rc: &mut HashMap<u32, u32>| -> Option<u32> {
+        let mut path = Vec::new();
+        let mut n = m;
+        let root = loop {
+            if let Some(&r) = rc.get(&n) {
+                for p in path {
+                    rc.insert(p, r);
+                }
+                break r;
+            }
+            let par = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]);
+            if par.is_empty() {
+                for p in &path {
+                    rc.insert(*p, n);
+                }
+                rc.insert(n, n);
+                break n;
+            }
+            path.push(n);
+            n = par[0];
+        };
+        g.neighbors_by_type(root, Direction::Incoming, &["containerOf"])
+            .first()
+            .copied()
+    };
+    let tagged: Vec<u32> = g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]);
+    let tagged_set: HashSet<u32> = tagged.iter().copied().collect();
+    // message1 tuples (person1, forum1, ms1) and candidate (person2, person3, message2, forum2, ms2).
+    let mut m1_list: Vec<(u32, u32, i64)> = Vec::new();
+    let mut cand: Vec<(u32, u32, u32, u32, i64)> = Vec::new();
+    for &m in &tagged {
+        if let (Some(p1), Some(f1)) = (creator(m), forum_of(g, m, &mut root_cache)) {
+            m1_list.push((p1, f1, pi64(g, m, "ms")));
+        }
+        if let Some(&msg2) = g.neighbors_by_type(m, Direction::Outgoing, &["replyOf"]).first() {
+            if tagged_set.contains(&msg2) {
+                if let (Some(p2), Some(p3), Some(f2)) =
+                    (creator(m), creator(msg2), forum_of(g, msg2, &mut root_cache))
+                {
+                    cand.push((p2, p3, msg2, f2, pi64(g, msg2, "ms")));
+                }
+            }
+        }
+    }
+    let mut pm: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mut ensure = |g: &GraphSnapshot, p: u32, pm: &mut HashMap<u32, HashSet<u32>>| {
+        pm.entry(p).or_insert_with(|| {
+            g.neighbors_by_type(p, Direction::Incoming, &["hasMember"])
+                .into_iter()
+                .collect()
+        });
+    };
+    for &(p1, _, _) in &m1_list {
+        ensure(g, p1, &mut pm);
+    }
+    for &(p2, p3, _, _, _) in &cand {
+        ensure(g, p2, &mut pm);
+        ensure(g, p3, &mut pm);
+    }
+    let mut counts: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for &(p2, p3, msg2, f2, ms2) in &cand {
+        if p2 == p3 {
+            continue;
+        }
+        let (fp2, fp3) = (&pm[&p2], &pm[&p3]);
+        for &(p1, f1, ms1) in &m1_list {
+            if f1 != f2
+                && ms2 > ms1 + delta_ms
+                && fp2.contains(&f1)
+                && fp3.contains(&f1)
+                && !pm[&p1].contains(&f2)
+            {
+                counts.entry(p1).or_default().insert(msg2);
+            }
+        }
+    }
+    let mut rows: Vec<(i64, i64)> = counts
+        .into_iter()
+        .map(|(p, m)| (pi64(g, p, "plid"), m.len() as i64))
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows.truncate(10);
+    rows
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -2123,6 +2242,17 @@ fn main() -> Result<()> {
             days_from_civil(2010, 12, 1),
         );
         emit_json(dir, "q15.rust.json", format!("[[{:.6}]]", q15));
+
+        let q17 = q17_information_propagation(&graph, "Slavoj_Žižek", 4);
+        let mut s = String::from("["); // Q17: [pid, messageCount]
+        for (i, (p, c)) in q17.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{p},{c}]"));
+        }
+        s.push(']');
+        emit_json(dir, "q17.rust.json", s);
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());

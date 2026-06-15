@@ -47,6 +47,14 @@ def rows(subdir, cols):
                 yield [row[i] for i in idx]
 
 
+def parse_ms(cd):
+    """LDBC creationDate -> epoch milliseconds (matches rust parse_ms)."""
+    d = (datetime.date(int(cd[:4]), int(cd[5:7]), int(cd[8:10])) - datetime.date(1970, 1, 1)).days
+    h, mi, se = int(cd[11:13]), int(cd[14:16]), int(cd[17:19])
+    msec = int(cd[20:23]) if len(cd) >= 23 and cd[19] == '.' else 0
+    return d * 86400000 + h * 3600000 + mi * 60000 + se * 1000 + msec
+
+
 def preprocess():
     """Project the raw LDBC CSVs into Kùzu-friendly comma CSVs (cached)."""
     if os.path.isdir(IMPORT) and os.path.exists(f"{IMPORT}/message.csv"):
@@ -59,18 +67,18 @@ def preprocess():
          open(f"{IMPORT}/message_hascreator.csv", "w", newline="") as hc:
         w = csv.writer(out, delimiter="|")
         wc = csv.writer(hc, delimiter="|")
-        w.writerow(["id", "year", "cdate", "length", "hasContent", "isComment", "lang"])
+        w.writerow(["id", "year", "cdate", "length", "hasContent", "isComment", "lang", "mts"])
         wc.writerow(["from", "to"])  # Person -> Message
         for (i, cd, content, length, lang, creator) in rows(
             "dynamic/Post", ["id", "creationDate", "content", "length", "language", "CreatorPersonId"]
         ):
-            w.writerow([i, cd[:4], cd[:10], length or 0, "true" if content else "false", "false", lang])
+            w.writerow([i, cd[:4], cd[:10], length or 0, "true" if content else "false", "false", lang, parse_ms(cd)])
             if creator:
                 wc.writerow([creator, i])
         for (i, cd, content, length, creator) in rows(
             "dynamic/Comment", ["id", "creationDate", "content", "length", "CreatorPersonId"]
         ):
-            w.writerow([i, cd[:4], cd[:10], length or 0, "true" if content else "false", "true", ""])
+            w.writerow([i, cd[:4], cd[:10], length or 0, "true" if content else "false", "true", "", parse_ms(cd)])
             if creator:
                 wc.writerow([creator, i])
 
@@ -302,7 +310,7 @@ def load():
             os.remove(p)
     conn = kuzu.Connection(kuzu.Database(DB))
     ddl = [
-        "CREATE NODE TABLE Message(id INT64, year INT64, cdate DATE, length INT64, hasContent BOOLEAN, isComment BOOLEAN, lang STRING, PRIMARY KEY(id))",
+        "CREATE NODE TABLE Message(id INT64, year INT64, cdate DATE, length INT64, hasContent BOOLEAN, isComment BOOLEAN, lang STRING, mts INT64, PRIMARY KEY(id))",
         "CREATE NODE TABLE Person(id INT64, pcdate DATE, pym INT64, PRIMARY KEY(id))",
         "CREATE NODE TABLE Tag(id INT64, name STRING, PRIMARY KEY(id))",
         "CREATE NODE TABLE TagClass(id INT64, name STRING, PRIMARY KEY(id))",
@@ -506,6 +514,33 @@ MATCH (forum:Forum)-[:hasMember]->(person:Person)
 WHERE forum.id IN {lst}
 RETURN DISTINCT person.id AS pid
 """
+
+
+TAG17 = "Slavoj_Žižek"
+
+
+def q17_m1():
+    return f"""
+MATCH (p1:Person)-[:hasCreator]->(m1:Message)-[:replyOf*0..30]->(post1:Message)<-[:containerOf]-(f1:Forum)
+WHERE EXISTS {{ MATCH (m1)-[:hasTag]->(:Tag {{name: '{TAG17}'}}) }}
+RETURN DISTINCT p1.id AS p1, f1.id AS f1, m1.mts AS ms1
+"""
+
+
+def q17_cand():
+    return f"""
+MATCH (p2:Person)-[:hasCreator]->(comment:Message)-[:replyOf]->(m2:Message)-[:replyOf*0..30]->(post2:Message)<-[:containerOf]-(f2:Forum),
+      (p3:Person)-[:hasCreator]->(m2)
+WHERE comment.isComment = true
+  AND EXISTS {{ MATCH (comment)-[:hasTag]->(:Tag {{name: '{TAG17}'}}) }}
+  AND EXISTS {{ MATCH (m2)-[:hasTag]->(:Tag {{name: '{TAG17}'}}) }}
+RETURN DISTINCT p2.id AS p2, p3.id AS p3, m2.id AS m2, f2.id AS f2, m2.mts AS ms2
+"""
+
+
+def q17_mem(ids):
+    lst = "[" + ",".join(str(i) for i in ids) + "]"
+    return f"MATCH (f:Forum)-[:hasMember]->(p:Person) WHERE p.id IN {lst} RETURN p.id AS p, f.id AS f"
 
 
 def q15_text():
@@ -754,6 +789,31 @@ def emit_crosscheck(conn, outdir):
                      for f, t, fc, p, c in zip(d["fid"], d["title"], d["fcdate"], d["pid"], d["messageCount"])])
     d = conn.execute(q15_text()).get_as_df()
     n15 = dump("q15", [[round(float(d["dist"].iloc[0]), 6) if len(d) else -1.0]])
+    # Q17 (harness-reduced): Kùzu fetches message1 tuples, candidates, memberships;
+    # the nested propagation join is done here (symmetric with rust's hand-coded join).
+    m1df = conn.execute(q17_m1()).get_as_df()
+    m1_list = list(zip((int(x) for x in m1df["p1"]), (int(x) for x in m1df["f1"]), (int(x) for x in m1df["ms1"])))
+    cdf = conn.execute(q17_cand()).get_as_df()
+    cand17 = list(zip((int(x) for x in cdf["p2"]), (int(x) for x in cdf["p3"]),
+                      (int(x) for x in cdf["m2"]), (int(x) for x in cdf["f2"]), (int(x) for x in cdf["ms2"])))
+    involved = ({p for p, _, _ in m1_list} | {p2 for p2, _, _, _, _ in cand17}
+                | {p3 for _, p3, _, _, _ in cand17})
+    pm17 = {}
+    if involved:
+        memdf = conn.execute(q17_mem(sorted(involved))).get_as_df()
+        for p, f in zip((int(x) for x in memdf["p"]), (int(x) for x in memdf["f"])):
+            pm17.setdefault(p, set()).add(f)
+    delta17 = 4 * 3600000
+    counts17 = {}
+    for p2, p3, m2, f2, ms2 in cand17:
+        if p2 == p3:
+            continue
+        fp2, fp3 = pm17.get(p2, set()), pm17.get(p3, set())
+        for p1, f1, ms1 in m1_list:
+            if f1 != f2 and ms2 > ms1 + delta17 and f1 in fp2 and f1 in fp3 and f2 not in pm17.get(p1, set()):
+                counts17.setdefault(p1, set()).add(m2)
+    rows17 = sorted(([p, len(ms)] for p, ms in counts17.items()), key=lambda r: (-r[1], r[0]))[:10]
+    n17 = dump("q17", rows17)
     # Q4 (harness-reduced): pick top-100 forums, then rank their members by message count.
     dfm = conn.execute(q4_forum_members()).get_as_df()
     ranked = sorted(zip((int(x) for x in dfm["fid"]), (int(x) for x in dfm["numberOfMembers"]),
@@ -773,7 +833,7 @@ def emit_crosscheck(conn, outdir):
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q3={n3}, q4={n4}, q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q15={n15}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
+          f"q3={n3}, q4={n4}, q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q15={n15}, q16={n16}, q17={n17}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":
