@@ -875,6 +875,28 @@ fn q13_zombies(
     rows
 }
 
+/// End-to-end validation of the core `dijkstra` primitive on the real `knows`
+/// graph: shortest-hop reachability from one person (unit weights), returning
+/// (persons reachable, eccentricity in hops). Not a faithful BI query — Q19/Q20
+/// would need a derived interaction-weight graph — but it exercises dijkstra +
+/// path reconstruction at SF scale.
+fn knows_reachability(g: &GraphSnapshot) -> (usize, u32) {
+    let persons: Vec<u32> = g
+        .nodes_with_label("Person")
+        .map(|s| s.iter().collect())
+        .unwrap_or_default();
+    let Some(&source) = persons.first() else {
+        return (0, 0);
+    };
+    let sp = g.dijkstra(source, Direction::Both, &["knows"], None, |_, _| 1.0);
+    let reachable = persons.iter().filter(|&&p| sp.reached(p)).count();
+    let ecc = persons
+        .iter()
+        .filter_map(|&p| sp.distance(p))
+        .fold(0.0_f64, f64::max) as u32;
+    (reachable, ecc)
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1055,6 +1077,10 @@ fn main() -> Result<()> {
         "  Q13 zombies (France, before 2013-01-01): {} zombies",
         q13_rows.len()
     );
+    let (reach, ecc) = knows_reachability(&graph);
+    println!(
+        "  dijkstra knows-reachability from person[0]: {reach} reachable, eccentricity {ecc} hops"
+    );
     println!();
 
     let runs = 5;
@@ -1088,6 +1114,9 @@ fn main() -> Result<()> {
     });
     time_query("Q13 zombies", runs, || {
         q13_zombies(&graph, "France", q13_end, q13_ym).len()
+    });
+    time_query("dijkstra knows reachability", runs, || {
+        knows_reachability(&graph).0
     });
     // Simplified patterns (parity with the synthetic benchmark).
     time_query("BI1 tag co-evolution (simpl.)", runs, || {
