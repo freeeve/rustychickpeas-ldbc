@@ -458,35 +458,32 @@ ORDER BY messages DESC, pid LIMIT 100
 """
 
 
-def q13_text():
+def _zombie_pred(x, co, mm):
+    # France person, created before endDate, < 1 message/month before endDate.
     end = "date('2013-01-01')"
-    eym = 2013 * 12 + 1  # end year-month
+    eym = 2013 * 12 + 1
+    return (f"{x}.pcdate < {end} "
+            f"AND EXISTS {{ MATCH ({x})-[:isLocatedIn]->(:Place)-[:isPartOf]->({co}:Place) "
+            f"WHERE {co}.name = 'France' AND {co}.type = 'Country' }} "
+            f"AND ({eym} - {x}.pym + 1) > 0 "
+            f"AND COUNT {{ MATCH ({x})-[:hasCreator]->({mm}:Message) WHERE {mm}.cdate < {end} }} "
+            f"< ({eym} - {x}.pym + 1)")
 
-    def zombie(x, co, mm):
-        # France person, created before endDate, < 1 message/month before endDate.
-        return (f"{x}.pcdate < {end} "
-                f"AND EXISTS {{ MATCH ({x})-[:isLocatedIn]->(:Place)-[:isPartOf]->({co}:Place) "
-                f"WHERE {co}.name = 'France' AND {co}.type = 'Country' }} "
-                f"AND ({eym} - {x}.pym + 1) > 0 "
-                f"AND COUNT {{ MATCH ({x})-[:hasCreator]->({mm}:Message) WHERE {mm}.cdate < {end} }} "
-                f"< ({eym} - {x}.pym + 1)")
 
-    # Compute the zombie set ONCE (running the per-person COUNT subquery only for
-    # France persons), then score via list membership — re-running the zombie
-    # predicate per liker (any active person) is what makes the naive form hang.
+def q13_zids():
+    return f"MATCH (x:Person) WHERE {_zombie_pred('x', 'co', 'mmz')} RETURN x.id AS z"
+
+
+def q13_likes():
+    # HARNESS-REDUCED: one row per (zombie, like-edge); the harness computes zlc
+    # (liker in the zombie set) and tlc (liker active). The earlier optimized form
+    # used `liker.id IN zids` inside an aggregate where zids isn't a grouping key,
+    # so Kùzu evaluated it empty -> zlc was always 0 (only surfaced at SF10).
     return f"""
-MATCH (z0:Person)
-WHERE {zombie('z0', 'co', 'mmz')}
-WITH collect(z0.id) AS zids
-UNWIND zids AS zid
-MATCH (z:Person {{id: zid}})
-OPTIONAL MATCH (z)-[:hasCreator]->(:Message)<-[:likes]-(liker:Person)
-WITH zids, z, liker
-WITH z.id AS pid,
-  sum(CASE WHEN liker.pcdate < {end} THEN 1 ELSE 0 END) AS tlc,
-  sum(CASE WHEN liker.id IN zids THEN 1 ELSE 0 END) AS zlc
-RETURN pid, zlc, tlc
-ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 100
+MATCH (z:Person)-[:hasCreator]->(:Message)<-[:likes]-(liker:Person)
+WHERE {_zombie_pred('z', 'co', 'mmz')}
+RETURN z.id AS z, liker.id AS l,
+       CASE WHEN liker.pcdate < date('2013-01-01') THEN 1 ELSE 0 END AS active
 """
 
 
@@ -499,10 +496,13 @@ RETURN country.id AS cid, forum.id AS fid, count(person) AS numberOfMembers
 
 
 def q4_messages(ids):
+    # Drop the (person)<-[:hasMember]-(tf in top) join (it blows up against
+    # millions of hasMember edges and times out at SF10); the harness keeps only
+    # top-forum members, so counts for non-members are simply ignored.
     lst = "[" + ",".join(str(i) for i in ids) + "]"
     return f"""
-MATCH (forum:Forum)-[:containerOf]->(post:Message)<-[:replyOf*0..30]-(message:Message)<-[:hasCreator]-(person:Person)<-[:hasMember]-(tf:Forum)
-WHERE forum.id IN {lst} AND tf.id IN {lst}
+MATCH (forum:Forum)-[:containerOf]->(post:Message)<-[:replyOf*0..30]-(message:Message)<-[:hasCreator]-(person:Person)
+WHERE forum.id IN {lst}
 RETURN person.id AS pid, count(DISTINCT message) AS cnt
 """
 
@@ -756,8 +756,17 @@ def emit_crosscheck(conn, outdir):
     d = conn.execute(q11_text()).get_as_df()  # [[count]]
     n11 = int(d["cnt"].iloc[0])
     dump("q11", [[n11]])
-    d = conn.execute(q13_text()).get_as_df()  # [pid, zlc, tlc]
-    n13 = dump("q13", [[int(p), int(z), int(t)] for p, z, t in zip(d["pid"], d["zlc"], d["tlc"])])
+    zset13 = {int(x) for x in conn.execute(q13_zids()).get_as_df()["z"]}
+    agg13 = {z: [0, 0] for z in zset13}  # z -> [zlc, tlc]
+    ld = conn.execute(q13_likes()).get_as_df()
+    for z, l, active in zip(ld["z"], ld["l"], ld["active"]):
+        a = agg13[int(z)]
+        a[1] += int(active)
+        if int(l) in zset13:
+            a[0] += 1
+    rows13 = sorted(([z, agg13[z][0], agg13[z][1]] for z in zset13),
+                    key=lambda r: (-(r[1] / r[2] if r[2] else 0.0), r[0]))[:100]
+    n13 = dump("q13", rows13)
     d = conn.execute(q19_text()).get_as_df()  # [p1, p2, dist] (cost rounded to 6dp)
     n19 = dump("q19", [[int(a), int(b), round(float(x), 6)] for a, b, x in zip(d["p1"], d["p2"], d["dist"])])
     d = conn.execute(q20_text()).get_as_df()  # [pid, dist]

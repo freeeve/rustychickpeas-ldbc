@@ -763,7 +763,7 @@ fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64, u64, u
         .into_iter()
         .map(|(p, (m, r, l))| (p, m, r, l, m + 2 * r + 10 * l))
         .collect();
-    rows.sort_by(|a, b| b.4.cmp(&a.4).then(a.0.cmp(&b.0)));
+    rows.sort_by(|a, b| b.4.cmp(&a.4).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows.truncate(100);
     rows
 }
@@ -799,7 +799,7 @@ fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64)> {
             (p1, score)
         })
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows.truncate(100);
     rows
 }
@@ -850,7 +850,7 @@ fn q8_central_person(
             (p, s, fs)
         })
         .collect();
-    rows.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)).then(a.0.cmp(&b.0)));
+    rows.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows.truncate(100);
     rows
 }
@@ -953,7 +953,7 @@ fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i64) -> Vec<
         .into_iter()
         .map(|(p, (t, m))| (p, t, m))
         .collect();
-    rows.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+    rows.sort_by(|a, b| b.2.cmp(&a.2).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows.truncate(100);
     rows
 }
