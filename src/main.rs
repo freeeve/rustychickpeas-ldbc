@@ -1545,6 +1545,95 @@ fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_name: &str)
     rows
 }
 
+/// Q4 — Top message creators in a country. Take the top-100 forums (created
+/// after `after_day`) by single-country membership, then rank their members by
+/// the messages they created in those forums' post reply-trees. Returns
+/// (person LDBC id, messageCount), top 100. Cypher: bi-4.cypher (name/date output
+/// columns are deterministic from the id, so the cross-check uses id + count).
+fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i64)>, Vec<i64>) {
+    let person_country = |p: u32| -> Option<u32> {
+        let city = *g
+            .neighbors_by_type(p, Direction::Outgoing, &["isLocatedIn"])
+            .first()?;
+        g.neighbors_by_type(city, Direction::Outgoing, &["isPartOf"])
+            .first()
+            .copied()
+    };
+    // Step 1: top-100 forums by (country, forum) member count.
+    let mut cf: HashMap<(u32, u32), i64> = HashMap::new();
+    if let Some(forums) = g.nodes_with_label("Forum") {
+        for forum in forums.iter() {
+            if pi64(g, forum, "fday") <= after_day {
+                continue;
+            }
+            for m in g.neighbors_by_type(forum, Direction::Outgoing, &["hasMember"]) {
+                if let Some(country) = person_country(m) {
+                    *cf.entry((country, forum)).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut ranked: Vec<(i64, u32, u32)> = cf.iter().map(|((c, f), &n)| (n, *f, *c)).collect();
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then(pi64(g, a.1, "flid").cmp(&pi64(g, b.1, "flid")))
+            .then(pi64(g, a.2, "lid").cmp(&pi64(g, b.2, "lid")))
+    });
+    let mut top_forums: Vec<u32> = Vec::new();
+    let mut seen_f: HashSet<u32> = HashSet::new();
+    for (_, f, _) in ranked {
+        if seen_f.insert(f) {
+            top_forums.push(f);
+            if top_forums.len() == 100 {
+                break;
+            }
+        }
+    }
+    // Step 2: members of top forums, ranked by their messages in those forums.
+    let mut members: HashSet<u32> = HashSet::new();
+    for &f in &top_forums {
+        for m in g.neighbors_by_type(f, Direction::Outgoing, &["hasMember"]) {
+            members.insert(m);
+        }
+    }
+    let mut msg_count: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for &f in &top_forums {
+        for post in g.neighbors_by_type(f, Direction::Outgoing, &["containerOf"]) {
+            let mut stack = vec![post];
+            let mut seen: HashSet<u32> = HashSet::new();
+            while let Some(n) = stack.pop() {
+                if !seen.insert(n) {
+                    continue;
+                }
+                if let Some(&creator) = g
+                    .neighbors_by_type(n, Direction::Incoming, &["hasCreator"])
+                    .first()
+                {
+                    if members.contains(&creator) {
+                        msg_count.entry(creator).or_default().insert(n);
+                    }
+                }
+                stack.extend(g.neighbors_by_type(n, Direction::Incoming, &["replyOf"]));
+            }
+        }
+    }
+    let mut rows: Vec<(u32, i64)> = members
+        .iter()
+        .map(|&p| (p, msg_count.get(&p).map(|s| s.len() as i64).unwrap_or(0)))
+        .collect();
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
+    rows.truncate(100);
+    let mut top_flids: Vec<i64> = top_forums.iter().map(|&f| pi64(g, f, "flid")).collect();
+    top_flids.sort();
+    (
+        rows.into_iter().map(|(p, c)| (pi64(g, p, "plid"), c)).collect(),
+        top_flids,
+    )
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1930,6 +2019,26 @@ fn main() -> Result<()> {
         }
         s.push(']');
         emit_json(dir, "q3.rust.json", s);
+
+        let (q4, q4_top) = q4_top_creators(&graph, days_from_civil(2010, 1, 29));
+        let mut s = String::from("["); // Q4: [pid, messageCount]
+        for (i, (p, c)) in q4.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{p},{c}]"));
+        }
+        s.push(']');
+        emit_json(dir, "q4.rust.json", s);
+        let mut s = String::from("[");
+        for (i, f) in q4_top.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{f}]"));
+        }
+        s.push(']');
+        emit_json(dir, "q4forums.rust.json", s);
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
