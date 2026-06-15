@@ -1213,6 +1213,103 @@ fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u32
     rows
 }
 
+/// Q14 — International dialog. For each city of country1, the best-scoring
+/// knows-pair (person1 in that city, person2 in country2) where score rewards
+/// the presence of interaction types (4: p1 replied to p2; 1: p2 replied to p1;
+/// 10: p1 likes p2's message; 1: p2 likes p1's). Cypher: bi-14.cypher.
+fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name: &str) -> Vec<(u32, u32, String, i64)> {
+    let country = |name: &str| {
+        g.nodes_with_label("Country")
+            .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(name)))
+    };
+    let (Some(country1), Some(country2)) = (country(c1_name), country(c2_name)) else {
+        return Vec::new();
+    };
+    // persons whose message `p` replied to (via p's comments).
+    let commented_on = |p: u32| -> HashSet<u32> {
+        let mut s = HashSet::new();
+        for msg in g.neighbors_by_type(p, Direction::Outgoing, &["hasCreator"]) {
+            for parent in g.neighbors_by_type(msg, Direction::Outgoing, &["replyOf"]) {
+                if let Some(&cr) = g
+                    .neighbors_by_type(parent, Direction::Incoming, &["hasCreator"])
+                    .first()
+                {
+                    s.insert(cr);
+                }
+            }
+        }
+        s
+    };
+    // creators of messages `p` likes.
+    let liked_creators = |p: u32| -> HashSet<u32> {
+        let mut s = HashSet::new();
+        for msg in g.neighbors_by_type(p, Direction::Outgoing, &["likes"]) {
+            if let Some(&cr) = g
+                .neighbors_by_type(msg, Direction::Incoming, &["hasCreator"])
+                .first()
+            {
+                s.insert(cr);
+            }
+        }
+        s
+    };
+    // precompute interaction sets for country2 persons.
+    let mut in_c2: HashSet<u32> = HashSet::new();
+    let mut co_c2: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mut lc_c2: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for city in g.neighbors_by_type(country2, Direction::Incoming, &["isPartOf"]) {
+        for p in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
+            if in_c2.insert(p) {
+                co_c2.insert(p, commented_on(p));
+                lc_c2.insert(p, liked_creators(p));
+            }
+        }
+    }
+    let mut rows: Vec<(u32, u32, String, i64)> = Vec::new();
+    for city in g.neighbors_by_type(country1, Direction::Incoming, &["isPartOf"]) {
+        let city_name = pstr(g, city, "name").unwrap_or("").to_string();
+        let mut best: Option<(i64, i64, i64, u32, u32)> = None; // score, p1plid, p2plid, p1, p2
+        for p1 in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
+            let p1_co = commented_on(p1);
+            let p1_lc = liked_creators(p1);
+            for p2 in g.neighbors_by_type(p1, Direction::Outgoing, &["knows"]) {
+                if !in_c2.contains(&p2) {
+                    continue;
+                }
+                let mut score = 0i64;
+                if p1_co.contains(&p2) {
+                    score += 4;
+                }
+                if co_c2[&p2].contains(&p1) {
+                    score += 1;
+                }
+                if p1_lc.contains(&p2) {
+                    score += 10;
+                }
+                if lc_c2[&p2].contains(&p1) {
+                    score += 1;
+                }
+                let (pa, pb) = (pi64(g, p1, "plid"), pi64(g, p2, "plid"));
+                let cand = (score, pa, pb, p1, p2);
+                best = Some(match best {
+                    Some(b) if (b.0, -b.1, -b.2) >= (score, -pa, -pb) => b,
+                    _ => cand,
+                });
+            }
+        }
+        if let Some((score, _, _, p1, p2)) = best {
+            rows.push((p1, p2, city_name, score));
+        }
+    }
+    rows.sort_by(|a, b| {
+        b.3.cmp(&a.3)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(pi64(g, a.1, "plid").cmp(&pi64(g, b.1, "plid")))
+    });
+    rows.truncate(100);
+    rows
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1537,6 +1634,17 @@ fn main() -> Result<()> {
         }
         s.push(']');
         emit_json(dir, "q18.rust.json", s);
+
+        let q14 = q14_international_dialog(&graph, "Chile", "Argentina");
+        let mut s = String::from("["); // Q14: [p1, p2, cityName, score]
+        for (i, (p1, p2, cn, sc)) in q14.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{},{},{sc}]", plid(*p1), plid(*p2), jstr(cn)));
+        }
+        s.push(']');
+        emit_json(dir, "q14.rust.json", s);
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());

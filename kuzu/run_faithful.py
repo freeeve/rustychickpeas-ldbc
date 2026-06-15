@@ -400,6 +400,22 @@ ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 1
 """
 
 
+def q14_text():
+    # HARNESS-REDUCED: Kùzu scores every qualifying knows-pair (the graph work);
+    # the per-city best + top-100 reduction is done in emit_crosscheck, since
+    # Kùzu 0.11 has no per-group argmax / CALL subqueries / list comprehensions.
+    return """
+MATCH (country1:Place {name: 'Chile', type: 'Country'})<-[:isPartOf]-(city1:Place)<-[:isLocatedIn]-(person1:Person),
+      (person1)-[:knows]-(person2:Person)-[:isLocatedIn]->(:Place)-[:isPartOf]->(:Place {name: 'Argentina', type: 'Country'})
+RETURN city1.name AS cityName, person1.id AS p1, person2.id AS p2,
+  (CASE WHEN EXISTS { MATCH (person1)-[:hasCreator]->(:Message)-[:replyOf]->(:Message)<-[:hasCreator]-(person2) } THEN 4 ELSE 0 END
+   + CASE WHEN EXISTS { MATCH (person1)-[:hasCreator]->(:Message)<-[:replyOf]-(:Message)<-[:hasCreator]-(person2) } THEN 1 ELSE 0 END
+   + CASE WHEN EXISTS { MATCH (person1)-[:likes]->(:Message)<-[:hasCreator]-(person2) } THEN 10 ELSE 0 END
+   + CASE WHEN EXISTS { MATCH (person1)-[:hasCreator]->(:Message)<-[:likes]-(person2) } THEN 1 ELSE 0 END
+  ) AS score
+"""
+
+
 def q18_text():
     return """
 MATCH (tag:Tag {name: 'Frank_Sinatra'})<-[:hasInterest]-(person1:Person)-[:knows]-(mutualFriend:Person)-[:knows]-(person2:Person)-[:hasInterest]->(tag)
@@ -509,6 +525,7 @@ def main():
     time_query(conn, "Q19 interaction path", q19_text(), runs=2)
     time_query(conn, "Q20 recruitment", q20_text(), runs=2)
     time_query(conn, "Q18 friend recommendation", q18_text())
+    time_query(conn, "Q14 international dialog", q14_text())
 
 
 def emit_crosscheck(conn, outdir):
@@ -554,10 +571,19 @@ def emit_crosscheck(conn, outdir):
     n20 = dump("q20", [[int(p), round(float(x), 6)] for p, x in zip(d["pid"], d["dist"])])
     d = conn.execute(q18_text()).get_as_df()  # [p1, p2, mutualCount]
     n18 = dump("q18", [[int(a), int(b), int(c)] for a, b, c in zip(d["p1"], d["p2"], d["cnt"])])
+    d = conn.execute(q14_text()).get_as_df()  # scored pairs; per-city best + top100 below
+    best14 = {}
+    for cn, p1, p2, sc in zip(d["cityName"], d["p1"], d["p2"], d["score"]):
+        cn, p1, p2, sc = str(cn), int(p1), int(p2), int(sc)
+        key = (-sc, p1, p2)  # minimize: max score, then min p1, then min p2
+        if cn not in best14 or key < best14[cn][0]:
+            best14[cn] = (key, [p1, p2, cn, sc])
+    rows14 = sorted((v[1] for v in best14.values()), key=lambda r: (-r[3], r[0], r[1]))[:100]
+    n14 = dump("q14", rows14)
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q11={n11}, q12={n12}, q13={n13}, q18={n18}, q19={n19}, q20={n20})")
+          f"q11={n11}, q12={n12}, q13={n13}, q14={n14}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":
