@@ -1310,6 +1310,57 @@ fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name: &str) -> 
     rows
 }
 
+/// Q16 — Fake news detection. For two (tag, date) params, find people who made a
+/// message with that tag on that date and have at most `max_knows` friends who
+/// did the same; return people qualifying for BOTH, by combined message count.
+/// Cypher: bi-16.cypher.
+/// Q16 per-param: persons who made a message with `tag_name` on `day` and have
+/// at most `max_knows` friends who did the same, with their message count.
+fn q16_param_result(g: &GraphSnapshot, tag_name: &str, day: i64, max_knows: i64) -> HashMap<u32, i64> {
+    let Some(tag) = tag_by_name(g, tag_name) else {
+        return HashMap::new();
+    };
+    let mut cm: HashMap<u32, i64> = HashMap::new(); // person -> their tagged-on-day message count
+    let mut creators_on_day: HashSet<u32> = HashSet::new();
+    for msg in g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]) {
+        if pi64(g, msg, "day") != day {
+            continue;
+        }
+        for creator in g.neighbors_by_type(msg, Direction::Incoming, &["hasCreator"]) {
+            *cm.entry(creator).or_insert(0) += 1;
+            creators_on_day.insert(creator);
+        }
+    }
+    cm.into_iter()
+        .filter(|(p1, _)| {
+            let cp2 = g
+                .neighbors_by_type(*p1, Direction::Outgoing, &["knows"])
+                .iter()
+                .filter(|f| creators_on_day.contains(f))
+                .count() as i64;
+            cp2 <= max_knows
+        })
+        .collect()
+}
+
+fn q16_fake_news(
+    g: &GraphSnapshot,
+    ra: &HashMap<u32, i64>,
+    rb: &HashMap<u32, i64>,
+) -> Vec<(u32, i64, i64)> {
+    let mut rows: Vec<(u32, i64, i64)> = ra
+        .iter()
+        .filter_map(|(&p, &ca)| rb.get(&p).map(|&cb| (p, ca, cb)))
+        .collect();
+    rows.sort_by(|a, b| {
+        (b.1 + b.2)
+            .cmp(&(a.1 + a.2))
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
+    rows.truncate(20);
+    rows
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1645,6 +1696,34 @@ fn main() -> Result<()> {
         }
         s.push(']');
         emit_json(dir, "q14.rust.json", s);
+
+        let ra16 = q16_param_result(&graph, "Meryl_Streep", days_from_civil(2012, 9, 16), 4);
+        let rb16 = q16_param_result(&graph, "Hank_Williams", days_from_civil(2012, 5, 8), 4);
+        // Cross-check the per-param graph work (q16a/q16b) AND the A∩B result (q16);
+        // the official params yield an empty intersection at SF1.
+        for (name, m) in [("q16a.rust.json", &ra16), ("q16b.rust.json", &rb16)] {
+            let mut v: Vec<(i64, i64)> = m.iter().map(|(&p, &c)| (plid(p), c)).collect();
+            v.sort();
+            let mut s = String::from("[");
+            for (i, (p, c)) in v.iter().enumerate() {
+                if i > 0 {
+                    s.push(',');
+                }
+                s.push_str(&format!("[{p},{c}]"));
+            }
+            s.push(']');
+            emit_json(dir, name, s);
+        }
+        let q16 = q16_fake_news(&graph, &ra16, &rb16);
+        let mut s = String::from("["); // Q16: [pid, cmA, cmB]
+        for (i, (p, ca, cb)) in q16.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{ca},{cb}]", plid(*p)));
+        }
+        s.push(']');
+        emit_json(dir, "q16.rust.json", s);
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());

@@ -400,6 +400,20 @@ ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 1
 """
 
 
+def q16_param(tag, date):
+    # Per-param graph work (people who tagged on a date with <=4 such friends);
+    # the A-and-B intersection + top-20 is combined in emit_crosscheck.
+    return f"""
+MATCH (person1:Person)-[:hasCreator]->(message1:Message)-[:hasTag]->(tag:Tag {{name: '{tag}'}})
+WHERE message1.cdate = date('{date}')
+OPTIONAL MATCH (person1)-[:knows]-(person2:Person)-[:hasCreator]->(message2:Message)-[:hasTag]->(tag)
+  WHERE message2.cdate = date('{date}')
+WITH person1, count(DISTINCT message1) AS cm, count(DISTINCT person2) AS cp2
+WHERE cp2 <= 4
+RETURN person1.id AS pid, cm AS cm
+"""
+
+
 def q14_text():
     # HARNESS-REDUCED: Kùzu scores every qualifying knows-pair (the graph work);
     # the per-city best + top-100 reduction is done in emit_crosscheck, since
@@ -580,10 +594,19 @@ def emit_crosscheck(conn, outdir):
             best14[cn] = (key, [p1, p2, cn, sc])
     rows14 = sorted((v[1] for v in best14.values()), key=lambda r: (-r[3], r[0], r[1]))[:100]
     n14 = dump("q14", rows14)
+    da = conn.execute(q16_param("Meryl_Streep", "2012-09-16")).get_as_df()
+    db_ = conn.execute(q16_param("Hank_Williams", "2012-05-08")).get_as_df()
+    ra = {int(p): int(c) for p, c in zip(da["pid"], da["cm"])}
+    rb = {int(p): int(c) for p, c in zip(db_["pid"], db_["cm"])}
+    dump("q16a", sorted([p, c] for p, c in ra.items()))
+    dump("q16b", sorted([p, c] for p, c in rb.items()))
+    rows16 = sorted(([p, ra[p], rb[p]] for p in ra.keys() & rb.keys()),
+                    key=lambda r: (-(r[1] + r[2]), r[0]))[:20]
+    n16 = dump("q16", rows16)
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q11={n11}, q12={n12}, q13={n13}, q14={n14}, q18={n18}, q19={n19}, q20={n20})")
+          f"q11={n11}, q12={n12}, q13={n13}, q14={n14}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":
