@@ -1634,6 +1634,81 @@ fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i64)>, Vec<i
     )
 }
 
+/// Q15 — Weighted interaction path. Weighted shortest path over the knows graph
+/// where each edge weight is 1/(w+1); w sums reply interactions between the two
+/// people whose thread root-post forum was created in [start_day, end_day]
+/// (1.0 if a Post is involved, else 0.5). Returns the path cost, or -1 if
+/// unreachable. Cypher: bi-15.cypher.
+fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_day: i64) -> f64 {
+    let (Some(src), Some(tgt)) = (person_by_plid(g, p1), person_by_plid(g, p2)) else {
+        return -1.0;
+    };
+    let posts = g.nodes_with_label("Post");
+    let is_post = |n: u32| posts.is_some_and(|p| p.contains(n));
+    let creator = |m: u32| {
+        g.neighbors_by_type(m, Direction::Incoming, &["hasCreator"])
+            .first()
+            .copied()
+    };
+    // Root post of a message's thread (walk replyOf up to a Post), memoized.
+    let mut root_cache: HashMap<u32, u32> = HashMap::new();
+    let mut root_of = |g: &GraphSnapshot, start: u32, cache: &mut HashMap<u32, u32>| -> u32 {
+        let mut path = Vec::new();
+        let mut n = start;
+        loop {
+            if let Some(&r) = cache.get(&n) {
+                for p in path {
+                    cache.insert(p, r);
+                }
+                return r;
+            }
+            let parent = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]);
+            if parent.is_empty() {
+                for p in &path {
+                    cache.insert(*p, n);
+                }
+                cache.insert(n, n);
+                return n;
+            }
+            path.push(n);
+            n = parent[0];
+        }
+    };
+    // w[(a,b)] over reply interactions whose thread forum is in the window.
+    let mut w: HashMap<(u32, u32), f64> = HashMap::new();
+    if let Some(comments) = g.nodes_with_label("Comment") {
+        for c in comments.iter() {
+            let parent = g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]);
+            let Some(&parent) = parent.first() else {
+                continue;
+            };
+            let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
+                continue;
+            };
+            if cc == pc {
+                continue;
+            }
+            let root = root_of(g, c, &mut root_cache);
+            let Some(&forum) = g
+                .neighbors_by_type(root, Direction::Incoming, &["containerOf"])
+                .first()
+            else {
+                continue;
+            };
+            let fday = pi64(g, forum, "fday");
+            if fday >= start_day && fday <= end_day {
+                let contrib = if is_post(parent) { 1.0 } else { 0.5 };
+                *w.entry((cc.min(pc), cc.max(pc))).or_insert(0.0) += contrib;
+            }
+        }
+    }
+    let sp = g.dijkstra(src, Direction::Both, &["knows"], Some(tgt), |from, rel| {
+        let key = (from.min(rel.neighbor), from.max(rel.neighbor));
+        1.0 / (w.get(&key).copied().unwrap_or(0.0) + 1.0)
+    });
+    sp.distance(tgt).filter(|d| d.is_finite()).unwrap_or(-1.0)
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -2039,6 +2114,15 @@ fn main() -> Result<()> {
         }
         s.push(']');
         emit_json(dir, "q4forums.rust.json", s);
+
+        let q15 = q15_weighted_path(
+            &graph,
+            14,
+            16,
+            days_from_civil(2010, 11, 1),
+            days_from_civil(2010, 12, 1),
+        );
+        emit_json(dir, "q15.rust.json", format!("[[{:.6}]]", q15));
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());

@@ -242,6 +242,57 @@ def preprocess():
             if fid:
                 w.writerow([fid, pid])
 
+    # --- Q15 weighted knows graph: weight = 1/(w+1), w = reply interactions whose
+    # thread root-post forum was created in the window (1.0 if Post involved else 0.5). ---
+    epoch = datetime.date(1970, 1, 1)
+
+    def _day(s):
+        return (datetime.date(int(s[:4]), int(s[5:7]), int(s[8:10])) - epoch).days
+
+    w15_start, w15_end = _day("2010-11-01"), _day("2010-12-01")
+    forum_fday = {int(i): _day(cd) for (i, cd) in rows("dynamic/Forum", ["id", "creationDate"])}
+    post_forum = {int(pid): int(fid) for (pid, fid) in rows("dynamic/Post", ["id", "ContainerForumId"]) if fid}
+    posts_set = set(post_forum.keys())
+    parent_of = {}
+    for (cid, pp, pc) in rows("dynamic/Comment", ["id", "ParentPostId", "ParentCommentId"]):
+        p = pp if pp else pc
+        if p:
+            parent_of[int(cid)] = int(p)
+    root_cache = {}
+
+    def root_post(n):
+        path = []
+        while n not in root_cache and n in parent_of:
+            path.append(n)
+            n = parent_of[n]
+        r = root_cache.get(n, n)
+        for p in path:
+            root_cache[p] = r
+        root_cache[n] = r
+        return r
+
+    w15 = {}
+    for cid, parent in parent_of.items():
+        cc, pc = creator.get(cid), creator.get(parent)
+        if cc is None or pc is None or cc == pc:
+            continue
+        fid = post_forum.get(root_post(cid))
+        if fid is None:
+            continue
+        fday = forum_fday.get(fid)
+        if fday is None or not (w15_start <= fday <= w15_end):
+            continue
+        key = (cc, pc) if cc < pc else (pc, cc)
+        w15[key] = w15.get(key, 0.0) + (1.0 if parent in posts_set else 0.5)
+    with open(f"{IMPORT}/q15weight.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to", "w"])
+        for (a, b) in knows_pairs:
+            key = (a, b) if a < b else (b, a)
+            wt = 1.0 / (w15.get(key, 0.0) + 1.0)
+            w.writerow([a, b, wt])
+            w.writerow([b, a, wt])
+
 
 def load():
     for p in (DB, DB + ".wal"):
@@ -273,6 +324,7 @@ def load():
         "CREATE REL TABLE hasModerator(FROM Forum TO Person)",
         "CREATE REL TABLE hasMember(FROM Forum TO Person)",
         "CREATE REL TABLE containerOf(FROM Forum TO Message)",
+        "CREATE REL TABLE q15weight(FROM Person TO Person, w DOUBLE)",
     ]
     for stmt in ddl:
         conn.execute(stmt)
@@ -288,6 +340,7 @@ def load():
         ("workAt", "workat"), ("interactsWith", "interactswith"), ("cohort", "cohort"),
         ("Forum", "forum"), ("hasModerator", "forum_hasmoderator"),
         ("hasMember", "forum_hasmember"), ("containerOf", "forum_containerof"),
+        ("q15weight", "q15weight"),
     ]
     for tbl, f in copies:
         conn.execute(f"COPY {tbl} FROM '{IMPORT}/{f}.csv' (HEADER=true, DELIM='|')")
@@ -452,6 +505,13 @@ def q4_members(ids):
 MATCH (forum:Forum)-[:hasMember]->(person:Person)
 WHERE forum.id IN {lst}
 RETURN DISTINCT person.id AS pid
+"""
+
+
+def q15_text():
+    return """
+MATCH (a:Person {id: 14}), (b:Person {id: 16}), p = (a)-[e:q15weight * WSHORTEST(w)]->(b)
+RETURN cost(e) AS dist
 """
 
 
@@ -692,6 +752,8 @@ def emit_crosscheck(conn, outdir):
     d = conn.execute(q3_text()).get_as_df()  # [fid, title, fcdate, pid, messageCount]
     n3 = dump("q3", [[int(f), str(t), fday_of(fc), int(p), int(c)]
                      for f, t, fc, p, c in zip(d["fid"], d["title"], d["fcdate"], d["pid"], d["messageCount"])])
+    d = conn.execute(q15_text()).get_as_df()
+    n15 = dump("q15", [[round(float(d["dist"].iloc[0]), 6) if len(d) else -1.0]])
     # Q4 (harness-reduced): pick top-100 forums, then rank their members by message count.
     dfm = conn.execute(q4_forum_members()).get_as_df()
     ranked = sorted(zip((int(x) for x in dfm["fid"]), (int(x) for x in dfm["numberOfMembers"]),
@@ -711,7 +773,7 @@ def emit_crosscheck(conn, outdir):
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q3={n3}, q4={n4}, q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
+          f"q3={n3}, q4={n4}, q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q15={n15}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":
