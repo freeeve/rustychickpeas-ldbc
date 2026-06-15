@@ -42,27 +42,31 @@ parquet/object_store dependency tree resolves to versions known to build.
 | **Q11 — Friend triangles** | count triangles in the `knows` graph among a country's persons, with every edge created in a date window | location hierarchy, `knows` + **edge `creationDate`** |
 | **Q13 — Zombies** | low-activity persons in a country, scored by share of likes coming from other zombies | location, person `creationDate`, `hasCreator`, `likes` |
 | **Q12 — Message counts** | per person, count messages (content, length<thr, after date) whose root post's language is in a set; histogram persons by that count | `replyOf*0..`, `hasCreator`, post `language` |
+| **Q19 — Interaction path** | weighted shortest path between people in two cities; edge weight = 1/(reply interactions) | location, `knows`, derived interaction weights, **dijkstra** |
+| **Q20 — Recruitment** | weighted shortest path from a company's employees to a target person; edge weight = university-cohort closeness | `workAt`, `studyAt` (`classYear`), `knows`, **dijkstra** |
 
-Q8 and Q11 are **rustychickpeas-only** in the head-to-head for now: Q8's Cypher
-leans on Neo4j pattern comprehensions that don't port cleanly to Kùzu, and Q11's
-Kùzu side still needs the location + dated-`knows` schema loaded.
+Twelve of the 20 BI queries. Q8, Q11, Q19, Q20 are **rustychickpeas-only** in the
+head-to-head for now (Q8 uses Neo4j pattern comprehensions; Q11/Q19/Q20 need more
+of the schema loaded on the Kùzu side).
 
-**Q11 drove a core feature.** It filters `knows` edges by their `creationDate`,
-which needs per-edge property access *during traversal* — something the core's
-neighbor accessors couldn't do (they return node ids, not the CSR edge position
-that `relationship_property` needs). That gap was closed upstream by adding
-[`GraphSnapshot::out_edges`](https://github.com/freeeve/rustychickpeas) (returns
-`OutEdge { neighbor, rel_type, pos }`); Q11 reads each knows edge's date through
-`pos`. This is exactly the kind of missing capability this exercise was meant to
-surface and fix.
+**These queries drove two core features.** Q11 filters `knows` edges by their
+`creationDate` — per-edge property access *during traversal*, which the neighbor
+accessors couldn't do (they return node ids, not the CSR position
+`relationship_property` needs). That gap was closed upstream by
+`GraphSnapshot::relationships(node, direction, type) -> RelationshipRef { …, pos }`.
+Q19/Q20 are weighted shortest paths, which drove
+`GraphSnapshot::dijkstra(source, …, weight) -> ShortestPaths` — the weight closure
+reads the derived/edge-property cost via `rel.pos`, so it composes directly with
+the relationship accessor. Exactly the kind of missing capability this exercise
+was meant to surface and fix.
 
 These use the example parameters from the official Cypher. Q2 surfaces real
-artists (Rick_Springfield, Enrique_Iglesias, Freddie_Mercury) and Q7 surfaces
-plausible co-occurring tags — good smoke tests that the joins are correct.
+artists (Rick_Springfield, Enrique_Iglesias, Freddie_Mercury), Q7 surfaces
+plausible co-occurring tags, and Q19 finds 6 city-to-city interaction paths —
+good smoke tests that the joins and weights are correct.
 
-**Still deferred:** queries needing the Forum hierarchy (Q3, Q4, Q9), and the
-weighted-shortest-path queries (Q15, Q19, Q20) which are out of scope for a graph
-without a path-finding engine.
+**Still deferred:** the Forum-hierarchy queries (Q3, Q4) and the more involved
+social queries (Q10, Q14, Q15, Q16, Q17, Q18).
 
 ## Results — real LDBC SF1
 

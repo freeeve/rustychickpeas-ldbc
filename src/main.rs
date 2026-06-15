@@ -193,6 +193,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let id = next;
             next += 1;
             builder.add_node(Some(id), &["Person"]).unwrap();
+            builder.set_prop_i64(id, "plid", lid).unwrap(); // LDBC id, for Q20 target
             if let Some((year, day)) = parse_date(v[0]) {
                 let month = v[0]
                     .get(5..7)
@@ -215,6 +216,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             next += 1;
             builder.add_node(Some(id), &[v[2]]).unwrap(); // label = City/Country/Continent
             builder.set_prop_str(id, "name", v[1]).unwrap();
+            builder.set_prop_i64(id, "lid", lid).unwrap(); // LDBC id, for Q19 city params
             place.insert(lid, id);
         }
     })?;
@@ -387,6 +389,49 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 let i2 = builder.add_rel(b, a, "knows").unwrap();
                 builder.set_rel_props_by_index(i2, &[("kd", PropertyValue::Integer(day))]);
                 stats.edges += 2;
+            }
+        },
+    )?;
+
+    // Organisations (Company/University) + Person workAt Company + Person studyAt
+    // University (classYear stored as an edge property), for Q20.
+    let mut org: HashMap<i64, u32> = HashMap::new();
+    for_each_row(
+        &static_.join("Organisation"),
+        &["id", "type", "name"],
+        |v| {
+            if let Ok(lid) = v[0].parse::<i64>() {
+                let id = next;
+                next += 1;
+                builder.add_node(Some(id), &[v[1]]).unwrap(); // label = Company / University
+                builder.set_prop_str(id, "name", v[2]).unwrap();
+                org.insert(lid, id);
+            }
+        },
+    )?;
+    for_each_row(
+        &dynamic.join("Person_workAt_Company"),
+        &["PersonId", "CompanyId"],
+        |v| {
+            let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
+            let c = v[1].parse::<i64>().ok().and_then(|i| org.get(&i));
+            if let (Some(&p), Some(&c)) = (p, c) {
+                builder.add_rel(p, c, "workAt").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
+    for_each_row(
+        &dynamic.join("Person_studyAt_University"),
+        &["PersonId", "UniversityId", "classYear"],
+        |v| {
+            let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
+            let u = v[1].parse::<i64>().ok().and_then(|i| org.get(&i));
+            if let (Some(&p), Some(&u)) = (p, u) {
+                let cy = v[2].parse::<i64>().unwrap_or(0);
+                let idx = builder.add_rel(p, u, "studyAt").unwrap();
+                builder.set_rel_props_by_index(idx, &[("cy", PropertyValue::Integer(cy))]);
+                stats.edges += 1;
             }
         },
     )?;
@@ -897,6 +942,190 @@ fn knows_reachability(g: &GraphSnapshot) -> (usize, u32) {
     (reachable, ecc)
 }
 
+/// Find a place node (City/Country/...) by its LDBC id.
+fn place_by_lid(g: &GraphSnapshot, lid: i64) -> Option<u32> {
+    ["City", "Country"].iter().find_map(|label| {
+        g.nodes_with_label(label)
+            .and_then(|ns| ns.iter().find(|&n| pi64(g, n, "lid") == lid))
+    })
+}
+
+/// Precompute the per-pair person interaction counts for Q19: the number of
+/// reply interactions between the message creators of each (undirected) pair.
+/// This is the weighted "projected graph" Q19 runs over; building it once
+/// mirrors Q19's precomputation variant.
+fn build_interaction_map(g: &GraphSnapshot) -> HashMap<(u32, u32), u32> {
+    let mut interaction: HashMap<(u32, u32), u32> = HashMap::new();
+    if let Some(comments) = g.nodes_with_label("Comment") {
+        for c in comments.iter() {
+            let Some(&a) = g.in_neighbors_by_type(c, &["hasCreator"]).first() else {
+                continue;
+            };
+            for parent in g.out_neighbors_by_type(c, &["replyOf"]) {
+                if let Some(&b) = g.in_neighbors_by_type(parent, &["hasCreator"]).first() {
+                    if a != b {
+                        *interaction.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    interaction
+}
+
+/// Q19 — Interaction path between cities. For people in city1 and city2, find the
+/// shortest weighted path on the `knows` graph, where each edge weight is
+/// 1/(reply interactions between the two people); return the 20 city1-city2 pairs
+/// with the smallest path weight. Uses core `dijkstra` with a derived-weight
+/// closure (the weight comes from the precomputed interaction map, not a stored
+/// property). Cypher: bi-19.cypher.
+fn q19_interaction_path(
+    g: &GraphSnapshot,
+    city1: u32,
+    city2: u32,
+    interaction: &HashMap<(u32, u32), u32>,
+) -> Vec<(u32, u32, f64)> {
+    let c1 = g.in_neighbors_by_type(city1, &["isLocatedIn"]);
+    let c2: HashSet<u32> = g
+        .in_neighbors_by_type(city2, &["isLocatedIn"])
+        .into_iter()
+        .collect();
+    let mut results: Vec<(u32, u32, f64)> = Vec::new();
+    for p1 in c1 {
+        let sp = g.dijkstra(p1, Direction::Both, &["knows"], None, |from, rel| {
+            match interaction.get(&(from.min(rel.neighbor), from.max(rel.neighbor))) {
+                Some(&n) if n > 0 => 1.0 / n as f64,
+                _ => f64::INFINITY, // know each other but never interacted: no edge
+            }
+        });
+        for &p2 in &c2 {
+            if let Some(d) = sp.distance(p2) {
+                if d.is_finite() {
+                    results.push((p1, p2, d));
+                }
+            }
+        }
+    }
+    results.sort_by(|a, b| {
+        a.2.partial_cmp(&b.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+            .then(a.1.cmp(&b.1))
+    });
+    results.truncate(20);
+    results
+}
+
+/// Find an Organisation node (Company/University) by name.
+fn org_by_name(g: &GraphSnapshot, label: &str, name: &str) -> Option<u32> {
+    g.nodes_with_label(label)
+        .and_then(|ns| ns.iter().find(|&n| pstr(g, n, "name") == Some(name)))
+}
+
+/// Find a Person node by its LDBC id.
+fn person_by_plid(g: &GraphSnapshot, plid: i64) -> Option<u32> {
+    g.nodes_with_label("Person")
+        .and_then(|ns| ns.iter().find(|&n| pi64(g, n, "plid") == plid))
+}
+
+/// Per-person study records (university, classYear), read from studyAt edges and
+/// their classYear edge property.
+fn build_studyat(g: &GraphSnapshot) -> HashMap<u32, Vec<(u32, i64)>> {
+    let mut m: HashMap<u32, Vec<(u32, i64)>> = HashMap::new();
+    if let Some(persons) = g.nodes_with_label("Person") {
+        for p in persons.iter() {
+            let recs: Vec<(u32, i64)> = g
+                .relationships(p, Direction::Outgoing, &["studyAt"])
+                .iter()
+                .map(|r| {
+                    let cy = match g.relationship_property(r.pos, "cy") {
+                        Some(ValueId::I64(y)) => y,
+                        _ => 0,
+                    };
+                    (r.neighbor, cy)
+                })
+                .collect();
+            if !recs.is_empty() {
+                m.insert(p, recs);
+            }
+        }
+    }
+    m
+}
+
+/// Q20 weight map: for knowing persons who studied at a common university, the
+/// minimum |classYear difference| + 1 (smaller = closer cohort).
+fn build_study_weight_map(
+    g: &GraphSnapshot,
+    studyat: &HashMap<u32, Vec<(u32, i64)>>,
+) -> HashMap<(u32, u32), f64> {
+    let mut wm: HashMap<(u32, u32), f64> = HashMap::new();
+    for (&a, sa) in studyat {
+        for b in g.out_neighbors_by_type(a, &["knows"]) {
+            if b <= a {
+                continue;
+            }
+            if let Some(sb) = studyat.get(&b) {
+                let mut best: Option<i64> = None;
+                for &(ua, ya) in sa {
+                    for &(ub, yb) in sb {
+                        if ua == ub {
+                            best = Some(best.map_or((ya - yb).abs(), |x| x.min((ya - yb).abs())));
+                        }
+                    }
+                }
+                if let Some(d) = best {
+                    wm.insert((a, b), (d + 1) as f64);
+                }
+            }
+        }
+    }
+    wm
+}
+
+/// Q20 — Recruitment. From each employee of a company, the shortest weighted path
+/// on the `knows` graph to a target person, where edge weight is the closeness of
+/// the two people's university cohorts; return the 20 employees with the smallest
+/// path weight. Uses core dijkstra (single-pair, with target early-exit) and a
+/// derived-weight closure. Cypher: bi-20.cypher.
+fn q20_recruitment(
+    g: &GraphSnapshot,
+    company: u32,
+    person2: u32,
+    weight_map: &HashMap<(u32, u32), f64>,
+) -> Vec<(u32, f64)> {
+    let mut results: Vec<(u32, f64)> = Vec::new();
+    for p1 in g.in_neighbors_by_type(company, &["workAt"]) {
+        if p1 == person2 {
+            continue;
+        }
+        let sp = g.dijkstra(
+            p1,
+            Direction::Both,
+            &["knows"],
+            Some(person2),
+            |from, rel| {
+                weight_map
+                    .get(&(from.min(rel.neighbor), from.max(rel.neighbor)))
+                    .copied()
+                    .unwrap_or(f64::INFINITY)
+            },
+        );
+        if let Some(d) = sp.distance(person2) {
+            if d.is_finite() {
+                results.push((p1, d));
+            }
+        }
+    }
+    results.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    results.truncate(20);
+    results
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1081,6 +1310,39 @@ fn main() -> Result<()> {
     println!(
         "  dijkstra knows-reachability from person[0]: {reach} reachable, eccentricity {ecc} hops"
     );
+    let interaction = build_interaction_map(&graph);
+    let q19_cities = place_by_lid(&graph, 669).zip(place_by_lid(&graph, 648));
+    match q19_cities {
+        Some((c1, c2)) => {
+            let q19 = q19_interaction_path(&graph, c1, c2, &interaction);
+            println!(
+                "  Q19 interaction path (cities 669<->648): {} pairs over {} interaction edges",
+                q19.len(),
+                interaction.len()
+            );
+            if let Some((p1, p2, w)) = q19.first() {
+                println!("     best: person {p1} -> person {p2}, total weight {w:.4}");
+            }
+        }
+        None => println!("  Q19: city 669 or 648 not present in dataset"),
+    }
+    let studyat = build_studyat(&graph);
+    let study_wm = build_study_weight_map(&graph, &studyat);
+    let q20_args = org_by_name(&graph, "Company", "Falcon_Air").zip(person_by_plid(&graph, 66));
+    match q20_args {
+        Some((co, p2)) => {
+            let q20 = q20_recruitment(&graph, co, p2, &study_wm);
+            println!(
+                "  Q20 recruitment (Falcon_Air -> person 66): {} candidates over {} study edges",
+                q20.len(),
+                study_wm.len()
+            );
+            if let Some((p1, w)) = q20.first() {
+                println!("     best: person {p1}, total weight {w:.1}");
+            }
+        }
+        None => println!("  Q20: company Falcon_Air or person 66 not present"),
+    }
     println!();
 
     let runs = 5;
@@ -1118,6 +1380,16 @@ fn main() -> Result<()> {
     time_query("dijkstra knows reachability", runs, || {
         knows_reachability(&graph).0
     });
+    if let Some((c1, c2)) = q19_cities {
+        time_query("Q19 interaction path", runs, || {
+            q19_interaction_path(&graph, c1, c2, &interaction).len()
+        });
+    }
+    if let Some((co, p2)) = q20_args {
+        time_query("Q20 recruitment", runs, || {
+            q20_recruitment(&graph, co, p2, &study_wm).len()
+        });
+    }
     // Simplified patterns (parity with the synthetic benchmark).
     time_query("BI1 tag co-evolution (simpl.)", runs, || {
         bi1_tag_evolution(&graph)
