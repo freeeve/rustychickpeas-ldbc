@@ -400,6 +400,15 @@ ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 1
 """
 
 
+def q18_text():
+    return """
+MATCH (tag:Tag {name: 'Frank_Sinatra'})<-[:hasInterest]-(person1:Person)-[:knows]-(mutualFriend:Person)-[:knows]-(person2:Person)-[:hasInterest]->(tag)
+WHERE person1 <> person2 AND NOT EXISTS { MATCH (person1)-[:knows]-(person2) }
+RETURN person1.id AS p1, person2.id AS p2, count(DISTINCT mutualFriend) AS cnt
+ORDER BY cnt DESC, p1 ASC, p2 ASC LIMIT 20
+"""
+
+
 def q19_text():
     # Weighted shortest path between people of city 669 and city 648 over the
     # interaction-weighted graph; top-20 pairs by path cost.
@@ -499,6 +508,7 @@ def main():
     time_query(conn, "Q13 zombies", q13_text())
     time_query(conn, "Q19 interaction path", q19_text(), runs=2)
     time_query(conn, "Q20 recruitment", q20_text(), runs=2)
+    time_query(conn, "Q18 friend recommendation", q18_text())
 
 
 def emit_crosscheck(conn, outdir):
@@ -542,10 +552,12 @@ def emit_crosscheck(conn, outdir):
     n19 = dump("q19", [[int(a), int(b), round(float(x), 6)] for a, b, x in zip(d["p1"], d["p2"], d["dist"])])
     d = conn.execute(q20_text()).get_as_df()  # [pid, dist]
     n20 = dump("q20", [[int(p), round(float(x), 6)] for p, x in zip(d["pid"], d["dist"])])
+    d = conn.execute(q18_text()).get_as_df()  # [p1, p2, mutualCount]
+    n18 = dump("q18", [[int(a), int(b), int(c)] for a, b, c in zip(d["p1"], d["p2"], d["cnt"])])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q11={n11}, q12={n12}, q13={n13}, q19={n19}, q20={n20})")
+          f"q11={n11}, q12={n12}, q13={n13}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":

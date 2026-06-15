@@ -1173,6 +1173,46 @@ fn q20_recruitment(
     results
 }
 
+/// Q18 — Friend recommendation. For people interested in a tag, count the mutual
+/// friends shared with another (not-directly-known) person also interested in the
+/// tag; top 20 ordered pairs by mutual-friend count. Cypher: bi-18.cypher.
+fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u32, u64)> {
+    let Some(tag) = tag_by_name(g, tag_name) else {
+        return Vec::new();
+    };
+    let interested: HashSet<u32> = g
+        .neighbors_by_type(tag, Direction::Incoming, &["hasInterest"])
+        .into_iter()
+        .collect();
+    // For each interested p1 and mutual friend m known by p1, each p2 known by m
+    // who is interested, distinct from p1, and not directly known by p1.
+    let mut mutual: HashMap<(u32, u32), HashSet<u32>> = HashMap::new();
+    for &p1 in &interested {
+        let p1_knows: HashSet<u32> = g
+            .neighbors_by_type(p1, Direction::Outgoing, &["knows"])
+            .into_iter()
+            .collect();
+        for &m in &p1_knows {
+            for p2 in g.neighbors_by_type(m, Direction::Outgoing, &["knows"]) {
+                if p2 != p1 && interested.contains(&p2) && !p1_knows.contains(&p2) {
+                    mutual.entry((p1, p2)).or_default().insert(m);
+                }
+            }
+        }
+    }
+    let mut rows: Vec<(u32, u32, u64)> = mutual
+        .into_iter()
+        .map(|((p1, p2), ms)| (p1, p2, ms.len() as u64))
+        .collect();
+    rows.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(pi64(g, a.1, "plid").cmp(&pi64(g, b.1, "plid")))
+    });
+    rows.truncate(20);
+    rows
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1487,7 +1527,18 @@ fn main() -> Result<()> {
             emit_json(dir, "q20.rust.json", s);
         }
 
-        eprintln!("emitted Q1..Q13/Q19/Q20 cross-check JSON to {dir}; skipping downstream queries");
+        let q18 = q18_friend_recommendation(&graph, "Frank_Sinatra");
+        let mut s = String::from("["); // Q18: [p1, p2, mutualCount]
+        for (i, (p1, p2, c)) in q18.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{},{c}]", plid(*p1), plid(*p2)));
+        }
+        s.push(']');
+        emit_json(dir, "q18.rust.json", s);
+
+        eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
     }
     let q8_start = days_from_civil(2011, 7, 20);
