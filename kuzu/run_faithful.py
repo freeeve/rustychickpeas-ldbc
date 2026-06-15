@@ -258,6 +258,29 @@ ORDER BY authorityScore DESC, pid LIMIT 100
 """
 
 
+def q8_text():
+    d0, d1 = datetime.date(2011, 7, 20), datetime.date(2011, 7, 25)
+    win = f"m.cdate > date('{d0}') AND m.cdate < date('{d1}')"
+    return f"""
+MATCH (tag:Tag {{name: 'Che_Guevara'}})
+MATCH (cand:Person)
+WHERE EXISTS {{ MATCH (tag)<-[:hasInterest]-(cand) }}
+   OR EXISTS {{ MATCH (tag)<-[:hasTag]-(m:Message)<-[:hasCreator]-(cand) WHERE {win} }}
+WITH tag, cand,
+  (CASE WHEN EXISTS {{ MATCH (tag)<-[:hasInterest]-(cand) }} THEN 100 ELSE 0 END)
+  + COUNT {{ MATCH (tag)<-[:hasTag]-(m:Message)<-[:hasCreator]-(cand) WHERE {win} }} AS score
+OPTIONAL MATCH (cand)-[:knows]-(friend:Person)
+WITH tag, cand, score, friend,
+  CASE WHEN friend IS NULL THEN 0 ELSE
+    (CASE WHEN EXISTS {{ MATCH (tag)<-[:hasInterest]-(friend) }} THEN 100 ELSE 0 END)
+    + COUNT {{ MATCH (tag)<-[:hasTag]-(m:Message)<-[:hasCreator]-(friend) WHERE {win} }}
+  END AS fscore
+WITH cand, score, sum(fscore) AS friendsScore
+RETURN cand.id AS pid, score, friendsScore
+ORDER BY score + friendsScore DESC, pid LIMIT 100
+"""
+
+
 def q9_text():
     d0, d1 = datetime.date(2011, 10, 1), datetime.date(2011, 10, 15)
     return f"""
@@ -336,6 +359,7 @@ def main():
     time_query(conn, "Q12 message counts", q12_text(), runs=2)
     time_query(conn, "Q5 active posters", Q5)
     time_query(conn, "Q6 authoritative users", Q6)
+    time_query(conn, "Q8 central person", q8_text())
     time_query(conn, "Q9 thread initiators", q9_text())
     time_query(conn, "Q11 friend triangles", q11_text())
 
@@ -368,6 +392,8 @@ def emit_crosscheck(conn, outdir):
     n7 = dump("q7", [[str(nm), int(c)] for nm, c in zip(d["name"], d["cnt"])])
     d = conn.execute(q12_text()).get_as_df()  # [messageCount, personCount]
     n12 = dump("q12", [[int(mc), int(pc)] for mc, pc in zip(d["messageCount"], d["personCount"])])
+    d = conn.execute(q8_text()).get_as_df()  # [pid, score, friendsScore]
+    n8 = dump("q8", [[int(p), int(s), int(f)] for p, s, f in zip(d["pid"], d["score"], d["friendsScore"])])
     d = conn.execute(q9_text()).get_as_df()  # [pid, threads, messages]
     n9 = dump("q9", [[int(p), int(t), int(m)] for p, t, m in zip(d["pid"], d["threads"], d["messages"])])
     d = conn.execute(q11_text()).get_as_df()  # [[count]]
@@ -375,7 +401,7 @@ def emit_crosscheck(conn, outdir):
     dump("q11", [[n11]])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
-          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q9={n9}, q11={n11}, q12={n12})")
+          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, q11={n11}, q12={n12})")
 
 
 if __name__ == "__main__":
