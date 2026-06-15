@@ -957,7 +957,9 @@ fn q13_zombies(
         };
         sb.partial_cmp(&sa)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.0.cmp(&b.0))
+            // Tiebreak on the LDBC id (official "ORDER BY person.id"), so the
+            // top-100 cut matches reference engines at like-ratio ties.
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
     });
     rows.truncate(100);
     rows
@@ -1439,7 +1441,18 @@ fn main() -> Result<()> {
         s.push(']');
         emit_json(dir, "q8.rust.json", s);
 
-        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q8/Q9/Q11/Q12 cross-check JSON to {dir}; skipping downstream queries");
+        let q13 = q13_zombies(&graph, "France", days_from_civil(2013, 1, 1), 2013 * 12 + 1);
+        let mut s = String::from("["); // Q13: [pid, zlc, tlc]
+        for (i, (p, zlc, tlc)) in q13.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{zlc},{tlc}]", plid(*p)));
+        }
+        s.push(']');
+        emit_json(dir, "q13.rust.json", s);
+
+        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q8/Q9/Q11/Q12/Q13 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
     }
     let q8_start = days_from_civil(2011, 7, 20);

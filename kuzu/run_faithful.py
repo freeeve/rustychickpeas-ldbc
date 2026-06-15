@@ -103,10 +103,10 @@ def preprocess():
          open(f"{IMPORT}/person_islocatedin.csv", "w", newline="") as li:
         w = csv.writer(out, delimiter="|")
         wl = csv.writer(li, delimiter="|")
-        w.writerow(["id"])
+        w.writerow(["id", "pcdate", "pym"])  # creationDate + year*12+month, for Q13
         wl.writerow(["from", "to"])  # Person -> Place(city)
-        for (i, city) in rows("dynamic/Person", ["id", "LocationCityId"]):
-            w.writerow([i])
+        for (i, cd, city) in rows("dynamic/Person", ["id", "creationDate", "LocationCityId"]):
+            w.writerow([i, cd[:10], int(cd[:4]) * 12 + int(cd[5:7])])
             if city:
                 wl.writerow([i, city])
 
@@ -161,7 +161,7 @@ def load():
     conn = kuzu.Connection(kuzu.Database(DB))
     ddl = [
         "CREATE NODE TABLE Message(id INT64, year INT64, cdate DATE, length INT64, hasContent BOOLEAN, isComment BOOLEAN, lang STRING, PRIMARY KEY(id))",
-        "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))",
+        "CREATE NODE TABLE Person(id INT64, pcdate DATE, pym INT64, PRIMARY KEY(id))",
         "CREATE NODE TABLE Tag(id INT64, name STRING, PRIMARY KEY(id))",
         "CREATE NODE TABLE TagClass(id INT64, name STRING, PRIMARY KEY(id))",
         "CREATE NODE TABLE Place(id INT64, name STRING, type STRING, PRIMARY KEY(id))",
@@ -295,6 +295,38 @@ ORDER BY messages DESC, pid LIMIT 100
 """
 
 
+def q13_text():
+    end = "date('2013-01-01')"
+    eym = 2013 * 12 + 1  # end year-month
+
+    def zombie(x, co, mm):
+        # France person, created before endDate, < 1 message/month before endDate.
+        return (f"{x}.pcdate < {end} "
+                f"AND EXISTS {{ MATCH ({x})-[:isLocatedIn]->(:Place)-[:isPartOf]->({co}:Place) "
+                f"WHERE {co}.name = 'France' AND {co}.type = 'Country' }} "
+                f"AND ({eym} - {x}.pym + 1) > 0 "
+                f"AND COUNT {{ MATCH ({x})-[:hasCreator]->({mm}:Message) WHERE {mm}.cdate < {end} }} "
+                f"< ({eym} - {x}.pym + 1)")
+
+    # Compute the zombie set ONCE (running the per-person COUNT subquery only for
+    # France persons), then score via list membership — re-running the zombie
+    # predicate per liker (any active person) is what makes the naive form hang.
+    return f"""
+MATCH (z0:Person)
+WHERE {zombie('z0', 'co', 'mmz')}
+WITH collect(z0.id) AS zids
+UNWIND zids AS zid
+MATCH (z:Person {{id: zid}})
+OPTIONAL MATCH (z)-[:hasCreator]->(:Message)<-[:likes]-(liker:Person)
+WITH zids, z, liker
+WITH z.id AS pid,
+  sum(CASE WHEN liker.pcdate < {end} THEN 1 ELSE 0 END) AS tlc,
+  sum(CASE WHEN liker.id IN zids THEN 1 ELSE 0 END) AS zlc
+RETURN pid, zlc, tlc
+ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 100
+"""
+
+
 def q11_text():
     d0, d1 = datetime.date(2012, 9, 29), datetime.date(2013, 1, 1)
     return f"""
@@ -362,6 +394,7 @@ def main():
     time_query(conn, "Q8 central person", q8_text())
     time_query(conn, "Q9 thread initiators", q9_text())
     time_query(conn, "Q11 friend triangles", q11_text())
+    time_query(conn, "Q13 zombies", q13_text())
 
 
 def emit_crosscheck(conn, outdir):
@@ -399,9 +432,11 @@ def emit_crosscheck(conn, outdir):
     d = conn.execute(q11_text()).get_as_df()  # [[count]]
     n11 = int(d["cnt"].iloc[0])
     dump("q11", [[n11]])
+    d = conn.execute(q13_text()).get_as_df()  # [pid, zlc, tlc]
+    n13 = dump("q13", [[int(p), int(z), int(t)] for p, z, t in zip(d["pid"], d["zlc"], d["tlc"])])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
-          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, q11={n11}, q12={n12})")
+          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, q11={n11}, q12={n12}, q13={n13})")
 
 
 if __name__ == "__main__":
