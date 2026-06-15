@@ -1399,7 +1399,16 @@ fn main() -> Result<()> {
         s.push(']');
         emit_json(dir, "q12.rust.json", s);
 
-        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q12 cross-check JSON to {dir}; skipping downstream queries");
+        // Q11: single triangle count -> [[count]]
+        let q11 = q11_friend_triangles(
+            &graph,
+            "India",
+            days_from_civil(2012, 9, 29),
+            days_from_civil(2013, 1, 1),
+        );
+        emit_json(dir, "q11.rust.json", format!("[[{q11}]]"));
+
+        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q11/Q12 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
     }
     let q8_start = days_from_civil(2011, 7, 20);

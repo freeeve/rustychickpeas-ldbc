@@ -258,6 +258,21 @@ ORDER BY authorityScore DESC, pid LIMIT 100
 """
 
 
+def q11_text():
+    d0, d1 = datetime.date(2012, 9, 29), datetime.date(2013, 1, 1)
+    return f"""
+MATCH (a:Person)-[k1:knows]-(b:Person)-[k2:knows]-(c:Person)-[k3:knows]-(a:Person)
+WHERE a.id < b.id AND b.id < c.id
+  AND k1.cdate >= date('{d0}') AND k1.cdate <= date('{d1}')
+  AND k2.cdate >= date('{d0}') AND k2.cdate <= date('{d1}')
+  AND k3.cdate >= date('{d0}') AND k3.cdate <= date('{d1}')
+  AND EXISTS {{ MATCH (a)-[:isLocatedIn]->(:Place)-[:isPartOf]->(ca:Place) WHERE ca.name = 'India' AND ca.type = 'Country' }}
+  AND EXISTS {{ MATCH (b)-[:isLocatedIn]->(:Place)-[:isPartOf]->(cb:Place) WHERE cb.name = 'India' AND cb.type = 'Country' }}
+  AND EXISTS {{ MATCH (c)-[:isLocatedIn]->(:Place)-[:isPartOf]->(cc:Place) WHERE cc.name = 'India' AND cc.type = 'Country' }}
+RETURN count(*) AS cnt
+"""
+
+
 def time_query(conn, name, cypher, runs=5):
     rowcount = len(conn.execute(cypher).get_as_df())
     samples = []
@@ -307,6 +322,7 @@ def main():
     time_query(conn, "Q12 message counts", q12_text(), runs=2)
     time_query(conn, "Q5 active posters", Q5)
     time_query(conn, "Q6 authoritative users", Q6)
+    time_query(conn, "Q11 friend triangles", q11_text())
 
 
 def emit_crosscheck(conn, outdir):
@@ -337,9 +353,11 @@ def emit_crosscheck(conn, outdir):
     n7 = dump("q7", [[str(nm), int(c)] for nm, c in zip(d["name"], d["cnt"])])
     d = conn.execute(q12_text()).get_as_df()  # [messageCount, personCount]
     n12 = dump("q12", [[int(mc), int(pc)] for mc, pc in zip(d["messageCount"], d["personCount"])])
+    d = conn.execute(q11_text()).get_as_df()  # [[count]]
+    dump("q11", [[int(d["cnt"].iloc[0])]])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
-          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q12={n12})")
+          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q12={n12}, q11={int(d['cnt'].iloc[0])})")
 
 
 if __name__ == "__main__":
