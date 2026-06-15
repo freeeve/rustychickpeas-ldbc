@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use csv::ReaderBuilder;
-use rustychickpeas_core::{GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
+use rustychickpeas_core::{Direction, GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -731,7 +731,7 @@ fn q11_friend_triangles(
     // creationDate through its CSR position.
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
     for &a in &in_country {
-        for e in g.out_edges_by_type(a, &["knows"]) {
+        for e in g.relationships(a, Direction::Outgoing, &["knows"]) {
             if !in_country.contains(&e.neighbor) {
                 continue;
             }
