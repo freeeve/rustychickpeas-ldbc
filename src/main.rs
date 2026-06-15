@@ -1054,8 +1054,9 @@ fn q19_interaction_path(
     results.sort_by(|a, b| {
         a.2.partial_cmp(&b.2)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.0.cmp(&b.0))
-            .then(a.1.cmp(&b.1))
+            // Tiebreak on LDBC ids (official ORDER BY) so the top-20 cut matches Kùzu.
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(pi64(g, a.1, "plid").cmp(&pi64(g, b.1, "plid")))
     });
     results.truncate(20);
     results
@@ -1165,7 +1166,8 @@ fn q20_recruitment(
     results.sort_by(|a, b| {
         a.1.partial_cmp(&b.1)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.0.cmp(&b.0))
+            // Tiebreak on the LDBC id (official ORDER BY) so the top-20 matches Kùzu.
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
     });
     results.truncate(20);
     results
@@ -1452,7 +1454,40 @@ fn main() -> Result<()> {
         s.push(']');
         emit_json(dir, "q13.rust.json", s);
 
-        eprintln!("emitted Q1/Q2/Q5/Q6/Q7/Q8/Q9/Q11/Q12/Q13 cross-check JSON to {dir}; skipping downstream queries");
+        // Q19: weighted SP over interaction graph -> [p1, p2, dist(6dp)]
+        let interaction = build_interaction_map(&graph);
+        if let (Some(c1), Some(c2)) = (place_by_lid(&graph, 669), place_by_lid(&graph, 648)) {
+            let q19 = q19_interaction_path(&graph, c1, c2, &interaction);
+            let mut s = String::from("[");
+            for (i, (p1, p2, d)) in q19.iter().enumerate() {
+                if i > 0 {
+                    s.push(',');
+                }
+                s.push_str(&format!("[{},{},{:.6}]", plid(*p1), plid(*p2), d));
+            }
+            s.push(']');
+            emit_json(dir, "q19.rust.json", s);
+        }
+
+        // Q20: weighted SP over cohort graph -> [pid, dist(6dp)]
+        let studyat = build_studyat(&graph);
+        let study_wm = build_study_weight_map(&graph, &studyat);
+        if let (Some(co), Some(p2)) =
+            (org_by_name(&graph, "Company", "Falcon_Air"), person_by_plid(&graph, 66))
+        {
+            let q20 = q20_recruitment(&graph, co, p2, &study_wm);
+            let mut s = String::from("[");
+            for (i, (p1, d)) in q20.iter().enumerate() {
+                if i > 0 {
+                    s.push(',');
+                }
+                s.push_str(&format!("[{},{:.6}]", plid(*p1), d));
+            }
+            s.push(']');
+            emit_json(dir, "q20.rust.json", s);
+        }
+
+        eprintln!("emitted Q1..Q13/Q19/Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());
     }
     let q8_start = days_from_civil(2011, 7, 20);

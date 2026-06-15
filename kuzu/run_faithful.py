@@ -151,6 +151,74 @@ def preprocess():
         for (p, t) in rows("dynamic/Person_hasInterest_Tag", ["personId", "interestId"]):
             w.writerow([p, t])
 
+    # --- Organisation (Company/University) + workAt, for Q20 ---
+    with open(f"{IMPORT}/organisation.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["id", "name", "type"])
+        for (i, typ, nm) in rows("static/Organisation", ["id", "type", "name"]):
+            w.writerow([i, nm, typ])
+    with open(f"{IMPORT}/workat.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to"])  # Person -> Company
+        for (p, c) in rows("dynamic/Person_workAt_Company", ["PersonId", "CompanyId"]):
+            w.writerow([p, c])
+
+    # --- Derived weighted edge tables for the weighted-SP queries (Q19/Q20).
+    # These replace the per-edge weight closures rust's dijkstra uses: an edge
+    # exists only where two people both know each other AND interacted / shared a
+    # university, with the derived weight. knows is read once and reused.
+    knows_pairs = [(int(a), int(b))
+                   for (a, b) in rows("dynamic/Person_knows_Person", ["Person1Id", "Person2Id"])]
+
+    # message -> creator, to count reply interactions between distinct people.
+    creator = {}
+    for (i, cr) in rows("dynamic/Post", ["id", "CreatorPersonId"]):
+        if cr:
+            creator[int(i)] = int(cr)
+    for (i, cr) in rows("dynamic/Comment", ["id", "CreatorPersonId"]):
+        if cr:
+            creator[int(i)] = int(cr)
+    inter = {}
+    for (i, pp, pc) in rows("dynamic/Comment", ["id", "ParentPostId", "ParentCommentId"]):
+        a = creator.get(int(i))
+        parent = pp if pp else pc
+        b = creator.get(int(parent)) if parent else None
+        if a and b and a != b:
+            k = (a, b) if a < b else (b, a)
+            inter[k] = inter.get(k, 0) + 1
+    with open(f"{IMPORT}/interactswith.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to", "w"])
+        for (a, b) in knows_pairs:
+            k = (a, b) if a < b else (b, a)
+            n = inter.get(k, 0)
+            if n > 0:
+                wt = 1.0 / n
+                w.writerow([a, b, wt])
+                w.writerow([b, a, wt])  # both directions (knows is undirected)
+
+    # studyAt -> per-person (university, classYear); cohort weight = min|dy|+1.
+    study = {}
+    for (p, u, cy) in rows("dynamic/Person_studyAt_University", ["PersonId", "UniversityId", "classYear"]):
+        study.setdefault(int(p), []).append((int(u), int(cy)))
+    with open(f"{IMPORT}/cohort.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to", "w"])
+        for (a, b) in knows_pairs:
+            sa, sb = study.get(a), study.get(b)
+            if not sa or not sb:
+                continue
+            best = None
+            for (ua, ya) in sa:
+                for (ub, yb) in sb:
+                    if ua == ub:
+                        d = abs(ya - yb)
+                        best = d if best is None else min(best, d)
+            if best is not None:
+                wt = float(best + 1)
+                w.writerow([a, b, wt])
+                w.writerow([b, a, wt])
+
 
 def load():
     for p in (DB, DB + ".wal"):
@@ -174,6 +242,10 @@ def load():
         "CREATE REL TABLE hasInterest(FROM Person TO Tag)",
         "CREATE REL TABLE isLocatedIn(FROM Person TO Place)",
         "CREATE REL TABLE isPartOf(FROM Place TO Place)",
+        "CREATE NODE TABLE Organisation(id INT64, name STRING, type STRING, PRIMARY KEY(id))",
+        "CREATE REL TABLE workAt(FROM Person TO Organisation)",
+        "CREATE REL TABLE interactsWith(FROM Person TO Person, w DOUBLE)",
+        "CREATE REL TABLE cohort(FROM Person TO Person, w DOUBLE)",
     ]
     for stmt in ddl:
         conn.execute(stmt)
@@ -185,7 +257,8 @@ def load():
         ("hasCreator", "message_hascreator"), ("replyOf", "message_replyof"),
         ("likes", "message_likes"), ("knows", "knows"),
         ("hasInterest", "hasinterest"), ("isLocatedIn", "person_islocatedin"),
-        ("isPartOf", "place_ispartof"),
+        ("isPartOf", "place_ispartof"), ("Organisation", "organisation"),
+        ("workAt", "workat"), ("interactsWith", "interactswith"), ("cohort", "cohort"),
     ]
     for tbl, f in copies:
         conn.execute(f"COPY {tbl} FROM '{IMPORT}/{f}.csv' (HEADER=true, DELIM='|')")
@@ -327,6 +400,31 @@ ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 1
 """
 
 
+def q19_text():
+    # Weighted shortest path between people of city 669 and city 648 over the
+    # interaction-weighted graph; top-20 pairs by path cost.
+    return """
+MATCH (a:Person)-[:isLocatedIn]->(:Place {id: 669}),
+      (b:Person)-[:isLocatedIn]->(:Place {id: 648}),
+      p = (a)-[e:interactsWith * WSHORTEST(w)]->(b)
+RETURN a.id AS p1, b.id AS p2, cost(e) AS dist
+ORDER BY dist, p1, p2 LIMIT 20
+"""
+
+
+def q20_text():
+    # Weighted shortest path from each Falcon_Air employee to person 66 over the
+    # university-cohort-weighted graph; top-20 employees by path cost.
+    return """
+MATCH (company:Organisation {name: 'Falcon_Air', type: 'Company'})<-[:workAt]-(p1:Person),
+      (p2:Person {id: 66}),
+      path = (p1)-[e:cohort * WSHORTEST(w)]->(p2)
+WHERE p1.id <> 66
+RETURN p1.id AS pid, cost(e) AS dist
+ORDER BY dist, pid LIMIT 20
+"""
+
+
 def q11_text():
     d0, d1 = datetime.date(2012, 9, 29), datetime.date(2013, 1, 1)
     return f"""
@@ -377,6 +475,10 @@ def main():
         "hasInterest": n("MATCH ()-[k:hasInterest]->() RETURN count(k)"),
         "isLocatedIn": n("MATCH ()-[k:isLocatedIn]->() RETURN count(k)"),
         "isPartOf": n("MATCH ()-[k:isPartOf]->() RETURN count(k)"),
+        "orgs": n("MATCH (o:Organisation) RETURN count(o)"),
+        "workAt": n("MATCH ()-[k:workAt]->() RETURN count(k)"),
+        "interactsWith": n("MATCH ()-[k:interactsWith]->() RETURN count(k)"),
+        "cohort": n("MATCH ()-[k:cohort]->() RETURN count(k)"),
     }
     print(f"  loaded in {load_s:.1f}s: " + ", ".join(f"{k}={v}" for k, v in counts.items()) + "\n")
 
@@ -395,6 +497,8 @@ def main():
     time_query(conn, "Q9 thread initiators", q9_text())
     time_query(conn, "Q11 friend triangles", q11_text())
     time_query(conn, "Q13 zombies", q13_text())
+    time_query(conn, "Q19 interaction path", q19_text(), runs=2)
+    time_query(conn, "Q20 recruitment", q20_text(), runs=2)
 
 
 def emit_crosscheck(conn, outdir):
@@ -434,9 +538,14 @@ def emit_crosscheck(conn, outdir):
     dump("q11", [[n11]])
     d = conn.execute(q13_text()).get_as_df()  # [pid, zlc, tlc]
     n13 = dump("q13", [[int(p), int(z), int(t)] for p, z, t in zip(d["pid"], d["zlc"], d["tlc"])])
+    d = conn.execute(q19_text()).get_as_df()  # [p1, p2, dist] (cost rounded to 6dp)
+    n19 = dump("q19", [[int(a), int(b), round(float(x), 6)] for a, b, x in zip(d["p1"], d["p2"], d["dist"])])
+    d = conn.execute(q20_text()).get_as_df()  # [pid, dist]
+    n20 = dump("q20", [[int(p), round(float(x), 6)] for p, x in zip(d["pid"], d["dist"])])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
-          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, q11={n11}, q12={n12}, q13={n13})")
+          f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
+          f"q11={n11}, q12={n12}, q13={n13}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":
