@@ -178,7 +178,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 builder.set_prop_str(id, "name", v[1]).unwrap();
                 tag.insert(lid, id);
                 if let Some(&class) = v[2].parse::<i64>().ok().and_then(|c| tagclass.get(&c)) {
-                    builder.add_rel(id, class, "hasType").unwrap();
+                    builder.add_relationship(id, class, "hasType").unwrap();
                     stats.edges += 1;
                 }
             }
@@ -224,7 +224,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
         let c = v[0].parse::<i64>().ok().and_then(|i| place.get(&i));
         let parent = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
         if let (Some(&c), Some(&p)) = (c, parent) {
-            builder.add_rel(c, p, "isPartOf").unwrap();
+            builder.add_relationship(c, p, "isPartOf").unwrap();
             stats.edges += 1;
         }
     })?;
@@ -232,7 +232,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
         let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
         let city = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
         if let (Some(&p), Some(&city)) = (p, city) {
-            builder.add_rel(p, city, "isLocatedIn").unwrap();
+            builder.add_relationship(p, city, "isLocatedIn").unwrap();
             stats.edges += 1;
         }
     })?;
@@ -257,7 +257,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 builder.set_prop_str(id, "lang", v[5]).unwrap();
                 post.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
-                    builder.add_rel(creator, id, "hasCreator").unwrap();
+                    builder.add_relationship(creator, id, "hasCreator").unwrap();
                     stats.edges += 1;
                 }
             }
@@ -277,7 +277,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 set_message_props(&mut builder, id, v[2], v[3], v[4]);
                 comment.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
-                    builder.add_rel(creator, id, "hasCreator").unwrap();
+                    builder.add_relationship(creator, id, "hasCreator").unwrap();
                     stats.edges += 1;
                 }
             }
@@ -293,7 +293,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let p = v[0].parse::<i64>().ok().and_then(|i| post.get(&i));
             let t = v[1].parse::<i64>().ok().and_then(|i| tag.get(&i));
             if let (Some(&p), Some(&t)) = (p, t) {
-                builder.add_rel(p, t, "hasTag").unwrap();
+                builder.add_relationship(p, t, "hasTag").unwrap();
                 stats.edges += 1;
             }
         },
@@ -307,7 +307,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let c = v[0].parse::<i64>().ok().and_then(|i| comment.get(&i));
             let t = v[1].parse::<i64>().ok().and_then(|i| tag.get(&i));
             if let (Some(&c), Some(&t)) = (c, t) {
-                builder.add_rel(c, t, "hasTag").unwrap();
+                builder.add_relationship(c, t, "hasTag").unwrap();
                 stats.edges += 1;
             }
         },
@@ -321,7 +321,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
             let t = v[1].parse::<i64>().ok().and_then(|i| tag.get(&i));
             if let (Some(&p), Some(&t)) = (p, t) {
-                builder.add_rel(p, t, "hasInterest").unwrap();
+                builder.add_relationship(p, t, "hasInterest").unwrap();
                 stats.edges += 1;
             }
         },
@@ -340,7 +340,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 v[2].parse::<i64>().ok().and_then(|i| comment.get(&i))
             };
             if let (Some(&c), Some(&p)) = (c, parent) {
-                builder.add_rel(c, p, "replyOf").unwrap();
+                builder.add_relationship(c, p, "replyOf").unwrap();
                 stats.edges += 1;
             }
         },
@@ -354,7 +354,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
             let m = v[1].parse::<i64>().ok().and_then(|i| post.get(&i));
             if let (Some(&p), Some(&m)) = (p, m) {
-                builder.add_rel(p, m, "likes").unwrap();
+                builder.add_relationship(p, m, "likes").unwrap();
                 stats.edges += 1;
             }
         },
@@ -366,7 +366,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
             let m = v[1].parse::<i64>().ok().and_then(|i| comment.get(&i));
             if let (Some(&p), Some(&m)) = (p, m) {
-                builder.add_rel(p, m, "likes").unwrap();
+                builder.add_relationship(p, m, "likes").unwrap();
                 stats.edges += 1;
             }
         },
@@ -374,7 +374,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
 
     // Person -[knows]- Person, undirected (both directions), with the edge's
     // creationDate stored as the "kd" property (epoch day) so Q11 can filter
-    // knows edges by date during traversal. Uses the index returned by add_rel
+    // knows edges by date during traversal. Uses the index returned by add_relationship
     // to set the property without an O(n) endpoint lookup.
     for_each_row(
         &dynamic.join("Person_knows_Person"),
@@ -384,10 +384,10 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let a = v[1].parse::<i64>().ok().and_then(|i| person.get(&i));
             let b = v[2].parse::<i64>().ok().and_then(|i| person.get(&i));
             if let (Some(&a), Some(&b)) = (a, b) {
-                let i1 = builder.add_rel(a, b, "knows").unwrap();
-                builder.set_rel_props_by_index(i1, &[("kd", PropertyValue::Integer(day))]);
-                let i2 = builder.add_rel(b, a, "knows").unwrap();
-                builder.set_rel_props_by_index(i2, &[("kd", PropertyValue::Integer(day))]);
+                let i1 = builder.add_relationship(a, b, "knows").unwrap();
+                builder.set_relationship_props_by_index(i1, &[("kd", PropertyValue::Integer(day))]);
+                let i2 = builder.add_relationship(b, a, "knows").unwrap();
+                builder.set_relationship_props_by_index(i2, &[("kd", PropertyValue::Integer(day))]);
                 stats.edges += 2;
             }
         },
@@ -416,7 +416,7 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
             let c = v[1].parse::<i64>().ok().and_then(|i| org.get(&i));
             if let (Some(&p), Some(&c)) = (p, c) {
-                builder.add_rel(p, c, "workAt").unwrap();
+                builder.add_relationship(p, c, "workAt").unwrap();
                 stats.edges += 1;
             }
         },
@@ -429,8 +429,8 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             let u = v[1].parse::<i64>().ok().and_then(|i| org.get(&i));
             if let (Some(&p), Some(&u)) = (p, u) {
                 let cy = v[2].parse::<i64>().unwrap_or(0);
-                let idx = builder.add_rel(p, u, "studyAt").unwrap();
-                builder.set_rel_props_by_index(idx, &[("cy", PropertyValue::Integer(cy))]);
+                let idx = builder.add_relationship(p, u, "studyAt").unwrap();
+                builder.set_relationship_props_by_index(idx, &[("cy", PropertyValue::Integer(cy))]);
                 stats.edges += 1;
             }
         },
@@ -505,7 +505,7 @@ fn q2_tag_evolution(
     let mut qualifying: HashSet<u32> = HashSet::new();
     if let Some(tags) = g.nodes_with_label("Tag") {
         for t in tags.iter() {
-            if g.out_neighbors_by_type(t, &["hasType"]).contains(&target) {
+            if g.neighbors_by_type(t, Direction::Outgoing, &["hasType"]).contains(&target) {
                 qualifying.insert(t);
             }
         }
@@ -524,7 +524,7 @@ fn q2_tag_evolution(
                 if !in1 && !in2 {
                     continue;
                 }
-                for t in g.out_neighbors_by_type(msg, &["hasTag"]) {
+                for t in g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]) {
                     if qualifying.contains(&t) {
                         *(if in1 { &mut c1 } else { &mut c2 }).entry(t).or_insert(0) += 1;
                     }
@@ -559,9 +559,9 @@ fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(String, usize)> 
     };
 
     let mut related: HashMap<u32, HashSet<u32>> = HashMap::new();
-    for msg in g.in_neighbors_by_type(target, &["hasTag"]) {
-        for comment in g.in_neighbors_by_type(msg, &["replyOf"]) {
-            let ctags = g.out_neighbors_by_type(comment, &["hasTag"]);
+    for msg in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
+        for comment in g.neighbors_by_type(msg, Direction::Incoming, &["replyOf"]) {
+            let ctags = g.neighbors_by_type(comment, Direction::Outgoing, &["hasTag"]);
             if !ctags.contains(&target) {
                 for &rt in &ctags {
                     related.entry(rt).or_default().insert(comment);
@@ -597,7 +597,7 @@ fn q12_message_counts(
             if posts.is_some_and(|p| p.contains(n)) {
                 return pstr(g, n, "lang");
             }
-            n = *g.out_neighbors_by_type(n, &["replyOf"]).first()?;
+            n = *g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]).first()?;
         }
         None
     };
@@ -615,7 +615,7 @@ fn q12_message_counts(
                 if !matches!(root_lang(msg), Some(l) if langs.contains(&l)) {
                     continue;
                 }
-                for creator in g.in_neighbors_by_type(msg, &["hasCreator"]) {
+                for creator in g.neighbors_by_type(msg, Direction::Incoming, &["hasCreator"]) {
                     *per_person.entry(creator).or_insert(0) += 1;
                 }
             }
@@ -641,10 +641,10 @@ fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64, u64, u
         return Vec::new();
     };
     let mut agg: HashMap<u32, (u64, u64, u64)> = HashMap::new(); // person -> (msgs, replies, likes)
-    for message in g.in_neighbors_by_type(target, &["hasTag"]) {
-        let likes = g.in_neighbors_by_type(message, &["likes"]).len() as u64;
-        let replies = g.in_neighbors_by_type(message, &["replyOf"]).len() as u64;
-        for person in g.in_neighbors_by_type(message, &["hasCreator"]) {
+    for message in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
+        let likes = g.neighbors_by_type(message, Direction::Incoming, &["likes"]).len() as u64;
+        let replies = g.neighbors_by_type(message, Direction::Incoming, &["replyOf"]).len() as u64;
+        for person in g.neighbors_by_type(message, Direction::Incoming, &["hasCreator"]) {
             let e = agg.entry(person).or_insert((0, 0, 0));
             e.0 += 1;
             e.1 += replies;
@@ -668,12 +668,12 @@ fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64)> {
         return Vec::new();
     };
     let mut p1_to_p2: HashMap<u32, HashSet<u32>> = HashMap::new();
-    for message1 in g.in_neighbors_by_type(target, &["hasTag"]) {
-        let likers = g.in_neighbors_by_type(message1, &["likes"]);
+    for message1 in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
+        let likers = g.neighbors_by_type(message1, Direction::Incoming, &["likes"]);
         if likers.is_empty() {
             continue;
         }
-        for person1 in g.in_neighbors_by_type(message1, &["hasCreator"]) {
+        for person1 in g.neighbors_by_type(message1, Direction::Incoming, &["hasCreator"]) {
             p1_to_p2
                 .entry(person1)
                 .or_default()
@@ -685,8 +685,8 @@ fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64)> {
         .map(|(p1, p2set)| {
             let score: u64 = p2set
                 .iter()
-                .flat_map(|&p2| g.out_neighbors_by_type(p2, &["hasCreator"]))
-                .map(|m2| g.in_neighbors_by_type(m2, &["likes"]).len() as u64)
+                .flat_map(|&p2| g.neighbors_by_type(p2, Direction::Outgoing, &["hasCreator"]))
+                .map(|m2| g.neighbors_by_type(m2, Direction::Incoming, &["likes"]).len() as u64)
                 .sum();
             (p1, score)
         })
@@ -710,14 +710,14 @@ fn q8_central_person(
         return Vec::new();
     };
     let interested: HashSet<u32> = g
-        .in_neighbors_by_type(tag, &["hasInterest"])
+        .neighbors_by_type(tag, Direction::Incoming, &["hasInterest"])
         .into_iter()
         .collect();
     let mut msgcount: HashMap<u32, i64> = HashMap::new();
-    for msg in g.in_neighbors_by_type(tag, &["hasTag"]) {
+    for msg in g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]) {
         let day = pi64(g, msg, "day");
         if day > start_day && day < end_day {
-            for creator in g.in_neighbors_by_type(msg, &["hasCreator"]) {
+            for creator in g.neighbors_by_type(msg, Direction::Incoming, &["hasCreator"]) {
                 *msgcount.entry(creator).or_insert(0) += 1;
             }
         }
@@ -735,7 +735,7 @@ fn q8_central_person(
         .iter()
         .map(|(&p, &s)| {
             let fs: i64 = g
-                .out_neighbors_by_type(p, &["knows"])
+                .neighbors_by_type(p, Direction::Outgoing, &["knows"])
                 .iter()
                 .map(|f| score.get(f).copied().unwrap_or(0))
                 .sum();
@@ -767,8 +767,8 @@ fn q11_friend_triangles(
     };
     // Persons located in a city of this country.
     let mut in_country: HashSet<u32> = HashSet::new();
-    for city in g.in_neighbors_by_type(country, &["isPartOf"]) {
-        for p in g.in_neighbors_by_type(city, &["isLocatedIn"]) {
+    for city in g.neighbors_by_type(country, Direction::Incoming, &["isPartOf"]) {
+        for p in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
             in_country.insert(p);
         }
     }
@@ -819,7 +819,7 @@ fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i64) -> Vec<
             if pd < start_day || pd > end_day {
                 continue;
             }
-            let Some(&creator) = g.in_neighbors_by_type(post, &["hasCreator"]).first() else {
+            let Some(&creator) = g.neighbors_by_type(post, Direction::Incoming, &["hasCreator"]).first() else {
                 continue;
             };
             // Walk the post's reply tree; replies are created after their parent,
@@ -834,7 +834,7 @@ fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i64) -> Vec<
                 if d >= start_day {
                     msgs += 1;
                 }
-                stack.extend(g.in_neighbors_by_type(n, &["replyOf"]));
+                stack.extend(g.neighbors_by_type(n, Direction::Incoming, &["replyOf"]));
             }
             let e = per_person.entry(creator).or_insert((0, 0));
             e.0 += 1;
@@ -867,13 +867,13 @@ fn q13_zombies(
         return Vec::new();
     };
     let mut zombies: HashSet<u32> = HashSet::new();
-    for city in g.in_neighbors_by_type(country, &["isPartOf"]) {
-        for p in g.in_neighbors_by_type(city, &["isLocatedIn"]) {
+    for city in g.neighbors_by_type(country, Direction::Incoming, &["isPartOf"]) {
+        for p in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
             if pi64(g, p, "pday") >= end_day {
                 continue;
             }
             let mcount = g
-                .out_neighbors_by_type(p, &["hasCreator"])
+                .neighbors_by_type(p, Direction::Outgoing, &["hasCreator"])
                 .iter()
                 .filter(|&&m| pi64(g, m, "day") < end_day)
                 .count() as i64;
@@ -888,8 +888,8 @@ fn q13_zombies(
         .map(|&z| {
             let mut zlc = 0u64;
             let mut tlc = 0u64;
-            for m in g.out_neighbors_by_type(z, &["hasCreator"]) {
-                for liker in g.in_neighbors_by_type(m, &["likes"]) {
+            for m in g.neighbors_by_type(z, Direction::Outgoing, &["hasCreator"]) {
+                for liker in g.neighbors_by_type(m, Direction::Incoming, &["likes"]) {
                     if pi64(g, liker, "pday") < end_day {
                         tlc += 1;
                     }
@@ -958,11 +958,11 @@ fn build_interaction_map(g: &GraphSnapshot) -> HashMap<(u32, u32), u32> {
     let mut interaction: HashMap<(u32, u32), u32> = HashMap::new();
     if let Some(comments) = g.nodes_with_label("Comment") {
         for c in comments.iter() {
-            let Some(&a) = g.in_neighbors_by_type(c, &["hasCreator"]).first() else {
+            let Some(&a) = g.neighbors_by_type(c, Direction::Incoming, &["hasCreator"]).first() else {
                 continue;
             };
-            for parent in g.out_neighbors_by_type(c, &["replyOf"]) {
-                if let Some(&b) = g.in_neighbors_by_type(parent, &["hasCreator"]).first() {
+            for parent in g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]) {
+                if let Some(&b) = g.neighbors_by_type(parent, Direction::Incoming, &["hasCreator"]).first() {
                     if a != b {
                         *interaction.entry((a.min(b), a.max(b))).or_insert(0) += 1;
                     }
@@ -985,9 +985,9 @@ fn q19_interaction_path(
     city2: u32,
     interaction: &HashMap<(u32, u32), u32>,
 ) -> Vec<(u32, u32, f64)> {
-    let c1 = g.in_neighbors_by_type(city1, &["isLocatedIn"]);
+    let c1 = g.neighbors_by_type(city1, Direction::Incoming, &["isLocatedIn"]);
     let c2: HashSet<u32> = g
-        .in_neighbors_by_type(city2, &["isLocatedIn"])
+        .neighbors_by_type(city2, Direction::Incoming, &["isLocatedIn"])
         .into_iter()
         .collect();
     let mut results: Vec<(u32, u32, f64)> = Vec::new();
@@ -1061,7 +1061,7 @@ fn build_study_weight_map(
 ) -> HashMap<(u32, u32), f64> {
     let mut wm: HashMap<(u32, u32), f64> = HashMap::new();
     for (&a, sa) in studyat {
-        for b in g.out_neighbors_by_type(a, &["knows"]) {
+        for b in g.neighbors_by_type(a, Direction::Outgoing, &["knows"]) {
             if b <= a {
                 continue;
             }
@@ -1095,7 +1095,7 @@ fn q20_recruitment(
     weight_map: &HashMap<(u32, u32), f64>,
 ) -> Vec<(u32, f64)> {
     let mut results: Vec<(u32, f64)> = Vec::new();
-    for p1 in g.in_neighbors_by_type(company, &["workAt"]) {
+    for p1 in g.neighbors_by_type(company, Direction::Incoming, &["workAt"]) {
         if p1 == person2 {
             continue;
         }
@@ -1133,7 +1133,7 @@ fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
     for label in ["Post", "Comment"] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                let tags = g.out_neighbors_by_type(msg, &["hasTag"]);
+                let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]);
                 for i in 0..tags.len() {
                     for j in (i + 1)..tags.len() {
                         let pair = if tags[i] < tags[j] {
@@ -1155,7 +1155,7 @@ fn bi3_popular_topics(g: &GraphSnapshot) -> usize {
     for label in ["Post", "Comment"] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                for t in g.out_neighbors_by_type(msg, &["hasTag"]) {
+                for t in g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]) {
                     *counts.entry(t).or_insert(0) += 1;
                 }
             }
@@ -1169,7 +1169,7 @@ fn top_creators(g: &GraphSnapshot, label: &str) -> usize {
     let persons = g.nodes_with_label("Person");
     if let Some(nodes) = g.nodes_with_label(label) {
         for msg in nodes.iter() {
-            for &creator in g.in_neighbors(msg) {
+            for creator in g.neighbors(msg, Direction::Incoming) {
                 if persons.is_some_and(|p| p.contains(creator)) {
                     *counts.entry(creator).or_insert(0) += 1;
                 }
