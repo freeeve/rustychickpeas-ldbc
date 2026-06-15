@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use csv::ReaderBuilder;
-use rustychickpeas_core::{Direction, GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
+use rustychickpeas_core::{Column, Direction, GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -70,6 +70,33 @@ fn pstr<'a>(g: &'a GraphSnapshot, n: u32, k: &str) -> Option<&'a str> {
     match g.prop(n, k) {
         Some(ValueId::Str(s)) => g.resolve_string(s),
         _ => None,
+    }
+}
+
+/// Minimal JSON string escaper (enough for LDBC tag/place names).
+fn jstr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Write cross-check JSON (an array of row-arrays) to `<dir>/<name>`.
+fn emit_json(dir: &str, name: &str, body: String) {
+    let _ = std::fs::create_dir_all(dir);
+    if let Err(e) = std::fs::write(format!("{dir}/{name}"), body) {
+        eprintln!("emit_json {name}: {e}");
     }
 }
 
@@ -446,19 +473,30 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
 /// share of all messages before the cutoff.
 /// Returns (group rows, total-message-count). Cypher: bi-1.cypher.
 fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1Row>, u64) {
+    // Resolve each property's column once, hoisting the per-message key-string
+    // interning + columns lookup out of the multi-million-row scan (the
+    // dominant cost; behavior is identical to per-row `prop()` reads).
+    let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
+    let (day_col, content_col, len_col, year_col) =
+        (col("day"), col("content"), col("len"), col("year"));
+    let get_i64 = |c: Option<&Column>, n: u32| match c.and_then(|c| c.get(n)) {
+        Some(ValueId::I64(v)) => v,
+        _ => 0,
+    };
+
     let mut total = 0u64;
     let mut groups: HashMap<(i64, bool, u8), (u64, i64)> = HashMap::new();
     for (label, is_comment) in [("Post", false), ("Comment", true)] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                if pi64(g, msg, "day") >= cutoff_day {
+                if get_i64(day_col, msg) >= cutoff_day {
                     continue;
                 }
                 total += 1;
-                if !pbool(g, msg, "content") {
+                if !matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))) {
                     continue;
                 }
-                let len = pi64(g, msg, "len");
+                let len = get_i64(len_col, msg);
                 let cat = if len < 40 {
                     0
                 } else if len < 80 {
@@ -469,7 +507,7 @@ fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1Row>, u64) {
                     3
                 };
                 let e = groups
-                    .entry((pi64(g, msg, "year"), is_comment, cat))
+                    .entry((get_i64(year_col, msg), is_comment, cat))
                     .or_insert((0, 0));
                 e.0 += 1;
                 e.1 += len;
@@ -515,10 +553,15 @@ fn q2_tag_evolution(
     let (w2_lo, w2_hi) = (date0_day + 100, date0_day + 200);
     let mut c1: HashMap<u32, u64> = HashMap::new();
     let mut c2: HashMap<u32, u64> = HashMap::new();
+    // Resolve the day column once; the window filter scans every message.
+    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
     for label in ["Post", "Comment"] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                let day = pi64(g, msg, "day");
+                let day = match day_col.and_then(|c| c.get(msg)) {
+                    Some(ValueId::I64(v)) => v,
+                    _ => 0,
+                };
                 let in1 = w1_lo <= day && day < w1_hi;
                 let in2 = w2_lo <= day && day < w2_hi;
                 if !in1 && !in2 {
@@ -1223,11 +1266,17 @@ fn main() -> Result<()> {
     println!("       {} edges in {load_secs:.1}s\n", s.edges);
 
     // --- Faithful LDBC BI queries (official Cypher params) ---
+    // Set LDBC_EMIT_JSON=<dir> to dump Q1/Q2 result rows for the Kùzu
+    // cross-check (and skip the slower downstream queries).
+    let emit = std::env::var("LDBC_EMIT_JSON").ok();
+
     println!("Faithful LDBC BI queries:");
     let q1_cutoff = days_from_civil(2011, 12, 1);
+    let t_q1 = Instant::now();
     let (q1_rows, q1_total) = q1_posting_summary(&graph, q1_cutoff);
+    let q1_ms = t_q1.elapsed().as_secs_f64() * 1000.0;
     println!(
-        "  Q1 posting summary: {} groups over {} messages before 2011-12-01",
+        "  Q1 posting summary: {} groups over {} messages before 2011-12-01  [{q1_ms:.1} ms]",
         q1_rows.len(),
         q1_total
     );
@@ -1237,14 +1286,45 @@ fn main() -> Result<()> {
         println!("     {y} {kind:<7} lenCat={cat}  count={n}  avgLen={avg:.1}");
     }
     let q2_date = days_from_civil(2012, 6, 1);
+    let t_q2 = Instant::now();
     let q2_rows = q2_tag_evolution(&graph, q2_date, "MusicalArtist");
+    let q2_ms = t_q2.elapsed().as_secs_f64() * 1000.0;
     println!(
-        "  Q2 tag evolution (MusicalArtist, 2012-06-01): {} tags",
+        "  Q2 tag evolution (MusicalArtist, 2012-06-01): {} tags  [{q2_ms:.1} ms]",
         q2_rows.len()
     );
     for (name, n1, n2, diff) in q2_rows.iter().take(3) {
         println!("     {name:<30} w1={n1} w2={n2} diff={diff}");
     }
+
+    if let Some(dir) = emit.as_deref() {
+        let mut s1 = String::from("[");
+        for (i, (y, c, cat, n, sum)) in q1_rows.iter().enumerate() {
+            if i > 0 {
+                s1.push(',');
+            }
+            s1.push_str(&format!(
+                "[{y},{},{cat},{n},{sum}]",
+                if *c { "true" } else { "false" }
+            ));
+        }
+        s1.push(']');
+        emit_json(dir, "q1.rust.json", s1);
+
+        let mut s2 = String::from("[");
+        for (i, (name, n1, n2, diff)) in q2_rows.iter().enumerate() {
+            if i > 0 {
+                s2.push(',');
+            }
+            s2.push_str(&format!("[{},{n1},{n2},{diff}]", jstr(name)));
+        }
+        s2.push(']');
+        emit_json(dir, "q2.rust.json", s2);
+
+        eprintln!("emitted Q1/Q2 cross-check JSON to {dir}; skipping downstream queries");
+        return Ok(());
+    }
+
     let q7_rows = q7_related_topics(&graph, "Enrique_Iglesias");
     println!(
         "  Q7 related topics (Enrique_Iglesias): {} related tags",

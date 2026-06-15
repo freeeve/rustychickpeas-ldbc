@@ -221,6 +221,23 @@ def time_query(conn, name, cypher, runs=5):
     return median
 
 
+def emit_crosscheck(conn, outdir):
+    """Dump Q1/Q2 result rows as canonical JSON arrays for the rust cross-check."""
+    import json
+    os.makedirs(outdir, exist_ok=True)
+    d1 = conn.execute(Q1).get_as_df()
+    r1 = [[int(y), bool(ic), int(c), int(cnt), int(sl)]
+          for y, ic, c, cnt, sl in zip(d1["year"], d1["isComment"], d1["cat"], d1["cnt"], d1["sumLen"])]
+    with open(f"{outdir}/q1.kuzu.json", "w") as f:
+        json.dump(r1, f)
+    d2 = conn.execute(q2_text()).get_as_df()
+    r2 = [[str(n), int(w1), int(w2), int(d)]
+          for n, w1, w2, d in zip(d2["name"], d2["w1"], d2["w2"], d2["diff"])]
+    with open(f"{outdir}/q2.kuzu.json", "w") as f:
+        json.dump(r2, f)
+    print(f"  emitted Q1/Q2 Kùzu cross-check JSON to {outdir} (q1={len(r1)} rows, q2={len(r2)} rows)")
+
+
 def main():
     print(f"=== Kùzu {kuzu.__version__} — LDBC BI {SCALE} ===")
     print("Preprocessing raw LDBC CSVs ...")
@@ -233,6 +250,10 @@ def main():
     n_msg = conn.execute("MATCH (m:Message) RETURN count(*)").get_as_df().iloc[0, 0]
     n_tag = conn.execute("MATCH (t:Tag) RETURN count(*)").get_as_df().iloc[0, 0]
     print(f"  loaded {n_msg} messages, {n_tag} tags in {load_s:.1f}s\n")
+
+    if "--emit-json" in sys.argv:
+        emit_crosscheck(conn, sys.argv[sys.argv.index("--emit-json") + 1])
+        return
 
     print(f"Timings (median of 5):")
     time_query(conn, "Q1 posting summary", Q1)
