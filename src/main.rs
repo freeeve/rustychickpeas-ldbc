@@ -1361,6 +1361,86 @@ fn q16_fake_news(
     rows
 }
 
+/// Q10 — Experts in social circle. From `start` (by LDBC id), people at knows
+/// shortest-distance in [min_dist, max_dist] who live in `country` and created
+/// messages tagged with a tag of `tagclass`; count messages per (expert, tag).
+/// Cypher: bi-10.cypher (start person/params adapted to SF1).
+fn q10_experts(
+    g: &GraphSnapshot,
+    start_plid: i64,
+    country_name: &str,
+    tagclass_name: &str,
+    min_dist: u32,
+    max_dist: u32,
+) -> Vec<(u32, String, i64)> {
+    let Some(start) = person_by_plid(g, start_plid) else {
+        return Vec::new();
+    };
+    // BFS shortest knows-distance up to max_dist.
+    let mut dist: HashMap<u32, u32> = HashMap::new();
+    dist.insert(start, 0);
+    let mut frontier = vec![start];
+    for d in 1..=max_dist {
+        let mut next = Vec::new();
+        for &n in &frontier {
+            for f in g.neighbors_by_type(n, Direction::Outgoing, &["knows"]) {
+                if !dist.contains_key(&f) {
+                    dist.insert(f, d);
+                    next.push(f);
+                }
+            }
+        }
+        frontier = next;
+        if frontier.is_empty() {
+            break;
+        }
+    }
+    let country = g
+        .nodes_with_label("Country")
+        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)));
+    let tc = g
+        .nodes_with_label("TagClass")
+        .and_then(|t| t.iter().find(|&x| pstr(g, x, "name") == Some(tagclass_name)));
+    let (Some(country), Some(tc)) = (country, tc) else {
+        return Vec::new();
+    };
+    let mut in_country: HashSet<u32> = HashSet::new();
+    for city in g.neighbors_by_type(country, Direction::Incoming, &["isPartOf"]) {
+        for p in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
+            in_country.insert(p);
+        }
+    }
+    let class_tags: HashSet<u32> = g
+        .neighbors_by_type(tc, Direction::Incoming, &["hasType"])
+        .into_iter()
+        .collect();
+    let mut counts: HashMap<(u32, u32), HashSet<u32>> = HashMap::new(); // (expert, tag) -> messages
+    for (&expert, &d) in &dist {
+        if d < min_dist || d > max_dist || !in_country.contains(&expert) {
+            continue;
+        }
+        for msg in g.neighbors_by_type(expert, Direction::Outgoing, &["hasCreator"]) {
+            let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]);
+            if tags.iter().any(|t| class_tags.contains(t)) {
+                for &t in &tags {
+                    counts.entry((expert, t)).or_default().insert(msg);
+                }
+            }
+        }
+    }
+    let mut rows: Vec<(u32, String, i64)> = counts
+        .into_iter()
+        .map(|((e, t), msgs)| (e, pstr(g, t, "name").unwrap_or("").to_string(), msgs.len() as i64))
+        .collect();
+    rows.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then(a.1.cmp(&b.1))
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
+    rows.truncate(100);
+    rows
+}
+
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============
 
 fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
@@ -1724,6 +1804,17 @@ fn main() -> Result<()> {
         }
         s.push(']');
         emit_json(dir, "q16.rust.json", s);
+
+        let q10 = q10_experts(&graph, 3470, "China", "MusicalArtist", 3, 4);
+        let mut s = String::from("["); // Q10: [eid, tagName, messageCount]
+        for (i, (e, tn, c)) in q10.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{},{c}]", plid(*e), jstr(tn)));
+        }
+        s.push(']');
+        emit_json(dir, "q10.rust.json", s);
 
         eprintln!("emitted Q1..Q20 cross-check JSON to {dir}; skipping downstream queries");
         return Ok(());

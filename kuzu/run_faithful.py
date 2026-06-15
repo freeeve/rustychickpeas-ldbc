@@ -400,6 +400,18 @@ ORDER BY (CASE WHEN tlc = 0 THEN 0.0 ELSE zlc * 1.0 / tlc END) DESC, pid LIMIT 1
 """
 
 
+def q10_text():
+    return """
+MATCH (s:Person {id: 3470})-[e:knows* SHORTEST 1..4]-(expert:Person)
+WHERE length(e) >= 3
+MATCH (expert)-[:isLocatedIn]->(:Place)-[:isPartOf]->(:Place {name: 'China', type: 'Country'}),
+      (expert)-[:hasCreator]->(message:Message)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass {name: 'MusicalArtist'})
+MATCH (message)-[:hasTag]->(tag:Tag)
+RETURN expert.id AS eid, tag.name AS tagName, count(DISTINCT message) AS messageCount
+ORDER BY messageCount DESC, tagName ASC, eid ASC LIMIT 100
+"""
+
+
 def q16_param(tag, date):
     # Per-param graph work (people who tagged on a date with <=4 such friends);
     # the A-and-B intersection + top-20 is combined in emit_crosscheck.
@@ -603,10 +615,12 @@ def emit_crosscheck(conn, outdir):
     rows16 = sorted(([p, ra[p], rb[p]] for p in ra.keys() & rb.keys()),
                     key=lambda r: (-(r[1] + r[2]), r[0]))[:20]
     n16 = dump("q16", rows16)
+    d = conn.execute(q10_text()).get_as_df()  # [eid, tagName, messageCount]
+    n10 = dump("q10", [[int(e), str(t), int(c)] for e, t, c in zip(d["eid"], d["tagName"], d["messageCount"])])
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
-          f"q11={n11}, q12={n12}, q13={n13}, q14={n14}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
+          f"q10={n10}, q11={n11}, q12={n12}, q13={n13}, q14={n14}, q16={n16}, q18={n18}, q19={n19}, q20={n20})")
 
 
 if __name__ == "__main__":
