@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use csv::ReaderBuilder;
-use rustychickpeas_core::{GraphBuilder, GraphSnapshot, ValueId};
+use rustychickpeas_core::{GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -71,6 +71,12 @@ fn pstr<'a>(g: &'a GraphSnapshot, n: u32, k: &str) -> Option<&'a str> {
         Some(ValueId::Str(s)) => g.resolve_string(s),
         _ => None,
     }
+}
+
+/// Find a Tag node by its name property.
+fn tag_by_name(g: &GraphSnapshot, name: &str) -> Option<u32> {
+    g.nodes_with_label("Tag")
+        .and_then(|tags| tags.iter().find(|&t| pstr(g, t, "name") == Some(name)))
 }
 
 /// Call `f` with the requested columns (in order) for every row across all
@@ -180,27 +186,73 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
     )?;
     stats.tags = tag.len() as u64;
 
-    // Persons (before Posts/Comments so hasCreator edges can resolve).
-    for_each_row(&dynamic.join("Person"), &["id"], |v| {
-        if let Ok(lid) = v[0].parse::<i64>() {
+    // Persons (before Posts/Comments so hasCreator edges can resolve). Store
+    // creationDate as epoch day (pday) and year*12+month (pym) for Q13.
+    for_each_row(&dynamic.join("Person"), &["creationDate", "id"], |v| {
+        if let Ok(lid) = v[1].parse::<i64>() {
             let id = next;
             next += 1;
             builder.add_node(Some(id), &["Person"]).unwrap();
+            if let Some((year, day)) = parse_date(v[0]) {
+                let month = v[0]
+                    .get(5..7)
+                    .and_then(|m| m.parse::<i64>().ok())
+                    .unwrap_or(1);
+                builder.set_prop_i64(id, "pday", day).unwrap();
+                builder.set_prop_i64(id, "pym", year * 12 + month).unwrap();
+            }
             person.insert(lid, id);
         }
     })?;
     stats.persons = person.len() as u64;
 
-    // Posts: node + properties + hasCreator (Person -> Post).
+    // Places (City/Country/Continent) + isPartOf hierarchy + Person isLocatedIn
+    // City, for Q11's "persons in a country" filter.
+    let mut place: HashMap<i64, u32> = HashMap::new();
+    for_each_row(&static_.join("Place"), &["id", "name", "type"], |v| {
+        if let Ok(lid) = v[0].parse::<i64>() {
+            let id = next;
+            next += 1;
+            builder.add_node(Some(id), &[v[2]]).unwrap(); // label = City/Country/Continent
+            builder.set_prop_str(id, "name", v[1]).unwrap();
+            place.insert(lid, id);
+        }
+    })?;
+    for_each_row(&static_.join("Place"), &["id", "PartOfPlaceId"], |v| {
+        let c = v[0].parse::<i64>().ok().and_then(|i| place.get(&i));
+        let parent = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
+        if let (Some(&c), Some(&p)) = (c, parent) {
+            builder.add_rel(c, p, "isPartOf").unwrap();
+            stats.edges += 1;
+        }
+    })?;
+    for_each_row(&dynamic.join("Person"), &["id", "LocationCityId"], |v| {
+        let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
+        let city = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
+        if let (Some(&p), Some(&city)) = (p, city) {
+            builder.add_rel(p, city, "isLocatedIn").unwrap();
+            stats.edges += 1;
+        }
+    })?;
+
+    // Posts: node + properties (incl. language for Q12) + hasCreator.
     for_each_row(
         &dynamic.join("Post"),
-        &["id", "CreatorPersonId", "creationDate", "content", "length"],
+        &[
+            "id",
+            "CreatorPersonId",
+            "creationDate",
+            "content",
+            "length",
+            "language",
+        ],
         |v| {
             if let Ok(lid) = v[0].parse::<i64>() {
                 let id = next;
                 next += 1;
                 builder.add_node(Some(id), &["Post"]).unwrap();
                 set_message_props(&mut builder, id, v[2], v[3], v[4]);
+                builder.set_prop_str(id, "lang", v[5]).unwrap();
                 post.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
                     builder.add_rel(creator, id, "hasCreator").unwrap();
@@ -269,6 +321,72 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             if let (Some(&p), Some(&t)) = (p, t) {
                 builder.add_rel(p, t, "hasInterest").unwrap();
                 stats.edges += 1;
+            }
+        },
+    )?;
+
+    // Comment -[replyOf]-> parent (Post or Comment). Separate pass so all
+    // message ids are resolvable regardless of file order.
+    for_each_row(
+        &dynamic.join("Comment"),
+        &["id", "ParentPostId", "ParentCommentId"],
+        |v| {
+            let c = v[0].parse::<i64>().ok().and_then(|i| comment.get(&i));
+            let parent = if !v[1].is_empty() {
+                v[1].parse::<i64>().ok().and_then(|i| post.get(&i))
+            } else {
+                v[2].parse::<i64>().ok().and_then(|i| comment.get(&i))
+            };
+            if let (Some(&c), Some(&p)) = (c, parent) {
+                builder.add_rel(c, p, "replyOf").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
+
+    // Person -[likes]-> Message (Post and Comment), for Q5/Q6.
+    for_each_row(
+        &dynamic.join("Person_likes_Post"),
+        &["PersonId", "PostId"],
+        |v| {
+            let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
+            let m = v[1].parse::<i64>().ok().and_then(|i| post.get(&i));
+            if let (Some(&p), Some(&m)) = (p, m) {
+                builder.add_rel(p, m, "likes").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
+    for_each_row(
+        &dynamic.join("Person_likes_Comment"),
+        &["PersonId", "CommentId"],
+        |v| {
+            let p = v[0].parse::<i64>().ok().and_then(|i| person.get(&i));
+            let m = v[1].parse::<i64>().ok().and_then(|i| comment.get(&i));
+            if let (Some(&p), Some(&m)) = (p, m) {
+                builder.add_rel(p, m, "likes").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
+
+    // Person -[knows]- Person, undirected (both directions), with the edge's
+    // creationDate stored as the "kd" property (epoch day) so Q11 can filter
+    // knows edges by date during traversal. Uses the index returned by add_rel
+    // to set the property without an O(n) endpoint lookup.
+    for_each_row(
+        &dynamic.join("Person_knows_Person"),
+        &["creationDate", "Person1Id", "Person2Id"],
+        |v| {
+            let day = parse_date(v[0]).map(|(_, d)| d).unwrap_or(0);
+            let a = v[1].parse::<i64>().ok().and_then(|i| person.get(&i));
+            let b = v[2].parse::<i64>().ok().and_then(|i| person.get(&i));
+            if let (Some(&a), Some(&b)) = (a, b) {
+                let i1 = builder.add_rel(a, b, "knows").unwrap();
+                builder.set_rel_props_by_index(i1, &[("kd", PropertyValue::Integer(day))]);
+                let i2 = builder.add_rel(b, a, "knows").unwrap();
+                builder.set_rel_props_by_index(i2, &[("kd", PropertyValue::Integer(day))]);
+                stats.edges += 2;
             }
         },
     )?;
@@ -380,6 +498,379 @@ fn q2_tag_evolution(
         })
         .collect();
     rows.sort_by(|a, b| b.3.cmp(&a.3).then(a.0.cmp(&b.0)));
+    rows.truncate(100);
+    rows
+}
+
+/// Q7 — Related topics. For a given tag, look at comments replying to messages
+/// carrying that tag, and (for comments that do not themselves carry the tag)
+/// count distinct such comments per *other* tag they carry. Cypher: bi-7.cypher.
+fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(String, usize)> {
+    let target = g
+        .nodes_with_label("Tag")
+        .and_then(|tags| tags.iter().find(|&t| pstr(g, t, "name") == Some(tag_name)));
+    let Some(target) = target else {
+        return Vec::new();
+    };
+
+    let mut related: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for msg in g.in_neighbors_by_type(target, &["hasTag"]) {
+        for comment in g.in_neighbors_by_type(msg, &["replyOf"]) {
+            let ctags = g.out_neighbors_by_type(comment, &["hasTag"]);
+            if !ctags.contains(&target) {
+                for &rt in &ctags {
+                    related.entry(rt).or_default().insert(comment);
+                }
+            }
+        }
+    }
+    let mut rows: Vec<(String, usize)> = related
+        .into_iter()
+        .map(|(rt, cs)| (pstr(g, rt, "name").unwrap_or("").to_string(), cs.len()))
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows.truncate(100);
+    rows
+}
+
+/// Q12 — How many people have a given number of messages. Per person, count
+/// messages (with content, length < threshold, after a date) whose root Post's
+/// language is in a given set; then histogram persons by that count (including
+/// the zero bucket). Cypher: bi-12.cypher.
+fn q12_message_counts(
+    g: &GraphSnapshot,
+    min_day: i64,
+    len_thr: i64,
+    langs: &[&str],
+) -> Vec<(u64, u64)> {
+    let posts = g.nodes_with_label("Post");
+    // Root-post language: the message itself if it is a Post, else walk replyOf
+    // up to the root Post (depth-capped against pathological chains).
+    let root_lang = |start: u32| -> Option<&str> {
+        let mut n = start;
+        for _ in 0..64 {
+            if posts.is_some_and(|p| p.contains(n)) {
+                return pstr(g, n, "lang");
+            }
+            n = *g.out_neighbors_by_type(n, &["replyOf"]).first()?;
+        }
+        None
+    };
+
+    let mut per_person: HashMap<u32, u64> = HashMap::new();
+    for label in ["Post", "Comment"] {
+        if let Some(nodes) = g.nodes_with_label(label) {
+            for msg in nodes.iter() {
+                if pi64(g, msg, "day") <= min_day
+                    || !pbool(g, msg, "content")
+                    || pi64(g, msg, "len") >= len_thr
+                {
+                    continue;
+                }
+                if !matches!(root_lang(msg), Some(l) if langs.contains(&l)) {
+                    continue;
+                }
+                for creator in g.in_neighbors_by_type(msg, &["hasCreator"]) {
+                    *per_person.entry(creator).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    let total_persons = g.nodes_with_label("Person").map(|p| p.len()).unwrap_or(0) as u64;
+    let mut hist: HashMap<u64, u64> = HashMap::new();
+    for &c in per_person.values() {
+        *hist.entry(c).or_insert(0) += 1;
+    }
+    hist.insert(0, total_persons.saturating_sub(per_person.len() as u64));
+    let mut rows: Vec<(u64, u64)> = hist.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
+    rows
+}
+
+/// Q5 — Most active posters of a given topic. For a tag, score each creator of
+/// tagged messages by 1*messages + 2*replies + 10*likes-received, top 100 by
+/// score. Returns (person, messages, replies, likes, score). Cypher: bi-5.cypher.
+fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64, u64, u64, u64)> {
+    let Some(target) = tag_by_name(g, tag_name) else {
+        return Vec::new();
+    };
+    let mut agg: HashMap<u32, (u64, u64, u64)> = HashMap::new(); // person -> (msgs, replies, likes)
+    for message in g.in_neighbors_by_type(target, &["hasTag"]) {
+        let likes = g.in_neighbors_by_type(message, &["likes"]).len() as u64;
+        let replies = g.in_neighbors_by_type(message, &["replyOf"]).len() as u64;
+        for person in g.in_neighbors_by_type(message, &["hasCreator"]) {
+            let e = agg.entry(person).or_insert((0, 0, 0));
+            e.0 += 1;
+            e.1 += replies;
+            e.2 += likes;
+        }
+    }
+    let mut rows: Vec<(u32, u64, u64, u64, u64)> = agg
+        .into_iter()
+        .map(|(p, (m, r, l))| (p, m, r, l, m + 2 * r + 10 * l))
+        .collect();
+    rows.sort_by(|a, b| b.4.cmp(&a.4).then(a.0.cmp(&b.0)));
+    rows.truncate(100);
+    rows
+}
+
+/// Q6 — Most authoritative users on a topic. For each creator of tagged messages
+/// (person1), find who liked those messages (person2), and sum the likes those
+/// person2s received on their own messages. Cypher: bi-6.cypher.
+fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64)> {
+    let Some(target) = tag_by_name(g, tag_name) else {
+        return Vec::new();
+    };
+    let mut p1_to_p2: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for message1 in g.in_neighbors_by_type(target, &["hasTag"]) {
+        let likers = g.in_neighbors_by_type(message1, &["likes"]);
+        if likers.is_empty() {
+            continue;
+        }
+        for person1 in g.in_neighbors_by_type(message1, &["hasCreator"]) {
+            p1_to_p2
+                .entry(person1)
+                .or_default()
+                .extend(likers.iter().copied());
+        }
+    }
+    let mut rows: Vec<(u32, u64)> = p1_to_p2
+        .into_iter()
+        .map(|(p1, p2set)| {
+            let score: u64 = p2set
+                .iter()
+                .flat_map(|&p2| g.out_neighbors_by_type(p2, &["hasCreator"]))
+                .map(|m2| g.in_neighbors_by_type(m2, &["likes"]).len() as u64)
+                .sum();
+            (p1, score)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows.truncate(100);
+    rows
+}
+
+/// Q8 — Central Person for a Tag. Score persons by interest in the tag (×100) +
+/// messages they made with the tag in a date window, then add their friends'
+/// scores. Returns (person, score, friendsScore), top 100 by score+friendsScore.
+/// Cypher: bi-8.cypher.
+fn q8_central_person(
+    g: &GraphSnapshot,
+    tag_name: &str,
+    start_day: i64,
+    end_day: i64,
+) -> Vec<(u32, i64, i64)> {
+    let Some(tag) = tag_by_name(g, tag_name) else {
+        return Vec::new();
+    };
+    let interested: HashSet<u32> = g
+        .in_neighbors_by_type(tag, &["hasInterest"])
+        .into_iter()
+        .collect();
+    let mut msgcount: HashMap<u32, i64> = HashMap::new();
+    for msg in g.in_neighbors_by_type(tag, &["hasTag"]) {
+        let day = pi64(g, msg, "day");
+        if day > start_day && day < end_day {
+            for creator in g.in_neighbors_by_type(msg, &["hasCreator"]) {
+                *msgcount.entry(creator).or_insert(0) += 1;
+            }
+        }
+    }
+    // Per-person base score (the same formula the friend-score uses).
+    let mut score: HashMap<u32, i64> = HashMap::new();
+    for &p in &interested {
+        *score.entry(p).or_insert(0) += 100;
+    }
+    for (&p, &c) in &msgcount {
+        *score.entry(p).or_insert(0) += c;
+    }
+    // friendsScore = sum of friends' base scores (non-candidates contribute 0).
+    let mut rows: Vec<(u32, i64, i64)> = score
+        .iter()
+        .map(|(&p, &s)| {
+            let fs: i64 = g
+                .out_neighbors_by_type(p, &["knows"])
+                .iter()
+                .map(|f| score.get(f).copied().unwrap_or(0))
+                .sum();
+            (p, s, fs)
+        })
+        .collect();
+    rows.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)).then(a.0.cmp(&b.0)));
+    rows.truncate(100);
+    rows
+}
+
+/// Q11 — Friend triangles. Count triangles in the `knows` graph among persons of
+/// a given country where every edge was created within a date window. This is
+/// the query that motivated the core `out_edges` API: it reads each knows edge's
+/// `creationDate` (`kd`) during traversal via the edge's CSR position.
+/// Cypher: bi-11.cypher.
+fn q11_friend_triangles(
+    g: &GraphSnapshot,
+    country_name: &str,
+    start_day: i64,
+    end_day: i64,
+) -> u64 {
+    let country = g.nodes_with_label("Country").and_then(|cs| {
+        cs.iter()
+            .find(|&c| pstr(g, c, "name") == Some(country_name))
+    });
+    let Some(country) = country else {
+        return 0;
+    };
+    // Persons located in a city of this country.
+    let mut in_country: HashSet<u32> = HashSet::new();
+    for city in g.in_neighbors_by_type(country, &["isPartOf"]) {
+        for p in g.in_neighbors_by_type(city, &["isLocatedIn"]) {
+            in_country.insert(p);
+        }
+    }
+    // Date-filtered knows adjacency among in-country persons, reading each edge's
+    // creationDate through its CSR position.
+    let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for &a in &in_country {
+        for e in g.out_edges_by_type(a, &["knows"]) {
+            if !in_country.contains(&e.neighbor) {
+                continue;
+            }
+            let kd = match g.relationship_property(e.pos, "kd") {
+                Some(ValueId::I64(d)) => d,
+                _ => continue,
+            };
+            if kd >= start_day && kd <= end_day {
+                adj.entry(a).or_default().insert(e.neighbor);
+            }
+        }
+    }
+    // Count triangles a<b<c (by internal id) with all three edges present.
+    let mut count: u64 = 0;
+    for (&a, nbrs_a) in &adj {
+        for &b in nbrs_a {
+            if b <= a {
+                continue;
+            }
+            if let Some(nbrs_b) = adj.get(&b) {
+                for &c in nbrs_b {
+                    if c > b && nbrs_a.contains(&c) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    count
+}
+
+/// Q9 — Top thread initiators. For each person, count their posts in a date
+/// window (threads) and the messages in those posts' reply trees, also in the
+/// window. Cypher: bi-9.cypher.
+fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i64) -> Vec<(u32, u64, u64)> {
+    let mut per_person: HashMap<u32, (u64, u64)> = HashMap::new(); // (threads, messages)
+    if let Some(posts) = g.nodes_with_label("Post") {
+        for post in posts.iter() {
+            let pd = pi64(g, post, "day");
+            if pd < start_day || pd > end_day {
+                continue;
+            }
+            let Some(&creator) = g.in_neighbors_by_type(post, &["hasCreator"]).first() else {
+                continue;
+            };
+            // Walk the post's reply tree; replies are created after their parent,
+            // so prune any node past end_day (its whole subtree is later).
+            let mut msgs = 0u64;
+            let mut stack = vec![post];
+            while let Some(n) = stack.pop() {
+                let d = pi64(g, n, "day");
+                if d > end_day {
+                    continue;
+                }
+                if d >= start_day {
+                    msgs += 1;
+                }
+                stack.extend(g.in_neighbors_by_type(n, &["replyOf"]));
+            }
+            let e = per_person.entry(creator).or_insert((0, 0));
+            e.0 += 1;
+            e.1 += msgs;
+        }
+    }
+    let mut rows: Vec<(u32, u64, u64)> = per_person
+        .into_iter()
+        .map(|(p, (t, m))| (p, t, m))
+        .collect();
+    rows.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+    rows.truncate(100);
+    rows
+}
+
+/// Q13 — Zombies in a country. Zombies are low-activity persons (created before
+/// endDate with under one message per month). Score each by the share of likes
+/// on their messages that come from other zombies. Cypher: bi-13.cypher.
+fn q13_zombies(
+    g: &GraphSnapshot,
+    country_name: &str,
+    end_day: i64,
+    end_ym: i64,
+) -> Vec<(u32, u64, u64)> {
+    let country = g.nodes_with_label("Country").and_then(|cs| {
+        cs.iter()
+            .find(|&c| pstr(g, c, "name") == Some(country_name))
+    });
+    let Some(country) = country else {
+        return Vec::new();
+    };
+    let mut zombies: HashSet<u32> = HashSet::new();
+    for city in g.in_neighbors_by_type(country, &["isPartOf"]) {
+        for p in g.in_neighbors_by_type(city, &["isLocatedIn"]) {
+            if pi64(g, p, "pday") >= end_day {
+                continue;
+            }
+            let mcount = g
+                .out_neighbors_by_type(p, &["hasCreator"])
+                .iter()
+                .filter(|&&m| pi64(g, m, "day") < end_day)
+                .count() as i64;
+            let months = end_ym - pi64(g, p, "pym") + 1;
+            if months > 0 && mcount < months {
+                zombies.insert(p);
+            }
+        }
+    }
+    let mut rows: Vec<(u32, u64, u64)> = zombies
+        .iter()
+        .map(|&z| {
+            let mut zlc = 0u64;
+            let mut tlc = 0u64;
+            for m in g.out_neighbors_by_type(z, &["hasCreator"]) {
+                for liker in g.in_neighbors_by_type(m, &["likes"]) {
+                    if pi64(g, liker, "pday") < end_day {
+                        tlc += 1;
+                    }
+                    if zombies.contains(&liker) {
+                        zlc += 1;
+                    }
+                }
+            }
+            (z, zlc, tlc)
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        let sa = if a.2 == 0 {
+            0.0
+        } else {
+            a.1 as f64 / a.2 as f64
+        };
+        let sb = if b.2 == 0 {
+            0.0
+        } else {
+            b.1 as f64 / b.2 as f64
+        };
+        sb.partial_cmp(&sa)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
     rows.truncate(100);
     rows
 }
@@ -503,6 +994,67 @@ fn main() -> Result<()> {
     for (name, n1, n2, diff) in q2_rows.iter().take(3) {
         println!("     {name:<30} w1={n1} w2={n2} diff={diff}");
     }
+    let q7_rows = q7_related_topics(&graph, "Enrique_Iglesias");
+    println!(
+        "  Q7 related topics (Enrique_Iglesias): {} related tags",
+        q7_rows.len()
+    );
+    for (name, c) in q7_rows.iter().take(3) {
+        println!("     {name:<30} comments={c}");
+    }
+    let q12_min = days_from_civil(2010, 7, 22);
+    let q12_rows = q12_message_counts(&graph, q12_min, 20, &["ar", "hu"]);
+    println!(
+        "  Q12 message counts (len<20, after 2010-07-22, lang ar/hu): {} buckets",
+        q12_rows.len()
+    );
+    for (mc, pc) in q12_rows.iter().take(3) {
+        println!("     messageCount={mc} -> persons={pc}");
+    }
+    let q5_rows = q5_active_posters(&graph, "Abbas_I_of_Persia");
+    println!(
+        "  Q5 active posters (Abbas_I_of_Persia): {} persons",
+        q5_rows.len()
+    );
+    for (_p, m, r, l, score) in q5_rows.iter().take(3) {
+        println!("     msgs={m} replies={r} likes={l} score={score}");
+    }
+    let q6_rows = q6_authoritative(&graph, "Arnold_Schwarzenegger");
+    println!(
+        "  Q6 authoritative users (Arnold_Schwarzenegger): {} persons",
+        q6_rows.len()
+    );
+    for (_p, score) in q6_rows.iter().take(3) {
+        println!("     authorityScore={score}");
+    }
+    let q8_start = days_from_civil(2011, 7, 20);
+    let q8_end = days_from_civil(2011, 7, 25);
+    let q8_rows = q8_central_person(&graph, "Che_Guevara", q8_start, q8_end);
+    println!(
+        "  Q8 central person (Che_Guevara, 2011-07-20..25): {} persons",
+        q8_rows.len()
+    );
+    for (_p, s, fs) in q8_rows.iter().take(3) {
+        println!("     score={s} friendsScore={fs}");
+    }
+    let q11_start = days_from_civil(2012, 9, 29);
+    let q11_end = days_from_civil(2013, 1, 1);
+    let q11_count = q11_friend_triangles(&graph, "India", q11_start, q11_end);
+    println!("  Q11 friend triangles (India, 2012-09-29..2013-01-01): {q11_count} triangles");
+    let q9_start = days_from_civil(2011, 10, 1);
+    let q9_end = days_from_civil(2011, 10, 15);
+    let q9_rows = q9_thread_initiators(&graph, q9_start, q9_end);
+    println!(
+        "  Q9 thread initiators (2011-10-01..15): {} persons",
+        q9_rows.len()
+    );
+    let q13_end = days_from_civil(2013, 1, 1);
+    let q13_ym = 2013 * 12 + 1;
+    let q13_rows = q13_zombies(&graph, "France", q13_end, q13_ym);
+    println!(
+        "  Q13 zombies (France, before 2013-01-01): {} zombies",
+        q13_rows.len()
+    );
     println!();
 
     let runs = 5;
@@ -512,6 +1064,30 @@ fn main() -> Result<()> {
     });
     time_query("Q2 tag evolution", runs, || {
         q2_tag_evolution(&graph, q2_date, "MusicalArtist").len()
+    });
+    time_query("Q7 related topics", runs, || {
+        q7_related_topics(&graph, "Enrique_Iglesias").len()
+    });
+    time_query("Q12 message counts", runs, || {
+        q12_message_counts(&graph, q12_min, 20, &["ar", "hu"]).len()
+    });
+    time_query("Q5 active posters", runs, || {
+        q5_active_posters(&graph, "Abbas_I_of_Persia").len()
+    });
+    time_query("Q6 authoritative users", runs, || {
+        q6_authoritative(&graph, "Arnold_Schwarzenegger").len()
+    });
+    time_query("Q8 central person", runs, || {
+        q8_central_person(&graph, "Che_Guevara", q8_start, q8_end).len()
+    });
+    time_query("Q11 friend triangles", runs, || {
+        q11_friend_triangles(&graph, "India", q11_start, q11_end) as usize
+    });
+    time_query("Q9 thread initiators", runs, || {
+        q9_thread_initiators(&graph, q9_start, q9_end).len()
+    });
+    time_query("Q13 zombies", runs, || {
+        q13_zombies(&graph, "France", q13_end, q13_ym).len()
     });
     // Simplified patterns (parity with the synthetic benchmark).
     time_query("BI1 tag co-evolution (simpl.)", runs, || {
