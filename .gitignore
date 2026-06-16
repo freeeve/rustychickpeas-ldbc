@@ -3,3 +3,5 @@
 .venv-kuzu/
 kuzu/import-*
 kuzu/db-*
+__pycache__/
+*.pyc
