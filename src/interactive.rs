@@ -794,7 +794,14 @@ pub fn run() -> Result<()> {
             Some((fname, lname, _pday)) => format!("[[{},{}]]", jstr(&fname), jstr(&lname)),
             None => "[]".to_string(),
         });
-        println!("emitted IC cross-check JSON (ic1-13, is1-7 sans is4) to {dir}");
+        // IC14: weighted shortest-path cost (path node ids aren't comparable
+        // across engines, so compare the cost rounded to 6 dp). (task 054)
+        let interaction = build_knows_interaction(&graph);
+        emit_json(&dir, "ic14.rust.json", match ic14_weighted_path(&graph, seeds.person, seeds.person_b, &interaction) {
+            Some((_, c)) => format!("[[{c:.6}]]"),
+            None => "[]".to_string(),
+        });
+        println!("emitted IC cross-check JSON (ic1-14, is1-7 sans is4) to {dir}");
         return Ok(());
     }
 

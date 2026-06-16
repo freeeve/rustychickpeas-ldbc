@@ -157,8 +157,8 @@ single-threaded — an asymmetry to settle before quoting numbers).
 The seed-anchored Interactive workload runs over the *same* SF1 snapshot (no
 extra download): `cargo run --release --bin ic` on our side, `kuzu/run_ic.py
 sf1` against the existing `db-sf1-faithful`, both using the seeds `pick_seeds`
-chose. **All 19 cross-checkable queries are value-identical** across engines
-(`kuzu/compare.py` over ic1–ic13 + is1/2/3/5/6/7 → ALL PASS, incl. 848 friend
+chose. **All 20 cross-checkable queries are value-identical** across engines
+(`kuzu/compare.py` over ic1–ic14 + is1/2/3/5/6/7 → ALL PASS, incl. 848 friend
 rows).
 
 | IC query | rustychickpeas (ms) | Kùzu (ms) | winner |
@@ -178,12 +178,12 @@ rows).
 (IC1/IC8/IC11/IS1 also pass and favour rustychickpeas; full table in
 `results/ic-sf1.txt`.) The interactive shape is where the CSR/RoaringBitmap
 adjacency shines — multi-hop traversals and sub-millisecond short reads; Kùzu's
-native path engine only ties the single IC13 shortest path. The loader-backed
-half (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1) is cross-checked against a faithful
-import extended with the matching edges/properties — additive, so BI stays
-20/20 identical on the rebuilt `db-sf1-faithful`. Not cross-checked: IC14
-(interaction-weight path) and IS4 (content text, kept out of the shared faithful
-import). Full numbers: `results/ic-sf1.txt`.
+native `(W)SHORTEST` path engine wins only the two shortest-path queries (IC13,
+IC14). The loader-backed half (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1, IC14) is
+cross-checked against a faithful import extended with the matching
+edges/properties — additive, so BI stays 20/20 identical on the rebuilt
+`db-sf1-faithful`. Only IS4 (content text, kept out of the shared faithful import
+to keep BI loads lean) is not cross-checked. Full numbers: `results/ic-sf1.txt`.
 
 ## Roadmap
 

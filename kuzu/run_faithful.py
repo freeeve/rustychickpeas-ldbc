@@ -232,6 +232,16 @@ def preprocess():
                 w.writerow([a, b, wt])
                 w.writerow([b, a, wt])  # both directions (knows is undirected)
 
+    # IC14: every knows edge weighted 1/(interactions+1) (cf. rust IC14).
+    with open(f"{IMPORT}/ic14weight.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to", "w"])
+        for (a, b) in knows_pairs:
+            k = (a, b) if a < b else (b, a)
+            wt = 1.0 / (inter.get(k, 0) + 1)
+            w.writerow([a, b, wt])
+            w.writerow([b, a, wt])
+
     # studyAt -> per-person (university, classYear); cohort weight = min|dy|+1.
     study = {}
     for (p, u, cy) in rows("dynamic/Person_studyAt_University", ["PersonId", "UniversityId", "classYear"]):
@@ -363,6 +373,7 @@ def load():
         "CREATE REL TABLE msgCountry(FROM Message TO Place)",
         "CREATE REL TABLE orgPlace(FROM Organisation TO Place)",
         "CREATE REL TABLE isSubclassOf(FROM TagClass TO TagClass)",
+        "CREATE REL TABLE ic14weight(FROM Person TO Person, w DOUBLE)",
     ]
     for stmt in ddl:
         conn.execute(stmt)
@@ -380,7 +391,7 @@ def load():
         ("hasMember", "forum_hasmember"), ("containerOf", "forum_containerof"),
         ("q15weight", "q15weight"),
         ("msgCountry", "message_country"), ("orgPlace", "org_place"),
-        ("isSubclassOf", "tagclass_subclass"),
+        ("isSubclassOf", "tagclass_subclass"), ("ic14weight", "ic14weight"),
     ]
     for tbl, f in copies:
         conn.execute(f"COPY {tbl} FROM '{IMPORT}/{f}.csv' (HEADER=true, DELIM='|')")

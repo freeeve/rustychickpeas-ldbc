@@ -169,6 +169,10 @@ def main():
                     RETURN f.id AS pid, count(DISTINCT c) AS cnt ORDER BY cnt DESC, pid ASC LIMIT 20""",
         # IS1: the seed's profile (first/last name).
         "is1": f"""MATCH (p:Person {{id:{person}}}) RETURN p.fname AS fn, p.lname AS ln""",
+        # IC14: weighted shortest-path cost over the 1/(interactions+1) knows graph.
+        "ic14": f"""MATCH (a:Person {{id:{person}}}), (b:Person {{id:{person_b}}}),
+                    p = (a)-[e:ic14weight * WSHORTEST(w)]->(b)
+                    RETURN cost(e) AS dist""",
     }
 
     # Map each query's rows to the comparable JSON the rust side emits.
@@ -187,6 +191,8 @@ def main():
             return [[r[0], r[1]] for r in rows]        # 2-col rows
         if name == "ic11":
             return [[r[0], r[1], r[2]] for r in rows]  # [pid, cname, wf]
+        if name == "ic14":
+            return [[round(r[0], 6)] for r in rows]    # [cost] (fp, 6 dp)
         return [[r[0]] for r in rows]                  # ic13 [hops], is3 [fid], is5 [cid]
 
     def run(q):
