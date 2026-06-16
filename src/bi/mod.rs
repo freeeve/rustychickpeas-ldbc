@@ -427,7 +427,7 @@ pub fn run() -> Result<()> {
     );
     let (reach, ecc) = knows_reachability(&graph);
     println!(
-        "  dijkstra knows-reachability from person[0]: {reach} reachable, eccentricity {ecc} hops"
+        "  bounded-BFS knows-reachability from person[0]: {reach} reachable, eccentricity {ecc} hops"
     );
     let interaction = build_interaction_map(&graph);
     let q19_cities = place_by_lid(&graph, 669).zip(place_by_lid(&graph, 648));
@@ -496,7 +496,7 @@ pub fn run() -> Result<()> {
     time_query("Q13 zombies", runs, || {
         q13_zombies(&graph, "France", q13_end, q13_ym).len()
     });
-    time_query("dijkstra knows reachability", runs, || {
+    time_query("bounded-BFS knows reachability", runs, || {
         knows_reachability(&graph).0
     });
     if let Some((c1, c2)) = q19_cities {

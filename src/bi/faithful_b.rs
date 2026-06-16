@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
 
+use super::col_i64;
 use crate::props::*;
 
 /// Q13 — Zombies in a country. Zombies are low-activity persons (created before
@@ -57,6 +58,7 @@ pub(crate) fn q13_zombies(
             (z, zlc, tlc)
         })
         .collect();
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     rows.sort_by(|a, b| {
         let sa = if a.2 == 0 {
             0.0
@@ -72,17 +74,16 @@ pub(crate) fn q13_zombies(
             .unwrap_or(std::cmp::Ordering::Equal)
             // Tiebreak on the LDBC id (official "ORDER BY person.id"), so the
             // top-100 cut matches reference engines at like-ratio ties.
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
 }
 
-/// End-to-end validation of the core `dijkstra` primitive on the real `knows`
-/// graph: shortest-hop reachability from one person (unit weights), returning
-/// (persons reachable, eccentricity in hops). Not a faithful BI query — Q19/Q20
-/// would need a derived interaction-weight graph — but it exercises dijkstra +
-/// path reconstruction at SF scale.
+/// End-to-end validation of the core `bfs_distances` primitive on the real
+/// `knows` graph: shortest-hop reachability from one person, returning (persons
+/// reachable, eccentricity in hops). Not a faithful BI query — Q19/Q20 would need
+/// a derived interaction-weight graph — but it exercises bounded BFS at SF scale.
 pub(crate) fn knows_reachability(g: &GraphSnapshot) -> (usize, u32) {
     let persons: Vec<u32> = g
         .nodes_with_label("Person")
@@ -91,12 +92,13 @@ pub(crate) fn knows_reachability(g: &GraphSnapshot) -> (usize, u32) {
     let Some(&source) = persons.first() else {
         return (0, 0);
     };
-    let sp = g.dijkstra(source, Direction::Both, &["knows"], None, |_, _| 1.0);
-    let reachable = persons.iter().filter(|&&p| sp.reached(p)).count();
+    let dist = g.bfs_distances(source, Direction::Both, &["knows"], None);
+    let reachable = persons.iter().filter(|&&p| dist.contains_key(&p)).count();
     let ecc = persons
         .iter()
-        .filter_map(|&p| sp.distance(p))
-        .fold(0.0_f64, f64::max) as u32;
+        .filter_map(|&p| dist.get(&p).copied())
+        .max()
+        .unwrap_or(0);
     (reachable, ecc)
 }
 
@@ -179,12 +181,13 @@ pub(crate) fn q19_interaction_path(
             a
         },
     );
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     results.sort_by(|a, b| {
         a.2.partial_cmp(&b.2)
             .unwrap_or(std::cmp::Ordering::Equal)
             // Tiebreak on LDBC ids (official ORDER BY) so the top-20 cut matches Kùzu.
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
-            .then(pi64(g, a.1, "plid").cmp(&pi64(g, b.1, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(col_i64(plid_col, a.1).cmp(&col_i64(plid_col, b.1)))
     });
     results.truncate(20);
     results
@@ -206,12 +209,15 @@ pub(crate) fn person_by_plid(g: &GraphSnapshot, plid: i64) -> Option<u32> {
 /// their classYear edge property.
 pub(crate) fn build_studyat(g: &GraphSnapshot) -> HashMap<u32, Vec<(u32, i64)>> {
     let mut m: HashMap<u32, Vec<(u32, i64)>> = HashMap::new();
+    // Hoist the edge `cy` (classYear) column once instead of resolving the key
+    // per studyAt edge.
+    let cy_col = g.property_key_from_str("cy").and_then(|id| g.rel_columns.get(&id));
     if let Some(persons) = g.nodes_with_label("Person") {
         for p in persons.iter() {
             let recs: Vec<(u32, i64)> = g
                 .relationships(p, Direction::Outgoing, &["studyAt"])
                 .map(|r| {
-                    let cy = match g.relationship_property(r.pos, "cy") {
+                    let cy = match cy_col.and_then(|c| c.get(r.pos)) {
                         Some(ValueId::I64(y)) => y,
                         _ => 0,
                     };
@@ -290,11 +296,12 @@ pub(crate) fn q20_recruitment(
             }
         }
     }
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     results.sort_by(|a, b| {
         a.1.partial_cmp(&b.1)
             .unwrap_or(std::cmp::Ordering::Equal)
             // Tiebreak on the LDBC id (official ORDER BY) so the top-20 matches Kùzu.
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
     });
     results.truncate(20);
     results
@@ -331,10 +338,11 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
         .into_iter()
         .map(|((p1, p2), ms)| (p1, p2, ms.len() as u64))
         .collect();
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
-            .then(pi64(g, a.1, "plid").cmp(&pi64(g, b.1, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(col_i64(plid_col, a.1).cmp(&col_i64(plid_col, b.1)))
     });
     rows.truncate(20);
     rows
@@ -352,6 +360,8 @@ pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name
     let (Some(country1), Some(country2)) = (country(c1_name), country(c2_name)) else {
         return Vec::new();
     };
+    // Hoist the plid column once for the candidate tiebreaks below.
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     // persons whose message `p` replied to (via p's comments).
     let commented_on = |p: u32| -> HashSet<u32> {
         let mut s = HashSet::new();
@@ -416,7 +426,7 @@ pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name
                 if lc_c2[&p2].contains(&p1) {
                     score += 1;
                 }
-                let (pa, pb) = (pi64(g, p1, "plid"), pi64(g, p2, "plid"));
+                let (pa, pb) = (col_i64(plid_col, p1), col_i64(plid_col, p2));
                 let cand = (score, pa, pb, p1, p2);
                 best = Some(match best {
                     Some(b) if (b.0, -b.1, -b.2) >= (score, -pa, -pb) => b,
@@ -430,8 +440,8 @@ pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name
     }
     rows.sort_by(|a, b| {
         b.3.cmp(&a.3)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
-            .then(pi64(g, a.1, "plid").cmp(&pi64(g, b.1, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(col_i64(plid_col, a.1).cmp(&col_i64(plid_col, b.1)))
     });
     rows.truncate(100);
     rows

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
+use super::col_i64;
 use super::faithful_b::person_by_plid;
 use crate::props::*;
 
@@ -48,10 +49,11 @@ pub(crate) fn q16_fake_news(
         .iter()
         .filter_map(|(&p, &ca)| rb.get(&p).map(|&cb| (p, ca, cb)))
         .collect();
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
     });
     rows.truncate(20);
     rows
@@ -72,25 +74,9 @@ pub(crate) fn q10_experts(
     let Some(start) = person_by_plid(g, start_plid) else {
         return Vec::new();
     };
-    // BFS shortest knows-distance up to max_dist.
-    let mut dist: HashMap<u32, u32> = HashMap::new();
-    dist.insert(start, 0);
-    let mut frontier = vec![start];
-    for d in 1..=max_dist {
-        let mut next = Vec::new();
-        for &n in &frontier {
-            for f in g.neighbors_by_type(n, Direction::Outgoing, &["knows"]) {
-                if !dist.contains_key(&f) {
-                    dist.insert(f, d);
-                    next.push(f);
-                }
-            }
-        }
-        frontier = next;
-        if frontier.is_empty() {
-            break;
-        }
-    }
+    // Shortest knows hop-distance from start, bounded to max_dist, via the core
+    // bounded-BFS primitive.
+    let dist = g.bfs_distances(start, Direction::Outgoing, &["knows"], Some(max_dist));
     let country = g
         .nodes_with_label("Country")
         .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)));
@@ -128,10 +114,11 @@ pub(crate) fn q10_experts(
         .into_iter()
         .map(|((e, t), msgs)| (e, pstr(g, t, "name").unwrap_or("").to_string(), msgs.len() as i64))
         .collect();
+    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(a.1.cmp(&b.1))
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
@@ -323,68 +310,44 @@ pub(crate) fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: 
         (Some(t_reply), Some(t_creator), Some(t_container), Some(comments)) => {
             let creator = |m: u32| g.neighbors_by_type(m, Direction::Incoming, t_creator).next();
             let is_post = |n: u32| posts.is_some_and(|p| p.contains(n));
-            let root_of = |start: u32, cache: &mut FastMap<u32, u32>| -> u32 {
-                let mut path = Vec::new();
-                let mut n = start;
-                loop {
-                    if let Some(&r) = cache.get(&n) {
-                        for p in path {
-                            cache.insert(p, r);
-                        }
-                        return r;
+            // Forest-root array for replyOf, built once; indexed lock-free in the
+            // parallel fold below, so it replaces the per-worker root cache with no
+            // per-node synchronization.
+            let reply_roots = g.chain_roots(Direction::Outgoing, t_reply);
+            comments.par_fold(
+                FastMap::<(u32, u32), f64>::new,
+                |mut acc, c| {
+                    let Some(parent) = g.neighbors_by_type(c, Direction::Outgoing, t_reply).next()
+                    else {
+                        return acc;
+                    };
+                    let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
+                        return acc;
+                    };
+                    if cc == pc {
+                        return acc;
                     }
-                    match g.neighbors_by_type(n, Direction::Outgoing, t_reply).next() {
-                        Some(parent) => {
-                            path.push(n);
-                            n = parent;
-                        }
-                        None => {
-                            for p in &path {
-                                cache.insert(*p, n);
-                            }
-                            cache.insert(n, n);
-                            return n;
-                        }
+                    let root = reply_roots[c as usize];
+                    let Some(forum) = g
+                        .neighbors_by_type(root, Direction::Incoming, t_container)
+                        .next()
+                    else {
+                        return acc;
+                    };
+                    let fday = pi64(g, forum, "fday");
+                    if fday >= start_day && fday <= end_day {
+                        let contrib = if is_post(parent) { 1.0 } else { 0.5 };
+                        *acc.entry((cc.min(pc), cc.max(pc))).or_insert(0.0) += contrib;
                     }
-                }
-            };
-            comments
-                .par_fold(
-                    || (FastMap::<(u32, u32), f64>::new(), FastMap::<u32, u32>::new()),
-                    |mut acc, c| {
-                        let Some(parent) =
-                            g.neighbors_by_type(c, Direction::Outgoing, t_reply).next()
-                        else {
-                            return acc;
-                        };
-                        let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
-                            return acc;
-                        };
-                        if cc == pc {
-                            return acc;
-                        }
-                        let root = root_of(c, &mut acc.1);
-                        let Some(forum) = g
-                            .neighbors_by_type(root, Direction::Incoming, t_container)
-                            .next()
-                        else {
-                            return acc;
-                        };
-                        let fday = pi64(g, forum, "fday");
-                        if fday >= start_day && fday <= end_day {
-                            let contrib = if is_post(parent) { 1.0 } else { 0.5 };
-                            *acc.0.entry((cc.min(pc), cc.max(pc))).or_insert(0.0) += contrib;
-                        }
-                        acc
-                    },
-                    |mut a: (FastMap<(u32, u32), f64>, FastMap<u32, u32>), b| {
-                        for (k, v) in b.0 {
-                            *a.0.entry(k).or_insert(0.0) += v;
-                        }
-                        a
-                    },
-                )
-                .0
+                    acc
+                },
+                |mut a: FastMap<(u32, u32), f64>, b| {
+                    for (k, v) in b {
+                        *a.entry(k).or_insert(0.0) += v;
+                    }
+                    a
+                },
+            )
         }
         _ => FastMap::new(),
     };
@@ -409,27 +372,13 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
         g.neighbors_by_type(m, Direction::Incoming, &["hasCreator"])
             .next()
     };
-    let mut root_cache: HashMap<u32, u32> = HashMap::new();
-    let forum_of = |g: &GraphSnapshot, m: u32, rc: &mut HashMap<u32, u32>| -> Option<u32> {
-        let mut path = Vec::new();
-        let mut n = m;
-        let root = loop {
-            if let Some(&r) = rc.get(&n) {
-                for p in path {
-                    rc.insert(p, r);
-                }
-                break r;
-            }
-            let par = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]).collect::<Vec<_>>();
-            if par.is_empty() {
-                for p in &path {
-                    rc.insert(*p, n);
-                }
-                rc.insert(n, n);
-                break n;
-            }
-            path.push(n);
-            n = par[0];
+    // Forest-root array for replyOf, built once; the closure indexes it then
+    // takes one containerOf hop to the forum.
+    let reply_roots = g.rel_type("replyOf").map(|rt| g.chain_roots(Direction::Outgoing, rt));
+    let forum_of = |g: &GraphSnapshot, m: u32| -> Option<u32> {
+        let root = match &reply_roots {
+            Some(roots) => roots[m as usize],
+            None => m,
         };
         g.neighbors_by_type(root, Direction::Incoming, &["containerOf"])
             .next()
@@ -440,13 +389,13 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
     let mut m1_list: Vec<(u32, u32, i64)> = Vec::new();
     let mut cand: Vec<(u32, u32, u32, u32, i64)> = Vec::new();
     for &m in &tagged {
-        if let (Some(p1), Some(f1)) = (creator(m), forum_of(g, m, &mut root_cache)) {
+        if let (Some(p1), Some(f1)) = (creator(m), forum_of(g, m)) {
             m1_list.push((p1, f1, pi64(g, m, "ms")));
         }
         if let Some(msg2) = g.neighbors_by_type(m, Direction::Outgoing, &["replyOf"]).next() {
             if tagged_set.contains(&msg2) {
                 if let (Some(p2), Some(p3), Some(f2)) =
-                    (creator(m), creator(msg2), forum_of(g, msg2, &mut root_cache))
+                    (creator(m), creator(msg2), forum_of(g, msg2))
                 {
                     cand.push((p2, p3, msg2, f2, pi64(g, msg2, "ms")));
                 }
