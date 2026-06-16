@@ -1,53 +1,50 @@
 LDBC SNB Interactive (IC) — SF1, single-machine head-to-head
 rustychickpeas (this engine) vs Kùzu, same data, same seeds (pick_seeds).
 
-Correctness (kuzu/compare.py, value-level): all 20 cross-checkable queries are
-byte-identical across engines —
-  ic1 ic2 ic3 ic4 ic5 ic6 ic7 ic8 ic9 ic10 ic11 ic12 ic13 ic14
-  is1 is2 is3 is5 is6 is7 : ALL PASS
+CAVEATS: timings below are SF1 under load avg ~6.7 on 16 cores (a shared box) —
+read them RELATIVELY, not as absolutes; both engines run under the same load.
+Kùzu runs multi-threaded by default, our queries are mostly single-threaded.
+All 20 queries are value-identical (kuzu/compare.py ALL PASS).
 
-Query                            rustychickpeas      Kùzu
-IC1  friends by name                   4.5 ms       4.7 ms
-IC2  recent friend messages           16.8 ms      53.8 ms
-IC3  friends in two countries        143.6 ms     435.7 ms
-IC4  new topics                        7.0 ms    2119.8 ms
-IC5  new groups                      768.9 ms    1117.0 ms
-IC6  tag co-occurrence                33.4 ms     375.1 ms
-IC7  recent likers                     1.6 ms      88.6 ms
-IC8  recent replies                    0.19 ms     16.1 ms
-IC9  recent FoF messages             174.4 ms     790.5 ms
-IC10 friend recommendation             3.8 ms     568.7 ms
-IC11 job referral                      7.1 ms      13.2 ms
-IC12 expert search                    39.3 ms     321.7 ms
-IC13 unweighted shortest path          3.7 ms       3.6 ms
-IC14 weighted shortest path           19.4 ms       7.1 ms
-IS1  person profile                    0.00 ms      0.18 ms
-IS2  person recent messages            0.19 ms      7.0 ms
-IS3  person friends                    0.01 ms      1.4 ms
-IS5  message creator                    —           8.3 ms
-IS6  forum of message                  0.00 ms      8.2 ms
-IS7  replies of message                0.03 ms     27.3 ms
+The Kùzu Cypher was optimized first (tasks 055-064) so this is a fair fight —
+the initial reference Cypher was naive (correlated subqueries, IN-list
+membership, un-deduped knows*1..2). Per-query Kùzu gains:
+  IC4 6347->151 ms (~42x)   IC5 4455->434 ms (~10x)   IC6 2300->223 ms (~10x)
+  IC9 1672->431 ms (~4x)    IC12 925->342 ms (~3x)    IC3 745->562 ms
+And chickpeas IC14 was switched to a bidirectional search (~14->~10 ms).
 
-Median of 5 each. IS5 is not timed on the rust side. rustychickpeas wins every
-cross-checkable query except the two shortest-path queries IC13 and IC14, where
-Kùzu's native (W)SHORTEST path engine wins; the biggest rustychickpeas gaps are
-IC4 (~300x, Kùzu's NOT-EXISTS subquery), IC10 (~150x) and IC7 (~55x).
+Query                            rustychickpeas      Kùzu   winner
+IC1  friends by name                   5.3 ms       4.8 ms  Kùzu  ~1.1x
+IC2  recent friend messages           23.8 ms      54.7 ms  chickpeas 2.3x
+IC3  friends in two countries        148.6 ms     562.4 ms  chickpeas 3.8x
+IC4  new topics                        7.0 ms     151.0 ms  chickpeas 22x
+IC5  new groups                      896.0 ms     434.3 ms  Kùzu  2.1x
+IC6  tag co-occurrence                34.5 ms     222.5 ms  chickpeas 6.4x
+IC7  recent likers                     1.6 ms      89.4 ms  chickpeas 55x
+IC8  recent replies                    0.20 ms     13.4 ms  chickpeas 67x
+IC9  recent FoF messages             210.6 ms     430.6 ms  chickpeas 2.0x
+IC10 friend recommendation             4.3 ms    1576.5 ms  chickpeas ~370x
+IC11 job referral                      7.3 ms      10.5 ms  chickpeas 1.4x
+IC12 expert search                    47.2 ms     341.9 ms  chickpeas 7.2x
+IC13 unweighted shortest path          5.1 ms       3.7 ms  Kùzu  1.4x
+IC14 weighted shortest path           11.0 ms       6.7 ms  Kùzu  1.6x
+IS1  person profile                    0.00 ms      0.18 ms chickpeas
+IS2  person recent messages            0.18 ms      7.4 ms  chickpeas 41x
+IS3  person friends                    0.01 ms      1.6 ms  chickpeas
+IS5  message creator                    —           8.5 ms  —
+IS6  forum of message                  0.00 ms      7.4 ms  chickpeas
+IS7  replies of message                0.02 ms     29.1 ms  chickpeas
 
-Cross-check tiers:
-- Faithful projection, no rebuild: IC2/IC9/IC13, IS2/IS3/IS5 (task 004) +
-  IC4/IC6/IC8, IS6/IS7 (task 052).
-- Loader-backed, faithful import extended + rebuilt: IC1/IC3/IC5/IC7/IC10/IC11/
-  IC12, IS1 (task 053) + IC14 (1/(interactions+1) weighted knows edge, task 054).
-  The import additions are BI-safe (BI cross-check still 20/20 identical on the
-  rebuilt db-sf1-faithful).
-- Not cross-checked: IS4 (message content text — left out of the shared faithful
-  import to keep BI loads lean, mirroring the rust load_content opt-in). Runs
-  rust-side.
+Net: chickpeas wins ~14, Kùzu wins 4 (IC1/IC5/IC13/IC14). chickpeas dominates the
+short reads and CSR-friendly traversals (IS*, IC7/IC8/IC10) — neighbour iteration
+vs query-engine overhead. Kùzu's vectorized engine wins the native shortest paths
+(IC13/IC14) and the heavy multi-hop aggregation (IC5), and ties IC1. IC10's gap is
+real (the 2-hop foaf expansion + per-foaf counting is inherent to the query, not
+bad Cypher). Precise magnitudes still want an unloaded machine.
 
 Reproduce:
   cargo run --release --bin ic                     # rust timings
   .venv-kuzu/bin/python kuzu/run_ic.py sf1         # kuzu timings (db-sf1-faithful)
-  # value-level cross-check:
   LDBC_EMIT_JSON=/tmp/xchk cargo run --release --bin ic
   .venv-kuzu/bin/python kuzu/run_ic.py sf1 --emit-json /tmp/xchk
   .venv-kuzu/bin/python kuzu/compare.py /tmp/xchk \

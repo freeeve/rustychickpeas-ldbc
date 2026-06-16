@@ -161,25 +161,31 @@ chose. **All 20 cross-checkable queries are value-identical** across engines
 (`kuzu/compare.py` over ic1–ic14 + is1/2/3/5/6/7 → ALL PASS, incl. 848 friend
 rows).
 
+Timings are SF1 under load avg ~6.7 on a shared box — read them **relatively**.
+The Kùzu Cypher was optimized first (tasks 055–064) so this is a fair fight; the
+initial reference Cypher was naive (correlated subqueries, `IN`-list membership,
+un-deduped `knows*1..2`), e.g. IC4 6347→151 ms, IC5 4455→434 ms, IC6 2300→223 ms.
+
 | IC query | rustychickpeas (ms) | Kùzu (ms) | winner |
 |----------|--------------------:|----------:|--------|
-| IC2 recent friend messages | 16.8 | 53.8 | rustychickpeas (~3×) |
-| IC3 friends in two countries | 143.6 | 435.7 | rustychickpeas (~3×) |
-| IC4 new topics | 7.0 | 2119.8 | rustychickpeas (~300×) |
-| IC5 new groups | 768.9 | 1117.0 | rustychickpeas (~1.5×) |
-| IC6 tag co-occurrence | 33.4 | 375.1 | rustychickpeas (~11×) |
-| IC7 recent likers | 1.6 | 88.6 | rustychickpeas (~55×) |
-| IC9 recent FoF messages | 174.4 | 790.5 | rustychickpeas (~4×) |
-| IC10 friend recommendation | 3.8 | 568.7 | rustychickpeas (~150×) |
-| IC12 expert search | 39.3 | 321.7 | rustychickpeas (~8×) |
-| IC13 unweighted shortest path | 3.7 | 3.6 | Kùzu (~1.0×) |
-| IS2/IS3/IS6/IS7 short reads | <0.2 | 1.4–27 | rustychickpeas |
+| IC4 new topics | 7.0 | 151 | rustychickpeas ~22× |
+| IC5 new groups | 896 | 434 | **Kùzu ~2×** |
+| IC6 tag co-occurrence | 35 | 223 | rustychickpeas ~6× |
+| IC7 recent likers | 1.6 | 89 | rustychickpeas ~55× |
+| IC8 recent replies | 0.2 | 13 | rustychickpeas ~67× |
+| IC9 recent FoF messages | 211 | 431 | rustychickpeas ~2× |
+| IC10 friend recommendation | 4.3 | 1576 | rustychickpeas ~370× |
+| IC12 expert search | 47 | 342 | rustychickpeas ~7× |
+| IC13 unweighted shortest path | 5.1 | 3.7 | **Kùzu ~1.4×** |
+| IC14 weighted shortest path | 11 | 6.7 | **Kùzu ~1.6×** |
+| IS2/IS3/IS6/IS7 short reads | <0.2 | 1.6–29 | rustychickpeas |
 
-(IC1/IC8/IC11/IS1 also pass and favour rustychickpeas; full table in
-`results/ic-sf1.txt`.) The interactive shape is where the CSR/RoaringBitmap
-adjacency shines — multi-hop traversals and sub-millisecond short reads; Kùzu's
-native `(W)SHORTEST` path engine wins only the two shortest-path queries (IC13,
-IC14). The loader-backed half (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1, IC14) is
+(IC1 ~ties; IC2/IC3/IC11/IS1 favour rustychickpeas; full table in
+`results/ic-sf1.txt`.) With fair Cypher it's a real race: chickpeas dominates the
+short reads and CSR-friendly traversals (IS*, IC7/IC8/IC10 — neighbour iteration
+vs query-engine overhead), while Kùzu's vectorized engine takes the native
+shortest paths (IC13/IC14) and the heavy multi-hop aggregation (IC5). IC10's gap
+is genuinely inherent (the 2-hop foaf expansion), not bad Cypher. The loader-backed half (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1, IC14) is
 cross-checked against a faithful import extended with the matching
 edges/properties — additive, so BI stays 20/20 identical on the rebuilt
 `db-sf1-faithful`. Only IS4 (content text, kept out of the shared faithful import
