@@ -6,6 +6,7 @@
 
 pub mod loader;
 pub mod ntriples;
+pub mod parity;
 pub mod queries;
 
 // Per-query modules (one SPB query each), filled by tasks 015–048. Pre-declared
