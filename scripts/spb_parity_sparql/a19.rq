@@ -1,0 +1,16 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+# SPB advanced q19 — per topic tagged (via about/mentions) by works of the given
+# type and audience within the dateModified window: the distinct-work count and
+# the newest dateModified. Name is the topic label, falling back to its uri.
+SELECT ?name ?n ?maxdate WHERE {
+  {
+    SELECT ?topic (COUNT(DISTINCT ?cw) AS ?n) (MAX(str(?dm)) AS ?maxdate) WHERE {
+      ?cw a cwork:{{CW_TYPE}} ; cwork:audience <{{AUDIENCE}}> ; cwork:dateModified ?dm .
+      { ?cw cwork:about ?topic } UNION { ?cw cwork:mentions ?topic }
+      FILTER(str(?dm) >= "{{DATE_FROM}}" && str(?dm) <= "{{DATE_TO}}")
+    } GROUP BY ?topic
+  }
+  OPTIONAL { ?topic rdfs:label ?label }
+  BIND(COALESCE(?label, str(?topic)) AS ?name)
+}

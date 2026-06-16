@@ -1,0 +1,10 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB q7 — works of the given type whose `dateCreated` is in the window (lexical),
+# with a title + liveCoverage, pinned to a specific category and audience. Set of
+# work uris.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:{{CW_TYPE}} ; cwork:dateCreated ?dc ; cwork:title ?t ;
+      cwork:liveCoverage ?lc ;
+      cwork:category <{{CATEGORY}}> ; cwork:audience <{{AUDIENCE}}> .
+  FILTER(str(?dc) >= "{{DATE_FROM}}" && str(?dc) <= "{{DATE_TO}}")
+}

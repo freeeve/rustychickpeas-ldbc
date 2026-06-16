@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB q3 — creative works tagging the topic via `about`/`mentions`, carrying a
+# `dateCreated`. Set of work uris.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:CreativeWork ; cwork:dateCreated ?dc .
+  { ?cw cwork:about <{{TOPIC}}> } UNION { ?cw cwork:mentions <{{TOPIC}}> }
+}

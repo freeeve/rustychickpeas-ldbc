@@ -1,0 +1,11 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+PREFIX geo:<http://www.w3.org/2003/01/geo/wgs84_pos#>
+# SPB advanced q17 — works that `mentions` a geonames Feature inside the lat/long
+# box of half-extent DEV around (LAT, LON), restricted to works with a
+# `dateModified`. Set of work uris.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:CreativeWork ; cwork:dateModified ?dm ; cwork:mentions ?f .
+  ?f geo:lat ?lat ; geo:long ?lon .
+  FILTER(?lat >= {{LAT}} - {{DEV}} && ?lat <= {{LAT}} + {{DEV}} &&
+         ?lon >= {{LON}} - {{DEV}} && ?lon <= {{LON}} + {{DEV}})
+}

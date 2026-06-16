@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB q2 — resolve a single creative work by uri; it is a solution only if it is a
+# CreativeWork carrying a (required, non-OPTIONAL) title. Zero or one uri.
+SELECT DISTINCT ?cw WHERE {
+  BIND(<{{Q2_CW}}> AS ?cw)
+  ?cw a cwork:CreativeWork ; cwork:title ?t .
+}

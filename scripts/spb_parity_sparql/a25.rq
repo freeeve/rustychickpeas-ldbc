@@ -1,0 +1,11 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB advanced q25 — for each other entity co-mentioned with the selected one via
+# `about`, the number of distinct calendar days they co-occur. Key is the entity
+# uri, value COUNT(DISTINCT day).
+SELECT ?who (COUNT(DISTINCT ?day) AS ?n) WHERE {
+  ?cw a cwork:CreativeWork ;
+      cwork:about <{{TOPIC}}> ; cwork:about ?who ;
+      cwork:dateCreated ?dc .
+  FILTER(?who != <{{TOPIC}}>)
+  BIND(SUBSTR(str(?dc), 1, 10) AS ?day)
+} GROUP BY ?who

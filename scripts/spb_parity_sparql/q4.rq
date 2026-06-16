@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB q4 — BlogPosts tagging the topic via `about`/`mentions`, carrying a
+# `dateCreated`. Set of post uris.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:BlogPost ; cwork:dateCreated ?dc .
+  { ?cw cwork:about <{{TOPIC}}> } UNION { ?cw cwork:mentions <{{TOPIC}}> }
+}

@@ -1,0 +1,10 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB advanced q24 — per-day count of creative works tagging BOTH entities via
+# `about`. Key is the YYYY-MM-DD prefix of dateCreated; one solution per work, so
+# COUNT(*) per day == number of qualifying works that day.
+SELECT ?day (COUNT(*) AS ?n) WHERE {
+  ?cw a cwork:CreativeWork ;
+      cwork:about <{{TOPIC}}> ; cwork:about <{{ENT_B}}> ;
+      cwork:dateCreated ?dc .
+  BIND(SUBSTR(str(?dc), 1, 10) AS ?day)
+} GROUP BY ?day

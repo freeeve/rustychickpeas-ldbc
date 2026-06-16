@@ -1,0 +1,11 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+# SPB q5 — per topic carrying a label, the number of works of the given type and
+# audience whose dateModified is in the (exclusive) window that tag it via
+# `about`/`mentions`. Key is the topic label, value the distinct-work count.
+SELECT ?label (COUNT(DISTINCT ?cw) AS ?n) WHERE {
+  ?cw a cwork:{{CW_TYPE}} ; cwork:audience <{{AUDIENCE}}> ; cwork:dateModified ?dm .
+  { ?cw cwork:about ?topic } UNION { ?cw cwork:mentions ?topic }
+  ?topic rdfs:label ?label .
+  FILTER(str(?dm) > "{{DATE_FROM}}" && str(?dm) < "{{DATE_TO}}")
+} GROUP BY ?topic ?label
