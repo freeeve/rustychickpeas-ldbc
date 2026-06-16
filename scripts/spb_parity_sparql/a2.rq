@@ -1,0 +1,8 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+# adv q2 — the CreativeWork subtype(s) of one titled work (subClassOf via TBox).
+SELECT ?type WHERE {
+  <{{Q2_CW}}> a cwork:CreativeWork ; a ?t ; cwork:title ?title .
+  ?t rdfs:subClassOf cwork:CreativeWork .
+  BIND(REPLACE(STR(?t), "^.*/", "") AS ?type)
+}

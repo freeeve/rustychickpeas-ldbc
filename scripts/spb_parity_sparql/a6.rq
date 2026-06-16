@@ -1,0 +1,8 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q6 — about-entity-TYPE popularity (incl. the materialized Thing bucket),
+# filtered by liveCoverage + audience.
+SELECT ?type (COUNT(*) AS ?n) WHERE {
+  ?cw cwork:about ?about ; cwork:liveCoverage {{LIVE}} ; cwork:audience <{{AUDIENCE}}> .
+  ?about a ?t .
+  BIND(REPLACE(STR(?t), "^.*/", "") AS ?type)
+} GROUP BY ?type

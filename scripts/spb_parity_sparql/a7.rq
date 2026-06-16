@@ -1,0 +1,8 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+PREFIX bbc:<http://www.bbc.co.uk/ontologies/bbc/>
+# adv q7 — popular mentions, gated by works having > N primaryContentOf links.
+SELECT ?mentions (COUNT(*) AS ?n) WHERE {
+  ?cw cwork:mentions ?mentions .
+  { SELECT ?cw (COUNT(*) AS ?pc) WHERE { ?cw bbc:primaryContentOf ?p } GROUP BY ?cw }
+  FILTER(?pc > {{THRESHOLD}})
+} GROUP BY ?mentions

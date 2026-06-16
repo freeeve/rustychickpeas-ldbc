@@ -1,0 +1,5 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q10 — works whose mention count equals the maximum (with a dateCreated).
+SELECT ?cw (COUNT(?t) AS ?n) WHERE {
+  ?cw cwork:mentions ?t ; cwork:dateCreated ?dc .
+} GROUP BY ?cw HAVING (COUNT(?t) = {{MAXMENTIONS}})

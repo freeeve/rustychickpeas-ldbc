@@ -1,0 +1,5 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q9 — the maximum number of mentions on any single work.
+SELECT ("max" AS ?k) (MAX(?cnt) AS ?n) WHERE {
+  SELECT ?cw (COUNT(*) AS ?cnt) WHERE { ?cw cwork:mentions ?t } GROUP BY ?cw
+}

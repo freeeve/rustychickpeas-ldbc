@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q13 — (work, tag) pairs over works in either of two categories. tag is the
+# materialized super-property of about/mentions.
+SELECT DISTINCT ?thing ?tag WHERE {
+  ?thing a cwork:CreativeWork ; cwork:tag ?tag ; cwork:category ?cat ; cwork:dateModified ?dm .
+  FILTER(?cat = <{{CAT_COMPANY}}> || ?cat = <{{CATEGORY}}>)
+}

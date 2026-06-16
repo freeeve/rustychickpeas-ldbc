@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q4 — work count per CreativeWork subtype in a dateModified window.
+SELECT ?type (COUNT(*) AS ?n) WHERE {
+  ?cw a ?t ; a cwork:CreativeWork ; cwork:dateModified ?dm .
+  FILTER(?t != cwork:CreativeWork && str(?dm) > "{{DATE_FROM}}" && str(?dm) < "{{DATE_TO}}")
+  BIND(REPLACE(STR(?t), "^.*/", "") AS ?type)
+} GROUP BY ?type

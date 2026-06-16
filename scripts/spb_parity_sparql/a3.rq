@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q3 — work count per minute-of-hour of dateModified in a window.
+SELECT ?minute (COUNT(*) AS ?n) WHERE {
+  ?cw a cwork:CreativeWork ; cwork:dateModified ?dm .
+  FILTER(str(?dm) > "{{DATE_FROM}}" && str(?dm) < "{{DATE_TO}}")
+  BIND(MINUTES(?dm) AS ?minute)
+} GROUP BY ?minute

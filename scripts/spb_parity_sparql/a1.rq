@@ -1,0 +1,3 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q1 — works that `about` the thing and carry a dateModified.
+SELECT DISTINCT ?cw WHERE { ?cw a cwork:CreativeWork ; cwork:dateModified ?dm ; cwork:about <{{TOPIC}}> . }

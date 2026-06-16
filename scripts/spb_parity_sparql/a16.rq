@@ -1,0 +1,6 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q16 — (work, tag) pairs over works whose title ~ word. tag = about/mentions.
+SELECT DISTINCT ?thing ?tag WHERE {
+  ?thing a cwork:CreativeWork ; cwork:tag ?tag ; cwork:category ?cat ; cwork:title ?title .
+  FILTER(regex(?title, "\\b{{WORD2}}\\b", "i"))
+}

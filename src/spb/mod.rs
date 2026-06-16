@@ -17,8 +17,21 @@ pub mod q3;
 pub mod q4;
 pub mod q5;
 pub mod q7;
+pub mod q9; // basic q9 (related works by shared-tag score)
+pub mod a1; // advanced q1 (works about/mentioning a thing)
+pub mod a2; // advanced q2 (one work + its subtype; subClassOf)
+pub mod a3; // advanced q3 (works per minute in a window)
+pub mod a4; // advanced q4 (work counts per subtype; subClassOf)
 pub mod a5; // advanced q5 (popular topics by category; subClassOf entity type)
+pub mod a6; // advanced q6 (popular about-types by coverage/audience)
+pub mod a7; // advanced q7 (popular mentions gated by primaryContent count)
 pub mod a8; // advanced q8 (popular topics by type/audience/date; subPropertyOf tag)
+pub mod a9; // advanced q9 (max mentions on a work)
+pub mod a10; // advanced q10 (works with the most mentions)
+pub mod a13; // advanced q13 (works + tags + categories; subPropertyOf tag)
+pub mod a14; // advanced q14 (full star; subPropertyOf tag)
+pub mod a15; // advanced q15 (about & mentions share an entity type; subClassOf)
+pub mod a16; // advanced q16 (works + tags, title ~ policy; subPropertyOf tag)
 pub mod a17; // advanced q17 (geo)
 pub mod a18; // advanced q18 (date-range)
 pub mod a19; // advanced q19 (popular tags, aggregation)

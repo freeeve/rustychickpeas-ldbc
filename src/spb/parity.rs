@@ -14,7 +14,8 @@ use std::time::Instant;
 use rustychickpeas_core::GraphSnapshot;
 
 use super::{
-    a17, a18, a19, a20, a21, a22, a23, a24, a25, a5, a8, loader, q1, q2, q3, q4, q5, q7,
+    a1, a10, a13, a14, a15, a16, a17, a18, a19, a2, a20, a21, a22, a23, a24, a25, a3, a4, a5, a6,
+    a7, a8, a9, loader, q1, q2, q3, q4, q5, q7, q9,
 };
 use crate::harness::{emit_json, jstr, Result};
 use crate::props::pstr;
@@ -25,6 +26,7 @@ const DEFAULT_EXTRACT: &str = "data/spb/extract/spb-validate.nt";
 // extract) to yield non-empty results. Kept identical to the SPARQL side by
 // emitting them into the params block the harness reads.
 const WORD: &str = "football";
+const WORD2: &str = "policy"; // rarer title word for the star queries (q15/q16)
 const TOPIC: &str = "http://dbpedia.org/resource/Action_of_25_February_1781";
 // ASCII co-occurrence partner of TOPIC (14 shared works). A high-overlap partner
 // exists (Ottoman–Portuguese_conflicts, 3759) but its IRI is non-ASCII and the
@@ -37,6 +39,8 @@ const CAT_COMPANY: &str = "http://www.bbc.co.uk/category/Company";
 // coreconcepts:Thing, the super-class dbo:Company/Event carry via subClassOf;
 // our loader materializes it as the label `Thing` (q5's entity-type restriction).
 const ENTITY_LABEL: &str = "Thing";
+const PRIMARY_FORMAT: &str = "http://www.bbc.co.uk/ontologies/creativework/TextualFormat";
+const WEB_DOC_TYPE: &str = "http://www.bbc.co.uk/ontologies/bbc/HighWeb";
 const AUDIENCE: &str = "http://www.bbc.co.uk/ontologies/creativework/InternationalAudience";
 const CW_TYPE: &str = "BlogPost";
 const DATE_FROM: &str = "2011-03-01T00:00:00.000+00:00";
@@ -65,6 +69,18 @@ fn block(kind: &str, rows: String) -> String {
 /// `[[label, count], ...]` for `(String, usize)` aggregate rows.
 fn rows_kv(items: &[(String, usize)]) -> String {
     let v: Vec<String> = items.iter().map(|(k, n)| format!("[{},{}]", jstr(k), n)).collect();
+    format!("[{}]", v.join(","))
+}
+
+/// A JSON array of strings (e.g. type local names).
+fn strs(items: &[String]) -> String {
+    let v: Vec<String> = items.iter().map(|s| jstr(s)).collect();
+    format!("[{}]", v.join(","))
+}
+
+/// `[[a, b], ...]` for `(String, String)` pair rows (e.g. (work, tag) uris).
+fn rows_pairs(items: &[(String, String)]) -> String {
+    let v: Vec<String> = items.iter().map(|(a, b)| format!("[{},{}]", jstr(a), jstr(b))).collect();
     format!("[{}]", v.join(","))
 }
 
@@ -120,7 +136,9 @@ pub fn run() -> Result<()> {
             "{{",
             "\"q1\":{},\"q2\":{},\"q3\":{},\"q4\":{},\"q5\":{},\"q7\":{},",
             "\"a17\":{},\"a18\":{},\"a19\":{},\"a20\":{},\"a21\":{},\"a22\":{},",
-            "\"a23\":{},\"a24\":{},\"a25\":{},\"a5\":{},\"a8\":{}",
+            "\"a23\":{},\"a24\":{},\"a25\":{},\"a5\":{},\"a8\":{},",
+            "\"a1\":{},\"a2\":{},\"a3\":{},\"a4\":{},\"a6\":{},\"a7\":{},",
+            "\"a9\":{},\"a10\":{},\"a13\":{},\"a14\":{},\"a16\":{},\"a15\":{},\"q9\":{}",
             "}}"
         ),
         block("uris", uris(&g, &q1_works)),
@@ -146,17 +164,43 @@ pub fn run() -> Result<()> {
         block("who_days", a25_rows),
         block("kv", rows_kv(&a5::run(&g, ENTITY_LABEL, CAT_COMPANY, CATEGORY, ALL))),
         block("kv", rows_kv(&a8::run(&g, CW_TYPE, AUDIENCE, DATE_FROM, DATE_TO))),
+        block("uris", uris(&g, &a1::run(&g, "about", TOPIC))),
+        block("uris", strs(&a2::run(&g, q2_in))),
+        block("kv", rows_kv(&a3::run(&g, DATE_FROM, DATE_TO))),
+        block("kv", rows_kv(&a4::run(&g, DATE_FROM, DATE_TO, ALL))),
+        block("kv", rows_kv(&a6::run(&g, true, AUDIENCE, ALL))),
+        block("kv", rows_kv(&a7::run(&g, 1, ALL))),
+        block("kv", format!("[[{},{}]]", jstr("max"), a9::run(&g))),
+        block("kv", rows_kv(&a10::run(&g, ALL))),
+        block("pairs", rows_pairs(&a13::run(&g, CAT_COMPANY, CATEGORY, ALL))),
+        block("uris", uris(&g, &a14::run(&g, PRIMARY_FORMAT, WEB_DOC_TYPE, ALL))),
+        block("pairs", rows_pairs(&a16::run(&g, WORD2, ALL))),
+        block("uris", uris(&g, &a15::run(&g, WORD2, ALL))),
+        // q9 score emitted x2 as an integer (weights 4/3/2/1) to match the SPARQL,
+        // which avoids Oxigraph's decimal-coefficient arithmetic quirk.
+        block(
+            "kv",
+            rows_kv(
+                &q9::run(&g, q2_in, ALL)
+                    .into_iter()
+                    .map(|(u, s)| (u, (s * 2.0).round() as usize))
+                    .collect::<Vec<_>>(),
+            ),
+        ),
     );
 
     let params = format!(
         concat!(
             "{{\"word\":{},\"topic\":{},\"entB\":{},\"category\":{},\"audience\":{},",
             "\"cwType\":{},\"dateFrom\":{},\"dateTo\":{},\"lat\":{},\"lon\":{},",
-            "\"deviation\":{},\"q2_cw\":{},\"catCompany\":{},\"entityType\":{}}}"
+            "\"deviation\":{},\"q2_cw\":{},\"catCompany\":{},\"entityType\":{},",
+            "\"word2\":{},\"live\":\"true\",\"threshold\":1,\"maxMentions\":{},",
+            "\"primaryFormat\":{},\"webDocType\":{}}}"
         ),
         jstr(WORD), jstr(TOPIC), jstr(ENT_B), jstr(CATEGORY), jstr(AUDIENCE),
         jstr(CW_TYPE), jstr(DATE_FROM), jstr(DATE_TO), LAT, LON, DEVIATION, jstr(q2_in),
         jstr(CAT_COMPANY), jstr("http://www.bbc.co.uk/ontologies/coreconcepts/Thing"),
+        jstr(WORD2), a9::run(&g), jstr(PRIMARY_FORMAT), jstr(WEB_DOC_TYPE),
     );
 
     emit_json("results", "spb.parity.rust.json", format!("{{\"params\":{params},\"queries\":{queries}}}"));

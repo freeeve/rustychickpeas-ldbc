@@ -1,0 +1,9 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+PREFIX bbc:<http://www.bbc.co.uk/ontologies/bbc/>
+# adv q14 — full star: required BGP + pinned primaryFormat + webDocumentType.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:CreativeWork ; cwork:tag ?tag ; cwork:category ?cat ;
+      cwork:dateModified ?dm ; cwork:thumbnail ?th ; cwork:audience ?aud ;
+      cwork:primaryFormat <{{PRIMARYFORMAT}}> ; bbc:primaryContentOf ?pc .
+  ?pc bbc:webDocumentType <{{WEBDOCTYPE}}> .
+}

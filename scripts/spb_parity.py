@@ -28,12 +28,15 @@ PLACEHOLDERS = {
     "audience": "AUDIENCE", "cwType": "CW_TYPE", "dateFrom": "DATE_FROM",
     "dateTo": "DATE_TO", "lat": "LAT", "lon": "LON", "deviation": "DEV",
     "q2_cw": "Q2_CW", "catCompany": "CAT_COMPANY", "entityType": "ENTITY_TYPE",
+    "word2": "WORD2", "live": "LIVE", "threshold": "THRESHOLD",
+    "maxMentions": "MAXMENTIONS", "primaryFormat": "PRIMARYFORMAT",
+    "webDocType": "WEBDOCTYPE",
 }
 # How many leading TSV columns form the comparison key/value for each kind.
 KINDS = {
     "uris": ("uri",), "uri_opt": ("uri",), "kv": ("key", "int"),
     "kvx": ("key", "int", "key"), "day_count": ("key", "int"),
-    "who_days": ("uri", "int"),
+    "who_days": ("uri", "int"), "pairs": ("key", "key"), "kvf": ("key", "float"),
 }
 
 
@@ -66,6 +69,17 @@ def cell_int(cell):
     return int(s)
 
 
+def cell_float(cell):
+    """A float rounded to 4 dp, so engine score formulas compare regardless of
+    trailing-digit noise."""
+    if isinstance(cell, (int, float)):
+        return round(float(cell), 4)
+    s = str(cell).strip()
+    if s.startswith('"'):
+        s = s[1:s.rfind('"')] if s.rfind('"') > 0 else s[1:]
+    return round(float(s), 4)
+
+
 def fill(template, params):
     out = template
     for name, ph in PLACEHOLDERS.items():
@@ -92,7 +106,12 @@ def as_set(rows, shape):
     for r in rows:
         key = []
         for i, typ in enumerate(shape):
-            key.append(cell_int(r[i]) if typ == "int" else canon(r[i]))
+            if typ == "int":
+                key.append(cell_int(r[i]))
+            elif typ == "float":
+                key.append(cell_float(r[i]))
+            else:
+                key.append(canon(r[i]))
         out.add(key[0] if len(key) == 1 else tuple(key))
     return out
 

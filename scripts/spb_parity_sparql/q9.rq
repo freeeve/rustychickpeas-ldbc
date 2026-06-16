@@ -1,0 +1,25 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# basic q9 — works related to the focal one by shared tagged entities, scored
+# 2*(about,about) + 1.5*(about,mentions) + 1*(mentions,about) + 0.5*(mentions,mentions).
+# cwork:tag = about∪mentions (subPropertyOf); owl:sameAs is inert (none in data).
+# Score is emitted x2 as an integer (weights 4/3/2/1) — Oxigraph mishandles
+# decimal-coefficient multiplication; the rust side scales its f64 score likewise.
+SELECT ?other ((4*?a2a + 3*?a2m + 2*?m2a + ?m2m) AS ?score) WHERE {
+  {
+    SELECT DISTINCT ?other WHERE {
+      <{{Q2_CW}}> cwork:about|cwork:mentions ?e .
+      ?other cwork:about|cwork:mentions ?e .
+      ?other a cwork:CreativeWork .
+      FILTER(?other != <{{Q2_CW}}>)
+    }
+  }
+  ?other cwork:dateModified ?dt .
+  OPTIONAL { SELECT ?other (COUNT(DISTINCT ?e) AS ?a2a0) WHERE { <{{Q2_CW}}> cwork:about ?e . ?other cwork:about ?e } GROUP BY ?other }
+  OPTIONAL { SELECT ?other (COUNT(DISTINCT ?e) AS ?a2m0) WHERE { <{{Q2_CW}}> cwork:about ?e . ?other cwork:mentions ?e } GROUP BY ?other }
+  OPTIONAL { SELECT ?other (COUNT(DISTINCT ?e) AS ?m2a0) WHERE { <{{Q2_CW}}> cwork:mentions ?e . ?other cwork:about ?e } GROUP BY ?other }
+  OPTIONAL { SELECT ?other (COUNT(DISTINCT ?e) AS ?m2m0) WHERE { <{{Q2_CW}}> cwork:mentions ?e . ?other cwork:mentions ?e } GROUP BY ?other }
+  BIND(COALESCE(?a2a0, 0) AS ?a2a)
+  BIND(COALESCE(?a2m0, 0) AS ?a2m)
+  BIND(COALESCE(?m2a0, 0) AS ?m2a)
+  BIND(COALESCE(?m2m0, 0) AS ?m2m)
+}

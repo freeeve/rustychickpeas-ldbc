@@ -1,0 +1,9 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# adv q15 — works whose about-target and mentions-target share an entity type
+# (the materialized Thing), title ~ word.
+SELECT DISTINCT ?thing WHERE {
+  ?thing a cwork:CreativeWork ; cwork:about ?about ; cwork:mentions ?mentions ;
+         cwork:category ?cat ; cwork:title ?title .
+  ?about a ?entityType . ?mentions a ?entityType .
+  FILTER(regex(?title, "\\b{{WORD2}}\\b", "i"))
+}
