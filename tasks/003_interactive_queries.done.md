@@ -15,6 +15,10 @@ Also implemented later with no loader change: IC4 (new topics), IC6 (tag
 co-occurrence), IC8 (recent replies), IS6 (forum of message, via chain_roots),
 IS7 (replies of message).
 
-Deferred (need a loader addition): IC3 (msg->country), IC5 (hasMember join
-date), IC7 (likes date), IC10 (birthday/gender), IC11 (workFrom + org
-location), IC12 (TagClass subclass), IS4 (message content text).
+Loader-backed tier added (loader extended additively — Message->Country edges,
+hasMember join-date, likes date, Person birthday/gender, workAt workFrom +
+Company location, TagClass subclass edges; BI cross-check re-verified 0-diff):
+IC3, IC5, IC7, IC10, IC11, IC12.
+
+Deferred: IS4 (message content text — not loaded by design; ~2.8M strings would
+bloat the loader for a trivial lookup).
