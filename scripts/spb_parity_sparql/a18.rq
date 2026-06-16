@@ -1,0 +1,10 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB advanced q18 — works of the given type whose `dateModified` is in the window
+# (lexical compare, matching the engine) and that carry title + liveCoverage +
+# category + audience. Set of work uris.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:{{CW_TYPE}} ;
+      cwork:dateModified ?dm ; cwork:title ?t ; cwork:liveCoverage ?lc ;
+      cwork:category ?cat ; cwork:audience ?aud .
+  FILTER(str(?dm) >= "{{DATE_FROM}}" && str(?dm) <= "{{DATE_TO}}")
+}

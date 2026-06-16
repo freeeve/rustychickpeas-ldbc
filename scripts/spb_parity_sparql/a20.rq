@@ -1,0 +1,9 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB advanced q20 — full-text: works whose title OR description contains the word
+# (whole-word, via a \b...\b regex approximating the engine's tokenizer) and that
+# carry a `dateModified`. Set of work uris.
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:CreativeWork ; cwork:dateModified ?dm .
+  { ?cw cwork:title ?x } UNION { ?cw cwork:description ?x }
+  FILTER(regex(?x, "\\b{{WORD}}\\b", "i"))
+}

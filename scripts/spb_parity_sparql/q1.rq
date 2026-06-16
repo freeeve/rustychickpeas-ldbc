@@ -1,0 +1,7 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB q1 — creative works that tag the topic via `about` or `mentions` and carry
+# a `dateModified` (the required sort key). Set of work uris (LIMIT/ORDER dropped).
+SELECT DISTINCT ?cw WHERE {
+  ?cw a cwork:CreativeWork ; cwork:dateModified ?dm .
+  { ?cw cwork:about <{{TOPIC}}> } UNION { ?cw cwork:mentions <{{TOPIC}}> }
+}
