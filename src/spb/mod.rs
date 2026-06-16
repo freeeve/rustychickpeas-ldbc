@@ -1,8 +1,8 @@
-//! SPB family — load RDF (N-Triples) into the property graph and run hand-coded
-//! SPB-style queries, with **no SPARQL engine**. The aggregation/hierarchy
-//! queries are plain traversals; the full-text and geo queries use the core
-//! `fts` and `geo_within_radius` capabilities. See `docs/families.md`,
-//! `docs/core-features.md`, and `tasks/010`.
+//! SPB family — load RDF (N-Triples / N-Quads; the 4th n-quads term is ignored)
+//! into the property graph and run the hand-coded SPB queries, with **no SPARQL
+//! engine**. Full-text (q8) and geo (q6) use the core `fts` / `geo` indexes; the
+//! remaining aggregation queries are tasks 015–048. See `docs/families.md`,
+//! `tasks/014`, and the `spb-real-data-pipeline` memory.
 
 pub mod loader;
 pub mod ntriples;
@@ -17,6 +17,10 @@ use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::props::pstr;
 
 const DEFAULT_SAMPLE: &str = "samples/spb-sample.nt";
+const DEF_LAT: f64 = 51.5074; // London
+const DEF_LON: f64 = -0.1278;
+const DEF_KM: f64 = 50.0;
+const DEF_WORD: &str = "football";
 
 /// Render nodes as a JSON array of their `uri` properties (the cross-engine key).
 fn uri_list(g: &GraphSnapshot, nodes: impl IntoIterator<Item = u32>) -> String {
@@ -28,15 +32,19 @@ fn uri_list(g: &GraphSnapshot, nodes: impl IntoIterator<Item = u32>) -> String {
     format!("[{}]", items.join(","))
 }
 
-/// Load an N-Triples file (arg 1, default `samples/spb-sample.nt`), then print
-/// and time the SPB-style queries.
+/// Load an N-Triples/N-Quads file (arg 1, default `samples/spb-sample.nt`) and
+/// run the real-vocabulary SPB queries.
+///
+/// Usage: `spb [file] [word] [lat] [lon] [km]`
 pub fn run() -> Result<()> {
-    let path = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_SAMPLE));
+    let a: Vec<String> = std::env::args().collect();
+    let path = a.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_SAMPLE));
+    let word = a.get(2).map(String::as_str).unwrap_or(DEF_WORD).to_string();
+    let lat = a.get(3).and_then(|s| s.parse().ok()).unwrap_or(DEF_LAT);
+    let lon = a.get(4).and_then(|s| s.parse().ok()).unwrap_or(DEF_LON);
+    let km = a.get(5).and_then(|s| s.parse().ok()).unwrap_or(DEF_KM);
 
-    eprintln!("Loading RDF (N-Triples) from {} ...", path.display());
+    eprintln!("Loading RDF from {} ...", path.display());
     let t = Instant::now();
     let (g, stats) = loader::load_ntriples(&path)?;
     let secs = t.elapsed().as_secs_f64();
@@ -46,59 +54,37 @@ pub fn run() -> Result<()> {
         "Loaded {} resources from {} triples ({} edges, {} literal props) in {:.3}s",
         stats.resources, stats.triples, stats.edges, stats.literals, secs
     );
+    println!(
+        "  CreativeWorks: {}   geonames Features: {}",
+        g.nodes_with_label("CreativeWork").map(|n| n.len()).unwrap_or(0),
+        g.nodes_with_label("Feature").map(|n| n.len()).unwrap_or(0)
+    );
 
-    let about = queries::works_about_entity(&g, "London");
-    println!("\nWorks about 'London': {}", about.len());
-    for &w in about.iter().take(5) {
+    let q8 = queries::q8_fulltext(&g, &word);
+    let q6 = queries::q6_geo(&g, lat, lon, km);
+    let q68 = queries::q6_q8(&g, lat, lon, km, &word);
+    println!("\nq8 full-text '{word}': {} works", q8.len());
+    for &w in q8.iter().take(3) {
         println!("   {}", queries::name_of(&g, w));
     }
+    println!("q6 geo (<= {km}km of {lat},{lon}): {} works", q6.len());
+    println!("q6 AND q8: {} works", q68.len());
 
-    println!("Category rollup under 'Sport':");
-    for (cat, n) in queries::works_by_category_rollup(&g, "Sport") {
-        println!("   {cat:<12} {n} works");
-    }
-
-    println!(
-        "\nFull-text 'football': {} works",
-        queries::fts_works(&g, "football").len()
-    );
-    println!(
-        "Near London (<=50km): {} works",
-        queries::geo_works_near(&g, 51.5074, -0.1278, 50.0).len()
-    );
-    println!(
-        "Near London AND 'tennis': {} works",
-        queries::geo_fts_works(&g, 51.5074, -0.1278, 50.0, "tennis").len()
-    );
-
-    // Emit query results (as uris) plus the geo pre-filter, for the Kùzu
-    // cross-check and the hybrid (b) mode. See kuzu/run_spb.py.
-    let near_places = g.geo_within_radius("Place", "lat", "long", 51.5074, -0.1278, 50.0);
+    // Emit uris for the Oxigraph cross-check (scripts/spb_crosscheck.py).
     let body = format!(
-        "{{\n  \"about_london\": {},\n  \"fts_football\": {},\n  \"geo_near_london\": {},\n  \"geo_places_near_london\": {},\n  \"geo_fts_tennis\": {}\n}}",
-        uri_list(&g, about.iter().copied()),
-        uri_list(&g, queries::fts_works(&g, "football")),
-        uri_list(&g, queries::geo_works_near(&g, 51.5074, -0.1278, 50.0)),
-        uri_list(&g, near_places.iter()),
-        uri_list(&g, queries::geo_fts_works(&g, 51.5074, -0.1278, 50.0, "tennis")),
+        "{{\n  \"q8_fulltext\": {},\n  \"q6_geo\": {},\n  \"q6_q8\": {},\n  \"word\": {}, \"lat\": {lat}, \"lon\": {lon}, \"km\": {km}\n}}",
+        uri_list(&g, q8.iter().copied()),
+        uri_list(&g, q6.iter().copied()),
+        uri_list(&g, q68.iter().copied()),
+        jstr(&word),
     );
     emit_json("results", "spb.rust.json", body);
-    println!("\nWrote results/spb.rust.json (uris) for the Kùzu cross-check.");
+    println!("\nWrote results/spb.rust.json for the Oxigraph cross-check.");
 
     println!("\nTimings (median of 5):");
-    time_query("SPB about-entity", 5, || {
-        queries::works_about_entity(&g, "London").len()
-    });
-    time_query("SPB category rollup", 5, || {
-        queries::works_by_category_rollup(&g, "Sport").len()
-    });
-    time_query("SPB full-text", 5, || queries::fts_works(&g, "football").len());
-    time_query("SPB geo radius", 5, || {
-        queries::geo_works_near(&g, 51.5074, -0.1278, 50.0).len()
-    });
-    time_query("SPB geo + fts", 5, || {
-        queries::geo_fts_works(&g, 51.5074, -0.1278, 50.0, "tennis").len()
-    });
+    time_query("q8 full-text", 5, || queries::q8_fulltext(&g, &word).len());
+    time_query("q6 geo", 5, || queries::q6_geo(&g, lat, lon, km).len());
+    time_query("q6 AND q8", 5, || queries::q6_q8(&g, lat, lon, km, &word).len());
 
     Ok(())
 }
