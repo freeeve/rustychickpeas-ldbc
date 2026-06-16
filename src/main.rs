@@ -537,47 +537,90 @@ fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
 /// (year, isComment, length-category); reports counts, average/sum length and
 /// share of all messages before the cutoff.
 /// Returns (group rows, total-message-count). Cypher: bi-1.cypher.
+/// Read a dense/sparse i64 column at `n` (0 if absent). Free fn (not a closure)
+/// so it stays `Sync` for the parallel scan below.
+#[inline]
+fn col_i64(c: Option<&Column>, n: u32) -> i64 {
+    match c.and_then(|c| c.get(n)) {
+        Some(ValueId::I64(v)) => v,
+        _ => 0,
+    }
+}
+
+type Q1Groups = hashbrown::HashMap<(i64, bool, u8), (u64, i64)>;
+
 fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1Row>, u64) {
-    // Resolve each property's column once, hoisting the per-message key-string
-    // interning + columns lookup out of the multi-million-row scan (the
-    // dominant cost; behavior is identical to per-row `prop()` reads).
+    use rayon::prelude::*;
+    // Resolve each property's column once (hoisted out of the multi-million-row
+    // scan). The scan is morsel-parallel — partial per-chunk aggregates merge —
+    // mirroring Kùzu's parallel hash-aggregate (Kùzu's edge on Q1 is threads).
     let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
     let (day_col, content_col, len_col, year_col) =
         (col("day"), col("content"), col("len"), col("year"));
-    let get_i64 = |c: Option<&Column>, n: u32| match c.and_then(|c| c.get(n)) {
-        Some(ValueId::I64(v)) => v,
-        _ => 0,
-    };
 
+    let mut groups: Q1Groups = Q1Groups::new();
     let mut total = 0u64;
-    let mut groups: HashMap<(i64, bool, u8), (u64, i64)> = HashMap::new();
     for (label, is_comment) in [("Post", false), ("Comment", true)] {
-        if let Some(nodes) = g.nodes_with_label(label) {
-            for msg in nodes.iter() {
-                if get_i64(day_col, msg) >= cutoff_day {
-                    continue;
-                }
-                total += 1;
-                if !matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))) {
-                    continue;
-                }
-                let len = get_i64(len_col, msg);
-                let cat = if len < 40 {
-                    0
-                } else if len < 80 {
-                    1
-                } else if len < 160 {
-                    2
-                } else {
-                    3
-                };
-                let e = groups
-                    .entry((get_i64(year_col, msg), is_comment, cat))
-                    .or_insert((0, 0));
-                e.0 += 1;
-                e.1 += len;
-            }
+        let Some(nodes) = g.nodes_with_label(label) else {
+            continue;
+        };
+        let count = nodes.len() as u32;
+        if count == 0 {
+            continue;
         }
+        // The loader assigns each label a contiguous internal-id block (sequential
+        // `next`), so we scan the range directly — no boxed-iterator collect — and
+        // par_iter it for a morsel-parallel hash aggregate.
+        let start = nodes.iter().next().unwrap();
+        let (part, sub_total) = (start..start + count)
+            .into_par_iter()
+            .fold(
+                || (Q1Groups::new(), 0u64),
+                |mut acc, msg| {
+                    if col_i64(day_col, msg) >= cutoff_day {
+                        return acc;
+                    }
+                    acc.1 += 1;
+                    if !matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))) {
+                        return acc;
+                    }
+                    let len = col_i64(len_col, msg);
+                    let cat: u8 = if len < 40 {
+                        0
+                    } else if len < 80 {
+                        1
+                    } else if len < 160 {
+                        2
+                    } else {
+                        3
+                    };
+                    let e = acc
+                        .0
+                        .entry((col_i64(year_col, msg), is_comment, cat))
+                        .or_insert((0, 0));
+                    e.0 += 1;
+                    e.1 += len;
+                    acc
+                },
+            )
+            .reduce(
+                || (Q1Groups::new(), 0u64),
+                |mut a, b| {
+                    for (k, (n, s)) in b.0 {
+                        let e = a.0.entry(k).or_insert((0, 0));
+                        e.0 += n;
+                        e.1 += s;
+                    }
+                    a.1 += b.1;
+                    a
+                },
+            );
+        for (k, (n, s)) in part {
+            let e = groups.entry(k).or_insert((0, 0));
+            e.0 += n;
+            e.1 += s;
+        }
+        total += sub_total;
     }
     let mut rows: Vec<Q1Row> = groups
         .into_iter()
@@ -608,7 +651,7 @@ fn q2_tag_evolution(
     let mut qualifying: HashSet<u32> = HashSet::new();
     if let Some(tags) = g.nodes_with_label("Tag") {
         for t in tags.iter() {
-            if g.neighbors_by_type(t, Direction::Outgoing, &["hasType"]).contains(&target) {
+            if g.neighbors_by_type(t, Direction::Outgoing, "hasType").any(|n| n == target) {
                 qualifying.insert(t);
             }
         }
@@ -669,7 +712,7 @@ fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(String, usize)> 
     let mut related: HashMap<u32, HashSet<u32>> = HashMap::new();
     for msg in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
         for comment in g.neighbors_by_type(msg, Direction::Incoming, &["replyOf"]) {
-            let ctags = g.neighbors_by_type(comment, Direction::Outgoing, &["hasTag"]);
+            let ctags: Vec<u32> = g.neighbors_by_type(comment, Direction::Outgoing, "hasTag").collect();
             if !ctags.contains(&target) {
                 for &rt in &ctags {
                     related.entry(rt).or_default().insert(comment);
@@ -705,7 +748,7 @@ fn q12_message_counts(
             if posts.is_some_and(|p| p.contains(n)) {
                 return pstr(g, n, "lang");
             }
-            n = *g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]).first()?;
+            n = g.neighbors_by_type(n, Direction::Outgoing, "replyOf").next()?;
         }
         None
     };
@@ -750,8 +793,8 @@ fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64, u64, u
     };
     let mut agg: HashMap<u32, (u64, u64, u64)> = HashMap::new(); // person -> (msgs, replies, likes)
     for message in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
-        let likes = g.neighbors_by_type(message, Direction::Incoming, &["likes"]).len() as u64;
-        let replies = g.neighbors_by_type(message, Direction::Incoming, &["replyOf"]).len() as u64;
+        let likes = g.neighbors_by_type(message, Direction::Incoming, "likes").count() as u64;
+        let replies = g.neighbors_by_type(message, Direction::Incoming, "replyOf").count() as u64;
         for person in g.neighbors_by_type(message, Direction::Incoming, &["hasCreator"]) {
             let e = agg.entry(person).or_insert((0, 0, 0));
             e.0 += 1;
@@ -777,7 +820,7 @@ fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64)> {
     };
     let mut p1_to_p2: HashMap<u32, HashSet<u32>> = HashMap::new();
     for message1 in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
-        let likers = g.neighbors_by_type(message1, Direction::Incoming, &["likes"]);
+        let likers: Vec<u32> = g.neighbors_by_type(message1, Direction::Incoming, "likes").collect();
         if likers.is_empty() {
             continue;
         }
@@ -794,7 +837,7 @@ fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64)> {
             let score: u64 = p2set
                 .iter()
                 .flat_map(|&p2| g.neighbors_by_type(p2, Direction::Outgoing, &["hasCreator"]))
-                .map(|m2| g.neighbors_by_type(m2, Direction::Incoming, &["likes"]).len() as u64)
+                .map(|m2| g.neighbors_by_type(m2, Direction::Incoming, "likes").count() as u64)
                 .sum();
             (p1, score)
         })
@@ -844,8 +887,7 @@ fn q8_central_person(
         .map(|(&p, &s)| {
             let fs: i64 = g
                 .neighbors_by_type(p, Direction::Outgoing, &["knows"])
-                .iter()
-                .map(|f| score.get(f).copied().unwrap_or(0))
+                .map(|f| score.get(&f).copied().unwrap_or(0))
                 .sum();
             (p, s, fs)
         })
@@ -927,7 +969,7 @@ fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i64) -> Vec<
             if pd < start_day || pd > end_day {
                 continue;
             }
-            let Some(&creator) = g.neighbors_by_type(post, Direction::Incoming, &["hasCreator"]).first() else {
+            let Some(creator) = g.neighbors_by_type(post, Direction::Incoming, &["hasCreator"]).next() else {
                 continue;
             };
             // Walk the post's reply tree; replies are created after their parent,
@@ -982,8 +1024,7 @@ fn q13_zombies(
             }
             let mcount = g
                 .neighbors_by_type(p, Direction::Outgoing, &["hasCreator"])
-                .iter()
-                .filter(|&&m| pi64(g, m, "day") < end_day)
+                .filter(|&m| pi64(g, m, "day") < end_day)
                 .count() as i64;
             let months = end_ym - pi64(g, p, "pym") + 1;
             if months > 0 && mcount < months {
@@ -1068,11 +1109,11 @@ fn build_interaction_map(g: &GraphSnapshot) -> HashMap<(u32, u32), u32> {
     let mut interaction: HashMap<(u32, u32), u32> = HashMap::new();
     if let Some(comments) = g.nodes_with_label("Comment") {
         for c in comments.iter() {
-            let Some(&a) = g.neighbors_by_type(c, Direction::Incoming, &["hasCreator"]).first() else {
+            let Some(a) = g.neighbors_by_type(c, Direction::Incoming, &["hasCreator"]).next() else {
                 continue;
             };
             for parent in g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]) {
-                if let Some(&b) = g.neighbors_by_type(parent, Direction::Incoming, &["hasCreator"]).first() {
+                if let Some(b) = g.neighbors_by_type(parent, Direction::Incoming, &["hasCreator"]).next() {
                     if a != b {
                         *interaction.entry((a.min(b), a.max(b))).or_insert(0) += 1;
                     }
@@ -1147,7 +1188,6 @@ fn build_studyat(g: &GraphSnapshot) -> HashMap<u32, Vec<(u32, i64)>> {
         for p in persons.iter() {
             let recs: Vec<(u32, i64)> = g
                 .relationships(p, Direction::Outgoing, &["studyAt"])
-                .iter()
                 .map(|r| {
                     let cy = match g.relationship_property(r.pos, "cy") {
                         Some(ValueId::I64(y)) => y,
@@ -1295,9 +1335,9 @@ fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name: &str) -> 
         let mut s = HashSet::new();
         for msg in g.neighbors_by_type(p, Direction::Outgoing, &["hasCreator"]) {
             for parent in g.neighbors_by_type(msg, Direction::Outgoing, &["replyOf"]) {
-                if let Some(&cr) = g
+                if let Some(cr) = g
                     .neighbors_by_type(parent, Direction::Incoming, &["hasCreator"])
-                    .first()
+                    .next()
                 {
                     s.insert(cr);
                 }
@@ -1309,9 +1349,9 @@ fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name: &str) -> 
     let liked_creators = |p: u32| -> HashSet<u32> {
         let mut s = HashSet::new();
         for msg in g.neighbors_by_type(p, Direction::Outgoing, &["likes"]) {
-            if let Some(&cr) = g
+            if let Some(cr) = g
                 .neighbors_by_type(msg, Direction::Incoming, &["hasCreator"])
-                .first()
+                .next()
             {
                 s.insert(cr);
             }
@@ -1400,7 +1440,6 @@ fn q16_param_result(g: &GraphSnapshot, tag_name: &str, day: i64, max_knows: i64)
         .filter(|(p1, _)| {
             let cp2 = g
                 .neighbors_by_type(*p1, Direction::Outgoing, &["knows"])
-                .iter()
                 .filter(|f| creators_on_day.contains(f))
                 .count() as i64;
             cp2 <= max_knows
@@ -1485,7 +1524,7 @@ fn q10_experts(
             continue;
         }
         for msg in g.neighbors_by_type(expert, Direction::Outgoing, &["hasCreator"]) {
-            let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]);
+            let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]).collect::<Vec<_>>();
             if tags.iter().any(|t| class_tags.contains(t)) {
                 for &t in &tags {
                     counts.entry((expert, t)).or_default().insert(msg);
@@ -1525,8 +1564,7 @@ fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_name: &str)
         .collect();
     let has_class_tag = |msg: u32| {
         g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"])
-            .iter()
-            .any(|t| class_tags.contains(t))
+            .any(|t| class_tags.contains(&t))
     };
     let mut rows: Vec<(i64, String, i64, i64, i64)> = Vec::new();
     for city in g.neighbors_by_type(country, Direction::Incoming, &["isPartOf"]) {
@@ -1569,37 +1607,55 @@ fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_name: &str)
 /// (person LDBC id, messageCount), top 100. Cypher: bi-4.cypher (name/date output
 /// columns are deterministic from the id, so the cross-check uses id + count).
 fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i64)>, Vec<i64>) {
+    use hashbrown::{HashMap as FastMap, HashSet as FastSet};
+    // Resolve the relationship types once and reuse them across the traversal.
+    // The string-based, Vec-returning neighbors_by_type allocated a HashSet + Vec
+    // on every call (~74% of this query's time); the zero-alloc *_of_type
+    // accessors below match the type by an integer compare instead.
+    let (
+        Some(t_member),
+        Some(t_loc),
+        Some(t_part),
+        Some(t_cont),
+        Some(t_creator),
+        Some(t_reply),
+    ) = (
+        g.relationship_type_from_str("hasMember"),
+        g.relationship_type_from_str("isLocatedIn"),
+        g.relationship_type_from_str("isPartOf"),
+        g.relationship_type_from_str("containerOf"),
+        g.relationship_type_from_str("hasCreator"),
+        g.relationship_type_from_str("replyOf"),
+    ) else {
+        return (Vec::new(), Vec::new());
+    };
     let person_country = |p: u32| -> Option<u32> {
-        let city = *g
-            .neighbors_by_type(p, Direction::Outgoing, &["isLocatedIn"])
-            .first()?;
-        g.neighbors_by_type(city, Direction::Outgoing, &["isPartOf"])
-            .first()
-            .copied()
+        let city = g.neighbors_by_type(p, Direction::Outgoing, t_loc).next()?;
+        g.neighbors_by_type(city, Direction::Outgoing, t_part).next()
     };
     // Step 1: top-100 forums by (country, forum) member count.
-    let mut cf: HashMap<(u32, u32), i64> = HashMap::new();
+    let mut cf: FastMap<(u32, u32), i64> = FastMap::new();
     if let Some(forums) = g.nodes_with_label("Forum") {
         for forum in forums.iter() {
             if pi64(g, forum, "fday") <= after_day {
                 continue;
             }
-            for m in g.neighbors_by_type(forum, Direction::Outgoing, &["hasMember"]) {
+            for m in g.neighbors_by_type(forum, Direction::Outgoing, t_member) {
                 if let Some(country) = person_country(m) {
                     *cf.entry((country, forum)).or_insert(0) += 1;
                 }
             }
         }
     }
-    let mut ranked: Vec<(i64, u32, u32)> = cf.iter().map(|((c, f), &n)| (n, *f, *c)).collect();
-    ranked.sort_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then(pi64(g, a.1, "flid").cmp(&pi64(g, b.1, "flid")))
-            .then(pi64(g, a.2, "lid").cmp(&pi64(g, b.2, "lid")))
-    });
+    // Precompute (flid, lid) sort keys so the comparator does no property reads.
+    let mut ranked: Vec<(i64, i64, i64, u32)> = cf
+        .iter()
+        .map(|(&(c, f), &n)| (n, pi64(g, f, "flid"), pi64(g, c, "lid"), f))
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
     let mut top_forums: Vec<u32> = Vec::new();
-    let mut seen_f: HashSet<u32> = HashSet::new();
-    for (_, f, _) in ranked {
+    let mut seen_f: FastSet<u32> = FastSet::new();
+    for (_, _, _, f) in ranked {
         if seen_f.insert(f) {
             top_forums.push(f);
             if top_forums.len() == 100 {
@@ -1608,36 +1664,35 @@ fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i64)>, Vec<i
         }
     }
     // Step 2: members of top forums, ranked by their messages in those forums.
-    let mut members: HashSet<u32> = HashSet::new();
+    let mut members: FastSet<u32> = FastSet::new();
     for &f in &top_forums {
-        for m in g.neighbors_by_type(f, Direction::Outgoing, &["hasMember"]) {
+        for m in g.neighbors_by_type(f, Direction::Outgoing, t_member) {
             members.insert(m);
         }
     }
-    let mut msg_count: HashMap<u32, HashSet<u32>> = HashMap::new();
+    // The replyOf graph is a forest (each thread roots at one Post), so a DFS down
+    // a post's subtree never revisits — no `seen` set, and each message is counted
+    // once (a plain per-creator counter, no inner dedup set). `stack` is reused.
+    let mut msg_count: FastMap<u32, i64> = FastMap::new();
+    let mut stack: Vec<u32> = Vec::new();
     for &f in &top_forums {
-        for post in g.neighbors_by_type(f, Direction::Outgoing, &["containerOf"]) {
-            let mut stack = vec![post];
-            let mut seen: HashSet<u32> = HashSet::new();
-            while let Some(n) = stack.pop() {
-                if !seen.insert(n) {
-                    continue;
+        for post in g.neighbors_by_type(f, Direction::Outgoing, t_cont) {
+            stack.push(post);
+        }
+        while let Some(n) = stack.pop() {
+            if let Some(creator) = g.neighbors_by_type(n, Direction::Incoming, t_creator).next() {
+                if members.contains(&creator) {
+                    *msg_count.entry(creator).or_insert(0) += 1;
                 }
-                if let Some(&creator) = g
-                    .neighbors_by_type(n, Direction::Incoming, &["hasCreator"])
-                    .first()
-                {
-                    if members.contains(&creator) {
-                        msg_count.entry(creator).or_default().insert(n);
-                    }
-                }
-                stack.extend(g.neighbors_by_type(n, Direction::Incoming, &["replyOf"]));
+            }
+            for c in g.neighbors_by_type(n, Direction::Incoming, t_reply) {
+                stack.push(c);
             }
         }
     }
     let mut rows: Vec<(u32, i64)> = members
         .iter()
-        .map(|&p| (p, msg_count.get(&p).map(|s| s.len() as i64).unwrap_or(0)))
+        .map(|&p| (p, msg_count.get(&p).copied().unwrap_or(0)))
         .collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
@@ -1665,8 +1720,7 @@ fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_da
     let is_post = |n: u32| posts.is_some_and(|p| p.contains(n));
     let creator = |m: u32| {
         g.neighbors_by_type(m, Direction::Incoming, &["hasCreator"])
-            .first()
-            .copied()
+            .next()
     };
     // Root post of a message's thread (walk replyOf up to a Post), memoized.
     let mut root_cache: HashMap<u32, u32> = HashMap::new();
@@ -1680,7 +1734,7 @@ fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_da
                 }
                 return r;
             }
-            let parent = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]);
+            let parent = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]).collect::<Vec<_>>();
             if parent.is_empty() {
                 for p in &path {
                     cache.insert(*p, n);
@@ -1696,8 +1750,7 @@ fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_da
     let mut w: HashMap<(u32, u32), f64> = HashMap::new();
     if let Some(comments) = g.nodes_with_label("Comment") {
         for c in comments.iter() {
-            let parent = g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]);
-            let Some(&parent) = parent.first() else {
+            let Some(parent) = g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]).next() else {
                 continue;
             };
             let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
@@ -1707,9 +1760,9 @@ fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_da
                 continue;
             }
             let root = root_of(g, c, &mut root_cache);
-            let Some(&forum) = g
+            let Some(forum) = g
                 .neighbors_by_type(root, Direction::Incoming, &["containerOf"])
-                .first()
+                .next()
             else {
                 continue;
             };
@@ -1739,8 +1792,7 @@ fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i
     let delta_ms = delta_hours * 3_600_000;
     let creator = |m: u32| {
         g.neighbors_by_type(m, Direction::Incoming, &["hasCreator"])
-            .first()
-            .copied()
+            .next()
     };
     let mut root_cache: HashMap<u32, u32> = HashMap::new();
     let mut forum_of = |g: &GraphSnapshot, m: u32, rc: &mut HashMap<u32, u32>| -> Option<u32> {
@@ -1753,7 +1805,7 @@ fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i
                 }
                 break r;
             }
-            let par = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]);
+            let par = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]).collect::<Vec<_>>();
             if par.is_empty() {
                 for p in &path {
                     rc.insert(*p, n);
@@ -1765,10 +1817,9 @@ fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i
             n = par[0];
         };
         g.neighbors_by_type(root, Direction::Incoming, &["containerOf"])
-            .first()
-            .copied()
+            .next()
     };
-    let tagged: Vec<u32> = g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]);
+    let tagged: Vec<u32> = g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]).collect();
     let tagged_set: HashSet<u32> = tagged.iter().copied().collect();
     // message1 tuples (person1, forum1, ms1) and candidate (person2, person3, message2, forum2, ms2).
     let mut m1_list: Vec<(u32, u32, i64)> = Vec::new();
@@ -1777,7 +1828,7 @@ fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i
         if let (Some(p1), Some(f1)) = (creator(m), forum_of(g, m, &mut root_cache)) {
             m1_list.push((p1, f1, pi64(g, m, "ms")));
         }
-        if let Some(&msg2) = g.neighbors_by_type(m, Direction::Outgoing, &["replyOf"]).first() {
+        if let Some(msg2) = g.neighbors_by_type(m, Direction::Outgoing, &["replyOf"]).next() {
             if tagged_set.contains(&msg2) {
                 if let (Some(p2), Some(p3), Some(f2)) =
                     (creator(m), creator(msg2), forum_of(g, msg2, &mut root_cache))
@@ -1835,7 +1886,7 @@ fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
     for label in ["Post", "Comment"] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]);
+                let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]).collect::<Vec<_>>();
                 for i in 0..tags.len() {
                     for j in (i + 1)..tags.len() {
                         let pair = if tags[i] < tags[j] {
@@ -1923,6 +1974,45 @@ fn main() -> Result<()> {
         s.persons, s.posts, s.comments, s.tags, s.tag_classes
     );
     println!("       {} edges in {load_secs:.1}s\n", s.edges);
+
+    // Focused profiling hook: LDBC_PROFILE_Q4=<reps> runs only Q4 then exits,
+    // so a sampler isn't diluted by load + the other queries.
+    if let Ok(v) = std::env::var("LDBC_PROFILE_Q4") {
+        let reps: usize = v.parse().ok().filter(|&n| n > 0).unwrap_or(5);
+        let after = days_from_civil(2010, 1, 29);
+        for i in 0..reps {
+            let t = Instant::now();
+            let r = q4_top_creators(&graph, after);
+            std::hint::black_box(&r);
+            eprintln!("Q4 rep {i}: {:.2} ms (rows={})", t.elapsed().as_secs_f64() * 1000.0, r.0.len());
+        }
+        return Ok(());
+    }
+    if let Ok(v) = std::env::var("LDBC_PROFILE_Q1") {
+        let reps: usize = v.parse().ok().filter(|&n| n > 0).unwrap_or(300);
+        let cutoff = days_from_civil(2011, 12, 1);
+        let t = Instant::now();
+        for _ in 0..reps {
+            let r = q1_posting_summary(&graph, cutoff);
+            std::hint::black_box(&r);
+        }
+        eprintln!(
+            "Q1 x{reps}: {:.2} ms/rep",
+            t.elapsed().as_secs_f64() * 1000.0 / reps as f64
+        );
+        return Ok(());
+    }
+    if let Ok(v) = std::env::var("LDBC_PROFILE_Q15") {
+        let reps: usize = v.parse().ok().filter(|&n| n > 0).unwrap_or(5);
+        let (s_day, e_day) = (days_from_civil(2010, 11, 1), days_from_civil(2010, 12, 1));
+        for i in 0..reps {
+            let t = Instant::now();
+            let r = q15_weighted_path(&graph, 14, 16, s_day, e_day);
+            std::hint::black_box(&r);
+            eprintln!("Q15 rep {i}: {:.2} ms (dist={r})", t.elapsed().as_secs_f64() * 1000.0);
+        }
+        return Ok(());
+    }
 
     // --- Faithful LDBC BI queries (official Cypher params) ---
     // Set LDBC_EMIT_JSON=<dir> to dump Q1/Q2 result rows for the Kùzu
@@ -2192,7 +2282,11 @@ fn main() -> Result<()> {
         s.push(']');
         emit_json(dir, "q16.rust.json", s);
 
-        let q10 = q10_experts(&graph, 3470, "China", "MusicalArtist", 3, 4);
+        let q10_person: i64 = std::env::var("LDBC_Q10_PERSON")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3470);
+        let q10 = q10_experts(&graph, q10_person, "China", "MusicalArtist", 3, 4);
         let mut s = String::from("["); // Q10: [eid, tagName, messageCount]
         for (i, (e, tn, c)) in q10.iter().enumerate() {
             if i > 0 {
@@ -2369,6 +2463,37 @@ fn main() -> Result<()> {
             q20_recruitment(&graph, co, p2, &study_wm).len()
         });
     }
+    time_query("Q3 popular topics", runs, || {
+        q3_popular_topics(&graph, "Burma", "MusicalArtist").len()
+    });
+    time_query("Q4 top creators", runs, || {
+        q4_top_creators(&graph, days_from_civil(2010, 1, 29)).0.len()
+    });
+    let q10_person: i64 = std::env::var("LDBC_Q10_PERSON")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3470);
+    time_query("Q10 experts", runs, || {
+        q10_experts(&graph, q10_person, "China", "MusicalArtist", 3, 4).len()
+    });
+    time_query("Q14 international dialog", runs, || {
+        q14_international_dialog(&graph, "Chile", "Argentina").len()
+    });
+    time_query("Q15 weighted path", runs, || {
+        let _ = q15_weighted_path(&graph, 14, 16, days_from_civil(2010, 11, 1), days_from_civil(2010, 12, 1));
+        1
+    });
+    time_query("Q16 fake news", runs, || {
+        let ra = q16_param_result(&graph, "Meryl_Streep", days_from_civil(2012, 9, 16), 4);
+        let rb = q16_param_result(&graph, "Hank_Williams", days_from_civil(2012, 5, 8), 4);
+        q16_fake_news(&graph, &ra, &rb).len()
+    });
+    time_query("Q17 information propagation", runs, || {
+        q17_information_propagation(&graph, "Slavoj_Žižek", 4).len()
+    });
+    time_query("Q18 friend recommendation", runs, || {
+        q18_friend_recommendation(&graph, "Frank_Sinatra").len()
+    });
     // Simplified patterns (parity with the synthetic benchmark).
     time_query("BI1 tag co-evolution (simpl.)", runs, || {
         bi1_tag_evolution(&graph)

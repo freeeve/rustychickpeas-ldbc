@@ -1821,6 +1821,8 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "flate2",
+ "hashbrown 0.16.0",
+ "rayon",
  "rustychickpeas-core",
 ]
 
