@@ -18,6 +18,10 @@ pub mod q5;
 pub mod q7;
 pub mod a17; // advanced q17 (geo)
 pub mod a18; // advanced q18 (date-range)
+pub mod a19; // advanced q19 (popular tags, aggregation)
+pub mod a20; // advanced q20 (full-text)
+pub mod a21; // advanced q21 (faceted search)
+pub mod a22; // advanced q22 (faceted search)
 
 use std::path::PathBuf;
 use std::time::Instant;
