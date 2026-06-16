@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Kùzu reference side for the SPB queries — the head-to-head against
-rustychickpeas's hand-coded SPB family.
+"""Kùzu reference side for the SPB queries, on the REAL SPB vocabulary — the
+head-to-head against rustychickpeas's hand-coded SPB family.
 
-Loads the same N-Triples sample as a property graph, builds a BM25 full-text
-index, and runs the five SPB queries:
+Projects a self-contained SPB N-Triples extract (creative works + geonames
+Features, from scripts/spb_extract.sh) into a Kùzu property graph, builds a BM25
+full-text index over title+description, and runs:
 
-  Q1 about-entity, Q2 category rollup  -- plain Cypher (the aggregation shape)
-  Q3 full-text                         -- Kùzu's `fts` index (BM25)  <- fts race
-  Q4 geo radius / Q5 geo+fts           -- two modes:
-       (a) Kùzu-native Cypher Haversine over all places (no spatial index)
-       (b) hybrid: our geo k-d tree pre-filters places, Kùzu does the rest
+  q8 full-text  -- Kùzu `fts` index (BM25)            <- the fts race
+  q6 geo        -- Cypher Haversine over Features (no spatial index)
+  q6 AND q8     -- composition
 
-Correctness is cross-checked against results/spb.rust.json (emitted by the
-`spb` binary). Run `cargo run --bin spb` first.
+then cross-checks the work-uri sets against results/spb.rust.json (emitted by the
+`spb` binary on the same extract). Run `target/release/spb <extract>` first.
 
-Usage: .venv-kuzu/bin/python kuzu/run_spb.py [sample.nt] [runs]
+Usage: .venv-kuzu/bin/python kuzu/run_spb.py <extract.nt> [runs]
 """
 import csv
 import json
@@ -27,54 +26,54 @@ import time
 
 import kuzu
 
-SAMPLE = sys.argv[1] if len(sys.argv) > 1 else "samples/spb-sample.nt"
+EXTRACT = sys.argv[1] if len(sys.argv) > 1 else "data/spb/extract/spb-validate.nt"
 RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 5
-QLAT, QLON, RADIUS = 51.5074, -0.1278, 50.0
+CW = "http://www.bbc.co.uk/ontologies/creativework/"
+GEO = "http://www.geonames.org/ontology#"
+WGS = "http://www.w3.org/2003/01/geo/wgs84_pos#"
 RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-
-TRIPLE = re.compile(r'^\s*(\S+)\s+(\S+)\s+(.+?)\s*\.\s*$')
-
-
-def local(iri):
-    return re.split(r'[#/]', iri.rstrip("#/"))[-1]
+TRIPLE = re.compile(r"^\s*<([^>]*)>\s+<([^>]*)>\s+(.+?)\s*\.\s*$")
 
 
-def parse_nt(path):
-    """Minimal N-Triples parse -> list of (s_iri, p_iri, object) where object is
-    ('iri', val) or ('lit', val)."""
-    out = []
+def lit(o):
+    return o.split('"')[1] if o.startswith('"') else None
+
+
+def clean(s):
+    """Strip CSV-hostile chars (the '|' delimiter, quotes, control chars) from a
+    display/FTS string. Geonames names/titles can contain '|'."""
+    return re.sub(r'[|"\t\r\n]', " ", s) if s else s
+
+
+def project(path, outdir):
+    """Parse the extract into CreativeWork / Feature node CSVs + a mentions
+    edge CSV. Returns (n_cw, n_feat, n_mentions)."""
+    cw = {}     # uri -> [title, description]
+    feat = {}   # uri -> [name, lat, lon]
+    is_cw, is_feat = set(), set()
+    mentions = []
     for line in open(path, encoding="utf-8"):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
         m = TRIPLE.match(line)
         if not m:
             continue
         s, p, o = m.group(1), m.group(2), m.group(3)
-        s = s.strip("<>")
-        p = p.strip("<>")
-        if o.startswith("<"):
-            out.append((s, p, ("iri", o[1:o.index(">")])))
-        elif o.startswith('"'):
-            out.append((s, p, ("lit", o[1:].split('"')[0])))
-        # blank nodes ignored for this sample
-    return out
-
-
-def project(path, outdir):
-    """Project triples into typed property-graph CSVs; return the resource->type map."""
-    triples = parse_nt(path)
-    typ, prop = {}, {}            # uri -> type local name ; uri -> {key: value}
-    about, broader = [], []       # (cw, target) ; (concept, parent)
-    for s, p, (kind, val) in triples:
-        if p == RDF_TYPE and kind == "iri":
-            typ[s] = local(val)
-        elif local(p) == "about" and kind == "iri":
-            about.append((s, val))
-        elif local(p) == "broader" and kind == "iri":
-            broader.append((s, val))
-        elif kind == "lit":
-            prop.setdefault(s, {})[local(p)] = val
+        if p == RDF_TYPE:
+            if o == f"<{CW}CreativeWork>":
+                is_cw.add(s)
+            elif o == f"<{GEO}Feature>":
+                is_feat.add(s)
+        elif p == f"{CW}title":
+            cw.setdefault(s, ["", ""])[0] = lit(o) or ""
+        elif p == f"{CW}description":
+            cw.setdefault(s, ["", ""])[1] = lit(o) or ""
+        elif p == f"{CW}mentions" and o.startswith("<"):
+            mentions.append((s, o[1:o.index(">")]))
+        elif p == f"{GEO}name":
+            feat.setdefault(s, ["", None, None])[0] = lit(o) or ""
+        elif p == f"{WGS}lat":
+            feat.setdefault(s, ["", None, None])[1] = lit(o)
+        elif p == f"{WGS}long":
+            feat.setdefault(s, ["", None, None])[2] = lit(o)
 
     def write(name, header, rows):
         with open(os.path.join(outdir, name), "w", newline="") as f:
@@ -82,110 +81,75 @@ def project(path, outdir):
             w.writerow(header)
             w.writerows(rows)
 
-    cw = [u for u, t in typ.items() if t == "CreativeWork"]
-    place = [u for u, t in typ.items() if t == "Place"]
-    concept = [u for u, t in typ.items() if t == "Concept"]
-    write("cw.csv", ["uri", "label", "content"],
-          [[u, prop.get(u, {}).get("label", ""), prop.get(u, {}).get("content", "")] for u in cw])
-    write("place.csv", ["uri", "label", "lat", "lon"],
-          [[u, prop.get(u, {}).get("label", ""), prop[u]["lat"], prop[u]["long"]] for u in place])
-    write("concept.csv", ["uri", "label"],
-          [[u, prop.get(u, {}).get("label", "")] for u in concept])
-    write("aboutplace.csv", ["from", "to"], [(a, b) for a, b in about if typ.get(b) == "Place"])
-    write("aboutconcept.csv", ["from", "to"], [(a, b) for a, b in about if typ.get(b) == "Concept"])
-    write("broader.csv", ["from", "to"], broader)
-    return len(cw), len(place), len(concept), len(about), len(broader)
+    write("cw.csv", ["uri", "title", "description"],
+          [[u, clean(cw.get(u, ["", ""])[0]), clean(cw.get(u, ["", ""])[1])] for u in is_cw])
+    feats = [u for u in is_feat if feat.get(u, ["", None, None])[1] is not None]
+    write("feat.csv", ["uri", "name", "lat", "lon"],
+          [[u, clean(feat[u][0]), feat[u][1], feat[u][2]] for u in feats])
+    fset = set(feats)
+    write("mentions.csv", ["from", "to"],
+          [(a, b) for a, b in mentions if a in is_cw and b in fset])
+    return len(is_cw), len(feats), sum(1 for a, b in mentions if a in is_cw and b in fset)
 
 
-def haversine(latcol, loncol):
-    """Cypher great-circle-distance (km) expression from query point to a row."""
+def haversine(latcol, loncol, qlat, qlon):
     return (f"6371.0088*2*asin(sqrt("
-            f"sin(radians({latcol}-({QLAT}))/2)*sin(radians({latcol}-({QLAT}))/2)+"
-            f"cos(radians({QLAT}))*cos(radians({latcol}))*"
-            f"sin(radians({loncol}-({QLON}))/2)*sin(radians({loncol}-({QLON}))/2)))")
+            f"sin(radians({latcol}-({qlat}))/2)*sin(radians({latcol}-({qlat}))/2)+"
+            f"cos(radians({qlat}))*cos(radians({latcol}))*"
+            f"sin(radians({loncol}-({qlon}))/2)*sin(radians({loncol}-({qlon}))/2)))")
 
 
 def main():
+    rust = json.load(open("results/spb.rust.json")) if os.path.exists("results/spb.rust.json") else {}
+    word = rust.get("word", "football")
+    qlat, qlon, km = rust.get("lat", 51.5074), rust.get("lon", -0.1278), rust.get("km", 50.0)
+
     tmp = tempfile.mkdtemp()
-    counts = project(SAMPLE, tmp)
-    print(f"Projected: {counts[0]} works, {counts[1]} places, {counts[2]} concepts, "
-          f"{counts[3]} about, {counts[4]} broader edges")
+    n_cw, n_feat, n_men = project(EXTRACT, tmp)
+    print(f"Projected: {n_cw} CreativeWorks, {n_feat} Features, {n_men} mentions edges")
 
     conn = kuzu.Connection(kuzu.Database(os.path.join(tmp, "db")))
     try:
         conn.execute("INSTALL fts; LOAD fts;")
     except Exception:
         pass
-    schema = [
-        "CREATE NODE TABLE CreativeWork(uri STRING, label STRING, content STRING, PRIMARY KEY(uri))",
-        "CREATE NODE TABLE Place(uri STRING, label STRING, lat DOUBLE, lon DOUBLE, PRIMARY KEY(uri))",
-        "CREATE NODE TABLE Concept(uri STRING, label STRING, PRIMARY KEY(uri))",
-        "CREATE REL TABLE aboutPlace(FROM CreativeWork TO Place)",
-        "CREATE REL TABLE aboutConcept(FROM CreativeWork TO Concept)",
-        "CREATE REL TABLE broader(FROM Concept TO Concept)",
-    ]
-    for s in schema:
-        conn.execute(s)
+    for stmt in [
+        "CREATE NODE TABLE CreativeWork(uri STRING, title STRING, description STRING, PRIMARY KEY(uri))",
+        "CREATE NODE TABLE Feature(uri STRING, name STRING, lat DOUBLE, lon DOUBLE, PRIMARY KEY(uri))",
+        "CREATE REL TABLE mentions(FROM CreativeWork TO Feature)",
+    ]:
+        conn.execute(stmt)
     t0 = time.perf_counter()
-    for tbl, f in [("CreativeWork", "cw"), ("Place", "place"), ("Concept", "concept"),
-                   ("aboutPlace", "aboutplace"), ("aboutConcept", "aboutconcept"), ("broader", "broader")]:
+    for tbl, f in [("CreativeWork", "cw"), ("Feature", "feat"), ("mentions", "mentions")]:
         conn.execute(f"COPY {tbl} FROM '{tmp}/{f}.csv' (HEADER=true, DELIM='|')")
-    conn.execute("CALL CREATE_FTS_INDEX('CreativeWork', 'cwFts', ['content'])")
-    load_ms = (time.perf_counter() - t0) * 1000
+    conn.execute("CALL CREATE_FTS_INDEX('CreativeWork', 'cwFts', ['title', 'description'])")
+    print(f"Kùzu load + FTS index: {(time.perf_counter()-t0)*1000:.0f} ms\n")
 
-    # Hybrid (b) pre-filter + correctness reference, from the rustychickpeas run.
-    rust = {}
-    if os.path.exists("results/spb.rust.json"):
-        rust = json.load(open("results/spb.rust.json"))
-    near_places = rust.get("geo_places_near_london", [])
-    near_list = "[" + ",".join(f"'{u}'" for u in near_places) + "]"
-
-    hav = haversine("p.lat", "p.lon")
+    hav = haversine("f.lat", "f.lon", qlat, qlon)
     queries = {
-        "Q1 about-entity": (
-            "MATCH (w:CreativeWork)-[:aboutPlace]->(p:Place {label:'London'}) RETURN DISTINCT w.uri AS uri",
-            "about_london"),
-        "Q2 category rollup": (
-            "MATCH (c:Concept)-[:broader*0..5]->(:Concept {label:'Sport'}) "
-            "OPTIONAL MATCH (w:CreativeWork)-[:aboutConcept]->(c) "
-            "RETURN c.label AS cat, count(DISTINCT w) AS works", None),
-        "Q3 fts (BM25 index)": (
-            "CALL QUERY_FTS_INDEX('CreativeWork','cwFts','football') RETURN node.uri AS uri ORDER BY score DESC",
-            "fts_football"),
-        "Q4a geo Haversine scan": (
-            f"MATCH (w:CreativeWork)-[:aboutPlace]->(p:Place) WITH w, {hav} AS km "
-            f"WHERE km <= {RADIUS} RETURN DISTINCT w.uri AS uri", "geo_near_london"),
-        "Q4b geo hybrid (our k-d tree)": (
-            f"MATCH (w:CreativeWork)-[:aboutPlace]->(p:Place) WHERE p.uri IN {near_list} "
-            f"RETURN DISTINCT w.uri AS uri", "geo_near_london"),
-        "Q5a geo+fts Haversine": (
-            f"CALL QUERY_FTS_INDEX('CreativeWork','cwFts','tennis') WITH node AS w "
-            f"MATCH (w)-[:aboutPlace]->(p:Place) WITH w, {hav} AS km "
-            f"WHERE km <= {RADIUS} RETURN DISTINCT w.uri AS uri", "geo_fts_tennis"),
-        "Q5b geo+fts hybrid": (
-            f"CALL QUERY_FTS_INDEX('CreativeWork','cwFts','tennis') WITH node AS w "
-            f"MATCH (w)-[:aboutPlace]->(p:Place) WHERE p.uri IN {near_list} "
-            f"RETURN DISTINCT w.uri AS uri", "geo_fts_tennis"),
+        "q8 fts (BM25 index)": (
+            f"CALL QUERY_FTS_INDEX('CreativeWork','cwFts','{word}') RETURN node.uri AS uri", "q8_fulltext"),
+        "q6 geo (Haversine scan)": (
+            f"MATCH (w:CreativeWork)-[:mentions]->(f:Feature) WITH w, {hav} AS km "
+            f"WHERE km <= {km} RETURN DISTINCT w.uri AS uri", "q6_geo"),
+        "q6 AND q8": (
+            f"CALL QUERY_FTS_INDEX('CreativeWork','cwFts','{word}') WITH node AS w "
+            f"MATCH (w)-[:mentions]->(f:Feature) WITH w, {hav} AS km "
+            f"WHERE km <= {km} RETURN DISTINCT w.uri AS uri", "q6_q8"),
     }
 
-    print(f"\nKùzu SPB (load + FTS index in {load_ms:.1f} ms)\n")
-    print(f"{'query':<32}{'kùzu ms':>9}  {'rows':>5}  cross-check")
-    for name, (cy, ref_key) in queries.items():
+    print(f"{'query':<26}{'kùzu ms':>9}  {'rows':>6}  cross-check vs rustychickpeas")
+    for name, (cy, key) in queries.items():
         samples = []
         for _ in range(RUNS):
             t = time.perf_counter()
             df = conn.execute(cy).get_as_df()
             samples.append((time.perf_counter() - t) * 1000)
-        med = statistics.median(samples)
-        if "uri" in df.columns:
-            got = sorted(df["uri"].tolist())
-            check = ""
-            if ref_key and ref_key in rust:
-                check = "match" if got == sorted(rust[ref_key]) else f"DIFF (rust={sorted(rust[ref_key])})"
-            print(f"{name:<32}{med:>9.3f}  {len(got):>5}  {check}")
-        else:
-            total = int(df["works"].sum())
-            print(f"{name:<32}{med:>9.3f}  {len(df):>5}  rollup total works={total}")
+        got = sorted(df["uri"].tolist())
+        check = ""
+        if key in rust:
+            check = "MATCH" if got == sorted(rust[key]) else f"DIFF (rust={len(rust[key])})"
+        print(f"{name:<26}{statistics.median(samples):>9.2f}  {len(got):>6}  {check}")
 
 
 if __name__ == "__main__":

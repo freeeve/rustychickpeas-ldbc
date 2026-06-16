@@ -20,8 +20,17 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use crate::props::pstr;
 
 /// Whether `node` carries the given label.
-fn has_label(g: &GraphSnapshot, node: u32, label: &str) -> bool {
+pub(crate) fn has_label(g: &GraphSnapshot, node: u32, label: &str) -> bool {
     g.nodes_with_label(label).is_some_and(|ns| ns.contains(node))
+}
+
+/// Find a node by its `uri` property, across the labelled entity types we keep
+/// (creative works and geonames features). Returns `None` for an unknown uri or
+/// an unlabelled resource (e.g. a bare dbpedia `about` target not in the extract).
+pub(crate) fn node_by_uri(g: &GraphSnapshot, uri: &str) -> Option<u32> {
+    ["CreativeWork", "Feature"]
+        .iter()
+        .find_map(|lbl| g.nodes_with_property(lbl, "uri", uri).and_then(|ns| ns.iter().next()))
 }
 
 /// Display name: a creative work's `title`, or a feature's `name`.

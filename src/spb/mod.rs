@@ -8,6 +8,13 @@ pub mod loader;
 pub mod ntriples;
 pub mod queries;
 
+// Per-query modules (one SPB query each), filled by tasks 015–048. Pre-declared
+// so parallel work never collides on a shared file.
+pub mod q1;
+pub mod q2;
+pub mod q3;
+pub mod q7;
+
 use std::path::PathBuf;
 use std::time::Instant;
 
