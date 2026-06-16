@@ -21,7 +21,7 @@ Two query families run:
 
 ```bash
 ./scripts/download_sf1.sh        # ~206 MB compressed, real LDBC SF1 (CSV)
-cargo run --release              # loads data/, runs the queries
+cargo run --release --bin bi     # loads data/, runs the queries
 ```
 
 Path-depends on `../rustychickpeas/rustychickpeas-core` (sibling checkout); the
@@ -164,11 +164,20 @@ single-threaded — an asymmetry to settle before quoting numbers).
 ## Layout
 
 ```
-src/main.rs             # CSV loader (pipe-delimited gzip, per-type id maps,
-                        #   message properties) + faithful Q1/Q2 + simplified BI1-6
+src/lib.rs              # shared library: re-exports loader/props/harness + bi
+src/loader.rs           # CSV ingest (pipe-delimited gzip, per-type id maps,
+                        #   message properties) -> GraphSnapshot + Stats
+src/props.rs            # date arithmetic + typed property/graph accessors
+src/harness.rs          # Result alias, JSON dump, median timing harness
+src/bi/                 # faithful BI Q1-Q20 + simplified BI1-6, and run()
+src/bin/bi.rs           # thin entry point -> rustychickpeas_ldbc::bi::run()
 scripts/download_sf1.sh # fetch + extract real SF1 from the current LDBC mirror
 results/sf1-results.txt # captured run
 ```
+
+The loader and helpers live in the library so the planned IC / Graphalytics /
+FinBench / SPB families (`docs/families.md`) can share them as thin
+`src/bin/*.rs` binaries. Run the BI binary with `cargo run --release --bin bi`.
 
 Query sources: official Cypher in
 [`ldbc/ldbc_snb_bi/neo4j/queries`](https://github.com/ldbc/ldbc_snb_bi/tree/main/neo4j/queries).
