@@ -90,11 +90,12 @@ def main():
                    MATCH (c:Person)-[:hasCreator]->(m) RETURN c.id AS cid""",
         # IC4: tags on the seed's friends' Posts in the window, never on their
         # Posts before it. (task 052)
-        "ic4": f"""MATCH (p:Person {{id:{person}}})-[:knows]-(:Person)-[:hasCreator]->(post:Message)-[:hasTag]->(t:Tag)
+        "ic4": f"""MATCH (:Person {{id:{person}}})-[:knows]-(:Person)-[:hasCreator]->(post:Message)-[:hasTag]->(t:Tag)
                    WHERE post.isComment = false AND post.cdate >= date('{ic4_start}') AND post.cdate < date('{ic4_end}')
-                     AND NOT EXISTS {{ MATCH (p)-[:knows]-(:Person)-[:hasCreator]->(pre:Message)-[:hasTag]->(t)
+                   WITH t, count(DISTINCT post) AS cnt
+                   WHERE NOT EXISTS {{ MATCH (:Person {{id:{person}}})-[:knows]-(:Person)-[:hasCreator]->(pre:Message)-[:hasTag]->(t)
                                        WHERE pre.isComment = false AND pre.cdate < date('{ic4_start}') }}
-                   RETURN t.name AS name, count(DISTINCT post) AS cnt ORDER BY cnt DESC, name ASC LIMIT 10""",
+                   RETURN t.name AS name, cnt ORDER BY cnt DESC, name ASC LIMIT 10""",
         # IC6: tags co-occurring with seed_tag on the neighbourhood's Posts.
         "ic6": f"""MATCH (:Person {{id:{person}}})-[:knows*1..2]-(f:Person)-[:hasCreator]->(post:Message)-[:hasTag]->(:Tag {{name:'{seed_tag}'}})
                    WHERE post.isComment = false AND f.id <> {person}
