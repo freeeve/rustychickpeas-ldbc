@@ -121,24 +121,31 @@ pub fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
     stats.tags = tag.len() as u64;
 
     // Persons (before Posts/Comments so hasCreator edges can resolve). Store
-    // creationDate as epoch day (pday) and year*12+month (pym) for Q13.
-    for_each_row(&dynamic.join("Person"), &["creationDate", "id"], |v| {
-        if let Ok(lid) = v[1].parse::<i64>() {
-            let id = next;
-            next += 1;
-            builder.add_node(Some(id), &["Person"]).unwrap();
-            builder.set_prop_i64(id, "plid", lid).unwrap(); // LDBC id, for Q20 target
-            if let Some((year, day)) = parse_date(v[0]) {
-                let month = v[0]
-                    .get(5..7)
-                    .and_then(|m| m.parse::<i64>().ok())
-                    .unwrap_or(1);
-                builder.set_prop_i64(id, "pday", day).unwrap();
-                builder.set_prop_i64(id, "pym", year * 12 + month).unwrap();
+    // creationDate as epoch day (pday) and year*12+month (pym) for Q13, plus
+    // first/last name (fname/lname) for the Interactive workload's IC1/IS1.
+    for_each_row(
+        &dynamic.join("Person"),
+        &["creationDate", "id", "firstName", "lastName"],
+        |v| {
+            if let Ok(lid) = v[1].parse::<i64>() {
+                let id = next;
+                next += 1;
+                builder.add_node(Some(id), &["Person"]).unwrap();
+                builder.set_prop_i64(id, "plid", lid).unwrap(); // LDBC id, for Q20 target
+                builder.set_prop_str(id, "fname", v[2]).unwrap();
+                builder.set_prop_str(id, "lname", v[3]).unwrap();
+                if let Some((year, day)) = parse_date(v[0]) {
+                    let month = v[0]
+                        .get(5..7)
+                        .and_then(|m| m.parse::<i64>().ok())
+                        .unwrap_or(1);
+                    builder.set_prop_i64(id, "pday", day).unwrap();
+                    builder.set_prop_i64(id, "pym", year * 12 + month).unwrap();
+                }
+                person.insert(lid, id);
             }
-            person.insert(lid, id);
-        }
-    })?;
+        },
+    )?;
     stats.persons = person.len() as u64;
 
     // Places (City/Country/Continent) + isPartOf hierarchy + Person isLocatedIn

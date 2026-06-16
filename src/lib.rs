@@ -10,6 +10,7 @@ pub mod loader;
 pub mod props;
 
 pub mod bi;
+pub mod interactive;
 pub mod spb;
 
 pub use harness::Result;
