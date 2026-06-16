@@ -17,6 +17,14 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
     let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
     let (day_col, content_col, len_col, year_col) =
         (col("day"), col("content"), col("len"), col("year"));
+    // Dense columns expose a typed slice: index it directly instead of building
+    // a ValueId per cell. Falls back to the per-cell read for sparse/absent cols.
+    let (day_s, len_s, year_s) = (
+        day_col.and_then(|c| c.as_i64_slice()),
+        len_col.and_then(|c| c.as_i64_slice()),
+        year_col.and_then(|c| c.as_i64_slice()),
+    );
+    let content_s = content_col.and_then(|c| c.as_bool_slice());
 
     let mut groups: Q1Groups = Q1Groups::new();
     let mut total = 0u64;
@@ -29,14 +37,26 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
         }
         // Per-message fold into a thread-local partial aggregate.
         let fold_one = |mut acc: (Q1Groups, u64), msg: u32| {
-            if col_i64(day_col, msg) >= cutoff_day {
+            let i = msg as usize;
+            let day = match day_s {
+                Some(s) => s[i],
+                None => col_i64(day_col, msg),
+            };
+            if day >= cutoff_day {
                 return acc;
             }
             acc.1 += 1;
-            if !matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))) {
+            let has_content = match content_s {
+                Some(s) => s[i],
+                None => matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))),
+            };
+            if !has_content {
                 return acc;
             }
-            let len = col_i64(len_col, msg);
+            let len = match len_s {
+                Some(s) => s[i],
+                None => col_i64(len_col, msg),
+            };
             let cat: u8 = if len < 40 {
                 0
             } else if len < 80 {
@@ -46,10 +66,11 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             } else {
                 3
             };
-            let e = acc
-                .0
-                .entry((col_i64(year_col, msg), is_comment, cat))
-                .or_insert((0, 0));
+            let year = match year_s {
+                Some(s) => s[i],
+                None => col_i64(year_col, msg),
+            };
+            let e = acc.0.entry((year, is_comment, cat)).or_insert((0, 0));
             e.0 += 1;
             e.1 += len;
             acc
@@ -226,14 +247,38 @@ pub(crate) fn q12_message_counts(
         None
     };
 
+    // Read day/content/len from dense column slices (index by node id) instead of
+    // re-resolving the property key on every one of millions of rows.
+    let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
+    let (day_col, content_col, len_col) = (col("day"), col("content"), col("len"));
+    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let len_s = len_col.and_then(|c| c.as_i64_slice());
+    let content_s = content_col.and_then(|c| c.as_bool_slice());
+
     let mut per_person: HashMap<u32, u64> = HashMap::new();
     for label in ["Post", "Comment"] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                if pi64(g, msg, "day") <= min_day
-                    || !pbool(g, msg, "content")
-                    || pi64(g, msg, "len") >= len_thr
-                {
+                let i = msg as usize;
+                let day = match day_s {
+                    Some(s) => s[i],
+                    None => pi64(g, msg, "day"),
+                };
+                if day <= min_day {
+                    continue;
+                }
+                let content = match content_s {
+                    Some(s) => s[i],
+                    None => pbool(g, msg, "content"),
+                };
+                if !content {
+                    continue;
+                }
+                let len = match len_s {
+                    Some(s) => s[i],
+                    None => pi64(g, msg, "len"),
+                };
+                if len >= len_thr {
                     continue;
                 }
                 if !matches!(root_lang(msg), Some(l) if langs.contains(&l)) {
