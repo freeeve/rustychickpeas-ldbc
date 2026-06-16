@@ -13,7 +13,11 @@ pub mod queries;
 pub mod q1;
 pub mod q2;
 pub mod q3;
+pub mod q4;
+pub mod q5;
 pub mod q7;
+pub mod a17; // advanced q17 (geo)
+pub mod a18; // advanced q18 (date-range)
 
 use std::path::PathBuf;
 use std::time::Instant;

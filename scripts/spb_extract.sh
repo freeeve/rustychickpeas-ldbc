@@ -32,6 +32,22 @@ WHERE { ?f a go:Feature ; wgs:lat ?lat ; wgs:long ?lon .
         -H 'Accept: application/n-triples' -o "$PLACES"
 fi
 
+# 1b) Entities (once): dbpedia Company/Event `about`-targets with their label, so
+#     entity-retrieval queries (q1/q3/q4/q5) can resolve a topic by uri.
+ENTITIES="$EXTRACT/entities.nt"
+if [[ ! -s "$ENTITIES" ]]; then
+    echo "Extracting dbpedia entities from Oxigraph ..." >&2
+    curl -s -X POST http://localhost:7878/query --data-urlencode 'query=
+PREFIX dbo:<http://dbpedia.org/ontology/>
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+CONSTRUCT { ?e a ?t . ?e rdfs:label ?l }
+WHERE {
+  { ?e a dbo:Company . BIND(dbo:Company AS ?t) OPTIONAL { ?e rdfs:label ?l } }
+  UNION
+  { ?e a dbo:Event . BIND(dbo:Event AS ?t) OPTIONAL { ?e rdfs:label ?l } }
+}' -H 'Accept: application/n-triples' -o "$ENTITIES"
+fi
+
 # 2) Works: strip the n-quads context (chomp first — a trailing \s*$ eats the
 #    newline) and add a cwork:CreativeWork supertype per work (the data types
 #    them only as BlogPost/NewsItem/... subclasses).
@@ -46,5 +62,5 @@ perl -ne '
     print "$1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .\n";
   }' $FILES > "$EXTRACT/works.nt"
 
-cat "$EXTRACT/works.nt" "$PLACES" > "$OUT"
-echo "Wrote $OUT — $(wc -l < "$OUT") triples (works $(wc -l < "$EXTRACT/works.nt") + places $(wc -l < "$PLACES"))" >&2
+cat "$EXTRACT/works.nt" "$PLACES" "$ENTITIES" > "$OUT"
+echo "Wrote $OUT — $(wc -l < "$OUT") triples (works $(wc -l < "$EXTRACT/works.nt") + places $(wc -l < "$PLACES") + entities $(wc -l < "$ENTITIES"))" >&2
