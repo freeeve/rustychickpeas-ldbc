@@ -637,8 +637,9 @@ fn q2_tag_evolution(
         return Vec::new();
     };
 
+    use hashbrown::{HashMap as FastMap, HashSet as FastSet};
     // Tags of that class.
-    let mut qualifying: HashSet<u32> = HashSet::new();
+    let mut qualifying: FastSet<u32> = FastSet::new();
     if let Some(tags) = g.nodes_with_label("Tag") {
         for t in tags.iter() {
             if g.neighbors_by_type(t, Direction::Outgoing, "hasType").any(|n| n == target) {
@@ -649,27 +650,49 @@ fn q2_tag_evolution(
 
     let (w1_lo, w1_hi) = (date0_day, date0_day + 100);
     let (w2_lo, w2_hi) = (date0_day + 100, date0_day + 200);
-    let mut c1: HashMap<u32, u64> = HashMap::new();
-    let mut c2: HashMap<u32, u64> = HashMap::new();
-    // Resolve the day column once; the window filter scans every message.
+    // Resolve the day column + hasTag type once; the window filter scans every msg.
     let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
-    for label in ["Post", "Comment"] {
-        if let Some(nodes) = g.nodes_with_label(label) {
-            for msg in nodes.iter() {
-                let day = match day_col.and_then(|c| c.get(msg)) {
-                    Some(ValueId::I64(v)) => v,
-                    _ => 0,
-                };
-                let in1 = w1_lo <= day && day < w1_hi;
-                let in2 = w2_lo <= day && day < w2_hi;
-                if !in1 && !in2 {
-                    continue;
-                }
-                for t in g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]) {
-                    if qualifying.contains(&t) {
-                        *(if in1 { &mut c1 } else { &mut c2 }).entry(t).or_insert(0) += 1;
+    let mut c1: FastMap<u32, u64> = FastMap::new();
+    let mut c2: FastMap<u32, u64> = FastMap::new();
+    if let Some(t_hastag) = g.rel_type("hasTag") {
+        for label in ["Post", "Comment"] {
+            let Some(nodes) = g.nodes_with_label(label) else {
+                continue;
+            };
+            // Per message: window-classify, then count its qualifying tags into the
+            // matching window's partial map; par_fold merges the workers.
+            let (p1, p2) = nodes.par_fold(
+                || (FastMap::<u32, u64>::new(), FastMap::<u32, u64>::new()),
+                |mut acc, msg| {
+                    let day = col_i64(day_col, msg);
+                    let in1 = w1_lo <= day && day < w1_hi;
+                    let in2 = w2_lo <= day && day < w2_hi;
+                    if !in1 && !in2 {
+                        return acc;
                     }
-                }
+                    for t in g.neighbors_by_type(msg, Direction::Outgoing, t_hastag) {
+                        if qualifying.contains(&t) {
+                            let m = if in1 { &mut acc.0 } else { &mut acc.1 };
+                            *m.entry(t).or_insert(0) += 1;
+                        }
+                    }
+                    acc
+                },
+                |mut a: (FastMap<u32, u64>, FastMap<u32, u64>), b| {
+                    for (k, v) in b.0 {
+                        *a.0.entry(k).or_insert(0) += v;
+                    }
+                    for (k, v) in b.1 {
+                        *a.1.entry(k).or_insert(0) += v;
+                    }
+                    a
+                },
+            );
+            for (k, v) in p1 {
+                *c1.entry(k).or_insert(0) += v;
+            }
+            for (k, v) in p2 {
+                *c2.entry(k).or_insert(0) += v;
             }
         }
     }
