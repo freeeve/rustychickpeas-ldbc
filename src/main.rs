@@ -564,57 +564,58 @@ fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1Row>, u64) {
         let Some(nodes) = g.nodes_with_label(label) else {
             continue;
         };
-        let count = nodes.len() as u32;
-        if count == 0 {
+        if nodes.is_empty() {
             continue;
         }
-        // The loader assigns each label a contiguous internal-id block (sequential
-        // `next`), so we scan the range directly — no boxed-iterator collect — and
-        // par_iter it for a morsel-parallel hash aggregate.
-        let start = nodes.iter().next().unwrap();
-        let (part, sub_total) = (start..start + count)
-            .into_par_iter()
-            .fold(
-                || (Q1Groups::new(), 0u64),
-                |mut acc, msg| {
-                    if col_i64(day_col, msg) >= cutoff_day {
-                        return acc;
-                    }
-                    acc.1 += 1;
-                    if !matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))) {
-                        return acc;
-                    }
-                    let len = col_i64(len_col, msg);
-                    let cat: u8 = if len < 40 {
-                        0
-                    } else if len < 80 {
-                        1
-                    } else if len < 160 {
-                        2
-                    } else {
-                        3
-                    };
-                    let e = acc
-                        .0
-                        .entry((col_i64(year_col, msg), is_comment, cat))
-                        .or_insert((0, 0));
-                    e.0 += 1;
-                    e.1 += len;
-                    acc
-                },
-            )
-            .reduce(
-                || (Q1Groups::new(), 0u64),
-                |mut a, b| {
-                    for (k, (n, s)) in b.0 {
-                        let e = a.0.entry(k).or_insert((0, 0));
-                        e.0 += n;
-                        e.1 += s;
-                    }
-                    a.1 += b.1;
-                    a
-                },
-            );
+        // Per-message fold into a thread-local partial aggregate.
+        let fold_one = |mut acc: (Q1Groups, u64), msg: u32| {
+            if col_i64(day_col, msg) >= cutoff_day {
+                return acc;
+            }
+            acc.1 += 1;
+            if !matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))) {
+                return acc;
+            }
+            let len = col_i64(len_col, msg);
+            let cat: u8 = if len < 40 {
+                0
+            } else if len < 80 {
+                1
+            } else if len < 160 {
+                2
+            } else {
+                3
+            };
+            let e = acc
+                .0
+                .entry((col_i64(year_col, msg), is_comment, cat))
+                .or_insert((0, 0));
+            e.0 += 1;
+            e.1 += len;
+            acc
+        };
+        let reduce_two = |mut a: (Q1Groups, u64), b: (Q1Groups, u64)| {
+            for (k, (n, s)) in b.0 {
+                let e = a.0.entry(k).or_insert((0, 0));
+                e.0 += n;
+                e.1 += s;
+            }
+            a.1 += b.1;
+            a
+        };
+        let id = || (Q1Groups::new(), 0u64);
+        // Fast path: a label whose ids are contiguous scans the range directly (no
+        // boxed-iterator collect). `NodeSet::as_range` verifies contiguity in core,
+        // so the fallback collect keeps the result correct for sparse sets.
+        let (part, sub_total) = match nodes.as_range() {
+            Some(range) => range.into_par_iter().fold(id, fold_one).reduce(id, reduce_two),
+            None => nodes
+                .iter()
+                .collect::<Vec<u32>>()
+                .into_par_iter()
+                .fold(id, fold_one)
+                .reduce(id, reduce_two),
+        };
         for (k, (n, s)) in part {
             let e = groups.entry(k).or_insert((0, 0));
             e.0 += n;
