@@ -149,13 +149,16 @@ pub fn ic14_weighted_path(
     p1: u32,
     p2: u32,
     interaction: &HashMap<(u32, u32), u32>,
-) -> Option<(Vec<u32>, f64)> {
-    let sp = g.dijkstra(p1, Direction::Outgoing, "knows", Some(p2), |from, rel| {
+) -> Option<f64> {
+    // Bidirectional search (meets in the middle) — much faster than a single-source
+    // dijkstra for this point-to-point query. knows is stored both directions, so
+    // Outgoing forward + Incoming backward covers the graph without the redundant
+    // double-traversal that Both would incur. Returns the path cost (the comparable
+    // metric; Kùzu's WSHORTEST also reports cost, not an enumerated path).
+    g.weighted_shortest_path(p1, p2, Direction::Outgoing, "knows", |from, rel| {
         let key = (from.min(rel.neighbor), from.max(rel.neighbor));
-        let w = interaction.get(&key).copied().unwrap_or(0);
-        1.0 / (w as f64 + 1.0)
-    });
-    Some((sp.path_to(p2)?, sp.distance(p2)?))
+        1.0 / (interaction.get(&key).copied().unwrap_or(0) as f64 + 1.0)
+    })
 }
 
 /// Reply interactions between message creators, keyed by the unordered person
@@ -798,7 +801,7 @@ pub fn run() -> Result<()> {
         // across engines, so compare the cost rounded to 6 dp). (task 054)
         let interaction = build_knows_interaction(&graph);
         emit_json(&dir, "ic14.rust.json", match ic14_weighted_path(&graph, seeds.person, seeds.person_b, &interaction) {
-            Some((_, c)) => format!("[[{c:.6}]]"),
+            Some(c) => format!("[[{c:.6}]]"),
             None => "[]".to_string(),
         });
         println!("emitted IC cross-check JSON (ic1-14, is1-7 sans is4) to {dir}");
@@ -818,12 +821,12 @@ pub fn run() -> Result<()> {
     assert!(ic13 >= 1, "IC13 path length should be >= 1 for a reachable pair");
     assert!(ic14.is_some(), "IC14 found no weighted path");
     println!(
-        "  IC1 rows: {}; IC2 recent: {}; IC9 FoF: {}; IC13 hops: {}; IC14 path len: {}",
+        "  IC1 rows: {}; IC2 recent: {}; IC9 FoF: {}; IC13 hops: {}; IC14 cost: {:.4}",
         ic1.len(),
         ic2.len(),
         ic9.len(),
         ic13,
-        ic14.as_ref().map(|(p, _)| p.len()).unwrap_or(0)
+        ic14.unwrap_or(-1.0)
     );
 
     // Deferred-tier queries enabled with no loader change: IC4/IC6/IC8, IS6/IS7.
@@ -891,9 +894,7 @@ pub fn run() -> Result<()> {
         ic13_shortest_path(&graph, seeds.person, seeds.person_b).max(0) as usize
     });
     time_query("IC14 weighted shortest path", runs, || {
-        ic14_weighted_path(&graph, seeds.person, seeds.person_b, &interaction)
-            .map(|(p, _)| p.len())
-            .unwrap_or(0)
+        ic14_weighted_path(&graph, seeds.person, seeds.person_b, &interaction).is_some() as usize
     });
     time_query("IS1 person profile", runs, || {
         is1_profile(&graph, seeds.person).is_some() as usize
