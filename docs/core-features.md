@@ -13,34 +13,46 @@ benchmark (`tasks/013`) is the driver that exercises them.
 
 - `NodeSet` (`src/bitmap.rs`) — RoaringBitmap- or bitvec-backed; the result type
   for `nodes_with_label`, `relationships_with_type`. Has `iter/len/contains/
-  as_range/par_fold/insert/remove`.
+  as_range/par_fold/insert/remove` **and set algebra** (`BitAnd`/`BitOr`/`Sub` on
+  `&NodeSet`).
 - `GraphBuilder::finalize(index_properties: Option<&[&str]>)` — the **existing**
-  hook that builds equality property indexes. FTS/geo extend this pattern.
+  hook that builds equality property indexes by scanning the typed columns
+  (`node_col_str` / `_i64` / `_f64` / `_bool`). FTS/geo extend this same scan.
+- `StringInterner` (`src/interner.rs`, lasso) — `get_or_intern`/`get`/`resolve`;
+  reused as the FTS term dictionary. `Atoms` is its finalized snapshot form
+  (`resolve` / `get_id`) holding full property values.
 - `GraphSnapshot::prop(node, key) -> Option<ValueId>`, `ValueId::to_f64()` —
-  read lat/lon literals. `Atoms` interner (`resolve` / `get_id`) — tokenize
-  interned strings without re-allocating.
+  read lat/lon literals for the geo index.
 
-## Prerequisite: `NodeSet` set algebra
+## Composition primitive: `NodeSet` set algebra — already present
 
-FTS ∩ geo ∩ label composition needs intersect/union/difference, which `NodeSet`
-lacks today. RoaringBitmap has `&`/`|`/`-` natively; bitvec has bitwise ops — so
-this is a thin wrapper.
+FTS ∩ geo ∩ label composition needs intersect/union/difference. `NodeSet`
+**already implements** these as operators on `&NodeSet` (`src/bitmap.rs`):
+`BitAnd` (`&`), `BitOr` (`|`), and `Sub` (`-`), with a ≤256-element Bitset
+fast-path. So composition works today with no core change:
 
 ```rust
-impl NodeSet {
-    pub fn intersect(&self, other: &NodeSet) -> NodeSet;
-    pub fn union(&self, other: &NodeSet) -> NodeSet;
-    pub fn difference(&self, other: &NodeSet) -> NodeSet;
-}
+let result = &fts_hits & &geo_hits & label_set;   // all NodeSet, native ops
 ```
+
+Named `intersect`/`union`/`difference` wrappers would be optional readability
+sugar over these operators — not a prerequisite.
 
 ## Feature 1 — Full-text index (`tasks/011`, `src/fulltext.rs`)
 
+**Model.** A boolean inverted index with `NodeSet` postings, optionally layered
+with BM25. The postings list for a term *is* a `NodeSet`, so query evaluation is
+the existing `&`/`|`/`-` algebra; the term dictionary is a second
+`StringInterner` (lasso). This is maximal reuse — see the model discussion in the
+git history / task 011.
+
 **Build.** A `GraphBuilder::index_fulltext(&[(label, property)])` registration;
-at `finalize`, tokenize each node's string property (lowercase, split on
-non-alphanumeric, optional stopword drop; stemming deferred) into an inverted
-index `term -> RoaringBitmap<NodeId>`. Term dictionary interned. Store per-(term,
-doc) frequency + doc length only if ranking is enabled.
+at `finalize`, extend the same column scan the equality index uses — walk
+`node_col_str[key]`'s `(node, str_id)` pairs, resolve each string, tokenize
+(lowercase, split on non-alphanumeric, optional stopword drop; stemming deferred),
+and add the node to each token's postings (`term -> NodeSet`). Term ids come from
+a `StringInterner`. Store per-(term, doc) frequency + doc length only when BM25
+ranking is enabled (gated, so the boolean path stays lean).
 
 **Query.**
 ```rust
