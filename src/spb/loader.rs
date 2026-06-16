@@ -42,34 +42,48 @@ pub fn load_ntriples(path: &Path) -> Result<(GraphSnapshot, SpbStats)> {
 pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
     let triples: Vec<_> = ntriples::parse(text).collect();
 
-    // Pass 1: assign a node id to every resource, and collect rdf:type labels.
+    // Pass 1: assign a node id to every resource, collect rdf:type labels, and
+    // remember each IRI to store as a `uri` property (the cross-engine join key).
     let mut ids: HashMap<String, u32> = HashMap::new();
     let mut labels: HashMap<u32, Vec<String>> = HashMap::new();
+    let mut uri_of: HashMap<u32, String> = HashMap::new();
     let mut next: u32 = 0;
-    let resource_id = |term: &Term, ids: &mut HashMap<String, u32>, next: &mut u32| -> u32 {
+    let intern = |term: &Term,
+                  ids: &mut HashMap<String, u32>,
+                  uri_of: &mut HashMap<u32, String>,
+                  next: &mut u32|
+     -> u32 {
         let key = resource_key(term).expect("resource term");
-        *ids.entry(key).or_insert_with(|| {
-            let id = *next;
-            *next += 1;
-            id
-        })
+        if let Some(&id) = ids.get(&key) {
+            return id;
+        }
+        let id = *next;
+        *next += 1;
+        ids.insert(key, id);
+        if let Term::Iri(iri) = term {
+            uri_of.insert(id, iri.clone());
+        }
+        id
     };
     for t in &triples {
-        let sid = resource_id(&t.subject, &mut ids, &mut next);
+        let sid = intern(&t.subject, &mut ids, &mut uri_of, &mut next);
         if predicate_is(t, RDF_TYPE) {
             if let Term::Iri(class) = &t.object {
                 labels.entry(sid).or_default().push(ntriples::local_name(class).to_string());
             }
         } else if t.object.is_resource() {
-            resource_id(&t.object, &mut ids, &mut next);
+            intern(&t.object, &mut ids, &mut uri_of, &mut next);
         }
     }
 
-    // Pass 2: create nodes (in id order) with their labels.
+    // Pass 2: create nodes (in id order) with their labels and uri.
     let mut builder = GraphBuilder::new(Some(next as usize), Some(triples.len()));
     for id in 0..next {
         let node_labels: Vec<&str> = labels.get(&id).map(|v| v.iter().map(String::as_str).collect()).unwrap_or_default();
         builder.add_node(Some(id), &node_labels).expect("add_node");
+        if let Some(iri) = uri_of.get(&id) {
+            builder.set_prop_str(id, "uri", iri).ok();
+        }
     }
 
     // Pass 3: edges (IRI objects) and properties (literal objects).

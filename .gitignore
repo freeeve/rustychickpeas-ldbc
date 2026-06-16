@@ -5,3 +5,4 @@ kuzu/import-*
 kuzu/db-*
 __pycache__/
 *.pyc
+results/*.rust.json

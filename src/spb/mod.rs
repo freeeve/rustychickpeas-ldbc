@@ -11,9 +11,22 @@ pub mod queries;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::harness::{time_query, Result};
+use rustychickpeas_core::GraphSnapshot;
+
+use crate::harness::{emit_json, jstr, time_query, Result};
+use crate::props::pstr;
 
 const DEFAULT_SAMPLE: &str = "samples/spb-sample.nt";
+
+/// Render nodes as a JSON array of their `uri` properties (the cross-engine key).
+fn uri_list(g: &GraphSnapshot, nodes: impl IntoIterator<Item = u32>) -> String {
+    let items: Vec<String> = nodes
+        .into_iter()
+        .filter_map(|n| pstr(g, n, "uri"))
+        .map(jstr)
+        .collect();
+    format!("[{}]", items.join(","))
+}
 
 /// Load an N-Triples file (arg 1, default `samples/spb-sample.nt`), then print
 /// and time the SPB-style queries.
@@ -57,6 +70,20 @@ pub fn run() -> Result<()> {
         "Near London AND 'tennis': {} works",
         queries::geo_fts_works(&g, 51.5074, -0.1278, 50.0, "tennis").len()
     );
+
+    // Emit query results (as uris) plus the geo pre-filter, for the Kùzu
+    // cross-check and the hybrid (b) mode. See kuzu/run_spb.py.
+    let near_places = g.geo_within_radius("Place", "lat", "long", 51.5074, -0.1278, 50.0);
+    let body = format!(
+        "{{\n  \"about_london\": {},\n  \"fts_football\": {},\n  \"geo_near_london\": {},\n  \"geo_places_near_london\": {},\n  \"geo_fts_tennis\": {}\n}}",
+        uri_list(&g, about.iter().copied()),
+        uri_list(&g, queries::fts_works(&g, "football")),
+        uri_list(&g, queries::geo_works_near(&g, 51.5074, -0.1278, 50.0)),
+        uri_list(&g, near_places.iter()),
+        uri_list(&g, queries::geo_fts_works(&g, 51.5074, -0.1278, 50.0, "tennis")),
+    );
+    emit_json("results", "spb.rust.json", body);
+    println!("\nWrote results/spb.rust.json (uris) for the Kùzu cross-check.");
 
     println!("\nTimings (median of 5):");
     time_query("SPB about-entity", 5, || {
