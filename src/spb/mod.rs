@@ -22,6 +22,9 @@ pub mod a19; // advanced q19 (popular tags, aggregation)
 pub mod a20; // advanced q20 (full-text)
 pub mod a21; // advanced q21 (faceted search)
 pub mod a22; // advanced q22 (faceted search)
+pub mod a23; // advanced q23 (faceted search)
+pub mod a24; // advanced q24 (relatedness timeline)
+pub mod a25; // advanced q25 (related entities)
 
 use std::path::PathBuf;
 use std::time::Instant;
