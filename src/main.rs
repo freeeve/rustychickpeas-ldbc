@@ -1846,7 +1846,7 @@ fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i
             .next()
     };
     let mut root_cache: HashMap<u32, u32> = HashMap::new();
-    let mut forum_of = |g: &GraphSnapshot, m: u32, rc: &mut HashMap<u32, u32>| -> Option<u32> {
+    let forum_of = |g: &GraphSnapshot, m: u32, rc: &mut HashMap<u32, u32>| -> Option<u32> {
         let mut path = Vec::new();
         let mut n = m;
         let root = loop {
@@ -1890,7 +1890,7 @@ fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i
         }
     }
     let mut pm: HashMap<u32, HashSet<u32>> = HashMap::new();
-    let mut ensure = |g: &GraphSnapshot, p: u32, pm: &mut HashMap<u32, HashSet<u32>>| {
+    let ensure = |g: &GraphSnapshot, p: u32, pm: &mut HashMap<u32, HashSet<u32>>| {
         pm.entry(p).or_insert_with(|| {
             g.neighbors_by_type(p, Direction::Incoming, &["hasMember"])
                 .into_iter()
@@ -2025,45 +2025,6 @@ fn main() -> Result<()> {
         s.persons, s.posts, s.comments, s.tags, s.tag_classes
     );
     println!("       {} edges in {load_secs:.1}s\n", s.edges);
-
-    // Focused profiling hook: LDBC_PROFILE_Q4=<reps> runs only Q4 then exits,
-    // so a sampler isn't diluted by load + the other queries.
-    if let Ok(v) = std::env::var("LDBC_PROFILE_Q4") {
-        let reps: usize = v.parse().ok().filter(|&n| n > 0).unwrap_or(5);
-        let after = days_from_civil(2010, 1, 29);
-        for i in 0..reps {
-            let t = Instant::now();
-            let r = q4_top_creators(&graph, after);
-            std::hint::black_box(&r);
-            eprintln!("Q4 rep {i}: {:.2} ms (rows={})", t.elapsed().as_secs_f64() * 1000.0, r.0.len());
-        }
-        return Ok(());
-    }
-    if let Ok(v) = std::env::var("LDBC_PROFILE_Q1") {
-        let reps: usize = v.parse().ok().filter(|&n| n > 0).unwrap_or(300);
-        let cutoff = days_from_civil(2011, 12, 1);
-        let t = Instant::now();
-        for _ in 0..reps {
-            let r = q1_posting_summary(&graph, cutoff);
-            std::hint::black_box(&r);
-        }
-        eprintln!(
-            "Q1 x{reps}: {:.2} ms/rep",
-            t.elapsed().as_secs_f64() * 1000.0 / reps as f64
-        );
-        return Ok(());
-    }
-    if let Ok(v) = std::env::var("LDBC_PROFILE_Q15") {
-        let reps: usize = v.parse().ok().filter(|&n| n > 0).unwrap_or(5);
-        let (s_day, e_day) = (days_from_civil(2010, 11, 1), days_from_civil(2010, 12, 1));
-        for i in 0..reps {
-            let t = Instant::now();
-            let r = q15_weighted_path(&graph, 14, 16, s_day, e_day);
-            std::hint::black_box(&r);
-            eprintln!("Q15 rep {i}: {:.2} ms (dist={r})", t.elapsed().as_secs_f64() * 1000.0);
-        }
-        return Ok(());
-    }
 
     // --- Faithful LDBC BI queries (official Cypher params) ---
     // Set LDBC_EMIT_JSON=<dir> to dump Q1/Q2 result rows for the Kùzu
