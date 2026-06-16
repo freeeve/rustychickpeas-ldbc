@@ -387,17 +387,25 @@ ORDER BY cnt DESC, name LIMIT 100
 """
 
 
-def q12_text():
-    d0 = datetime.date(2010, 7, 22)
-    return f"""
-MATCH (person:Person)
-OPTIONAL MATCH (person)-[:hasCreator]->(message:Message)-[:replyOf*0..30]->(post:Message)
-WHERE post.isComment = false AND message.hasContent = true AND message.length < 20
-  AND message.cdate > date('{d0}') AND post.lang IN ['ar', 'hu']
-WITH person, count(message) AS messageCount
-RETURN messageCount, count(person) AS personCount
-ORDER BY personCount DESC, messageCount DESC
-"""
+def q12_root_lang():
+    # comp -> root post language (the thread's single containerOf root).
+    return """CALL WEAKLY_CONNECTED_COMPONENTS('rg')
+WITH node AS post, group_id AS comp
+MATCH (forum:Forum)-[:containerOf]->(post)
+RETURN comp AS comp, post.lang AS lang"""
+
+
+def q12_msg_comp():
+    # Qualifying messages (short, has content, recent) -> (thread component, creator).
+    return """CALL WEAKLY_CONNECTED_COMPONENTS('rg')
+WITH node AS m, group_id AS comp
+MATCH (m)<-[:hasCreator]-(person:Person)
+WHERE m.length < 20 AND m.hasContent = true AND m.cdate > date('2010-07-22')
+RETURN comp AS comp, person.id AS pid"""
+
+
+def q12_person_count():
+    return "MATCH (p:Person) RETURN count(p) AS cnt"
 
 
 Q5 = """
@@ -495,16 +503,26 @@ RETURN country.id AS cid, forum.id AS fid, count(person) AS numberOfMembers
 """
 
 
-def q4_messages(ids):
-    # Drop the (person)<-[:hasMember]-(tf in top) join (it blows up against
-    # millions of hasMember edges and times out at SF10); the harness keeps only
-    # top-forum members, so counts for non-members are simply ignored.
+def q4_wcc_topcomps(ids):
+    # The replyOf forest: every thread is one weakly-connected component rooted at
+    # a single Post. WCC (built-in `algo` extension) labels each message with its
+    # thread in one native pass — replacing the recursive replyOf*0..30 expansion
+    # that doesn't scale (one SF10 forum ~6 min). topComps = components whose root
+    # Post sits in a top forum.
     lst = "[" + ",".join(str(i) for i in ids) + "]"
-    return f"""
-MATCH (forum:Forum)-[:containerOf]->(post:Message)<-[:replyOf*0..30]-(message:Message)<-[:hasCreator]-(person:Person)
-WHERE forum.id IN {lst}
-RETURN person.id AS pid, count(DISTINCT message) AS cnt
-"""
+    return f"""CALL WEAKLY_CONNECTED_COMPONENTS('rg')
+WITH node AS post, group_id AS comp
+MATCH (forum:Forum)-[:containerOf]->(post) WHERE forum.id IN {lst}
+RETURN DISTINCT comp AS comp"""
+
+
+def q4_msg_comp():
+    # Every message -> (its thread component, its creator). The harness keeps rows
+    # whose comp is in topComps and counts per creator (vectorized in pandas).
+    return """CALL WEAKLY_CONNECTED_COMPONENTS('rg')
+WITH node AS message, group_id AS comp
+MATCH (message)<-[:hasCreator]-(person:Person)
+RETURN comp AS comp, person.id AS pid"""
 
 
 def q4_members(ids):
@@ -550,12 +568,31 @@ RETURN cost(e) AS dist
 """
 
 
-def q3_text():
+def q3_forums():
+    # Candidate forums: those whose moderator is located in the country. No
+    # recursion — the reply-tree membership is computed with WCC (below).
     return """
-MATCH (country:Place {name: 'Burma', type: 'Country'})<-[:isPartOf]-(:Place)<-[:isLocatedIn]-(person:Person)<-[:hasModerator]-(forum:Forum)-[:containerOf]->(post:Message)<-[:replyOf*0..30]-(message:Message)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass {name: 'MusicalArtist'})
-RETURN forum.id AS fid, forum.title AS title, forum.fcdate AS fcdate, person.id AS pid, count(DISTINCT message) AS messageCount
-ORDER BY messageCount DESC, fid ASC LIMIT 20
-"""
+MATCH (country:Place {name: 'Burma', type: 'Country'})<-[:isPartOf]-(:Place)<-[:isLocatedIn]-(person:Person)<-[:hasModerator]-(forum:Forum)
+RETURN forum.id AS fid, forum.title AS title, forum.fcdate AS fcdate, person.id AS pid"""
+
+
+def q3_comp_forum(fids):
+    # comp -> forum for the candidate forums' root posts (each thread component is
+    # rooted at one containerOf post).
+    lst = "[" + ",".join(str(i) for i in fids) + "]"
+    return f"""CALL WEAKLY_CONNECTED_COMPONENTS('rg')
+WITH node AS post, group_id AS comp
+MATCH (forum:Forum)-[:containerOf]->(post) WHERE forum.id IN {lst}
+RETURN comp AS comp, forum.id AS fid"""
+
+
+def q3_tagged_comp():
+    # Distinct MusicalArtist-tagged messages per thread component. A message is in
+    # a forum's reply-trees iff its component is rooted in that forum.
+    return """CALL WEAKLY_CONNECTED_COMPONENTS('rg')
+WITH node AS m, group_id AS comp
+MATCH (m)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass {name: 'MusicalArtist'})
+RETURN comp AS comp, count(DISTINCT m) AS cnt"""
 
 
 def fday_of(fc):
@@ -565,11 +602,12 @@ def fday_of(fc):
 
 
 def q10_text():
-    return """
-MATCH (s:Person {id: 3470})-[e:knows* SHORTEST 1..4]-(expert:Person)
+    pid = os.environ.get("Q10_PERSON", "3470")  # scale-specific China start person
+    return f"""
+MATCH (s:Person {{id: {pid}}})-[e:knows* SHORTEST 1..4]-(expert:Person)
 WHERE length(e) >= 3
-MATCH (expert)-[:isLocatedIn]->(:Place)-[:isPartOf]->(:Place {name: 'China', type: 'Country'}),
-      (expert)-[:hasCreator]->(message:Message)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass {name: 'MusicalArtist'})
+MATCH (expert)-[:isLocatedIn]->(:Place)-[:isPartOf]->(:Place {{name: 'China', type: 'Country'}}),
+      (expert)-[:hasCreator]->(message:Message)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass {{name: 'MusicalArtist'}})
 MATCH (message)-[:hasTag]->(tag:Tag)
 RETURN expert.id AS eid, tag.name AS tagName, count(DISTINCT message) AS messageCount
 ORDER BY messageCount DESC, tagName ASC, eid ASC LIMIT 100
@@ -734,6 +772,12 @@ def emit_crosscheck(conn, outdir):
             json.dump(rows, f)
         return len(rows)
 
+    # Project the replyOf forest once for the WCC-based reply-tree queries (Q3, Q4).
+    try:
+        conn.execute("CALL PROJECT_GRAPH('rg', ['Message'], ['replyOf'])")
+    except Exception:
+        pass  # already projected on this connection
+
     d = conn.execute(Q1).get_as_df()  # [year, isComment, cat, cnt, sumLen]
     n1 = dump("q1", [[int(y), bool(ic), int(c), int(cnt), int(sl)]
                      for y, ic, c, cnt, sl in zip(d["year"], d["isComment"], d["cat"], d["cnt"], d["sumLen"])])
@@ -747,8 +791,24 @@ def emit_crosscheck(conn, outdir):
     n6 = dump("q6", [[int(p), int(a)] for p, a in zip(d["pid"], d["authorityScore"])])
     d = conn.execute(Q7).get_as_df()  # [name, count]
     n7 = dump("q7", [[str(nm), int(c)] for nm, c in zip(d["name"], d["cnt"])])
-    d = conn.execute(q12_text()).get_as_df()  # [messageCount, personCount]
-    n12 = dump("q12", [[int(mc), int(pc)] for mc, pc in zip(d["messageCount"], d["personCount"])])
+    # Q12 (harness-reduced via WCC): per person, count their short recent messages
+    # whose thread root post is in ar/hu, then histogram persons by that count.
+    # Replaces the recursive replyOf*0..30 (~31s at SF1).
+    rld = conn.execute(q12_root_lang()).get_as_df()
+    rootlang = {int(c): (str(l) if l is not None else None) for c, l in zip(rld["comp"], rld["lang"])}
+    langset = {"ar", "hu"}
+    permsg = {}
+    dmc = conn.execute(q12_msg_comp()).get_as_df()
+    for comp, pid in zip(dmc["comp"], dmc["pid"]):
+        if rootlang.get(int(comp)) in langset:
+            permsg[int(pid)] = permsg.get(int(pid), 0) + 1
+    total_persons = int(conn.execute(q12_person_count()).get_as_df()["cnt"].iloc[0])
+    hist = {}
+    for c in permsg.values():
+        hist[c] = hist.get(c, 0) + 1
+    hist[0] = hist.get(0, 0) + (total_persons - len(permsg))
+    rows12 = sorted(([mc, pc] for mc, pc in hist.items()), key=lambda r: (-r[1], -r[0]))
+    n12 = dump("q12", rows12)
     d = conn.execute(q8_text()).get_as_df()  # [pid, score, friendsScore]
     n8 = dump("q8", [[int(p), int(s), int(f)] for p, s, f in zip(d["pid"], d["score"], d["friendsScore"])])
     d = conn.execute(q9_text()).get_as_df()  # [pid, threads, messages]
@@ -793,9 +853,25 @@ def emit_crosscheck(conn, outdir):
     n16 = dump("q16", rows16)
     d = conn.execute(q10_text()).get_as_df()  # [eid, tagName, messageCount]
     n10 = dump("q10", [[int(e), str(t), int(c)] for e, t, c in zip(d["eid"], d["tagName"], d["messageCount"])])
-    d = conn.execute(q3_text()).get_as_df()  # [fid, title, fcdate, pid, messageCount]
-    n3 = dump("q3", [[int(f), str(t), fday_of(fc), int(p), int(c)]
-                     for f, t, fc, p, c in zip(d["fid"], d["title"], d["fcdate"], d["pid"], d["messageCount"])])
+    # Q3 (harness-reduced via WCC): MusicalArtist-tagged messages in a country's
+    # forums' reply-trees, counted per forum. Replaces replyOf*0..30 (~56s at SF1).
+    dform = conn.execute(q3_forums()).get_as_df()
+    finfo = {int(f): (str(t), fc, int(p)) for f, t, fc, p in
+             zip(dform["fid"], dform["title"], dform["fcdate"], dform["pid"])}
+    if finfo:
+        cfd = conn.execute(q3_comp_forum(list(finfo))).get_as_df()
+        comp2forum = {int(comp): int(fid) for comp, fid in zip(cfd["comp"], cfd["fid"])}
+        tcd = conn.execute(q3_tagged_comp()).get_as_df()
+        fcount = {}
+        for comp, cnt in zip(tcd["comp"], tcd["cnt"]):
+            fid = comp2forum.get(int(comp))
+            if fid is not None:
+                fcount[fid] = fcount.get(fid, 0) + int(cnt)
+        rows3 = sorted(([f, finfo[f][0], fday_of(finfo[f][1]), finfo[f][2], c]
+                        for f, c in fcount.items()), key=lambda r: (-r[4], r[0]))[:20]
+    else:
+        rows3 = []
+    n3 = dump("q3", rows3)
     d = conn.execute(q15_text()).get_as_df()
     n15 = dump("q15", [[round(float(d["dist"].iloc[0]), 6) if len(d) else -1.0]])
     # Q17 (harness-reduced): Kùzu fetches message1 tuples, candidates, memberships;
@@ -823,22 +899,33 @@ def emit_crosscheck(conn, outdir):
                 counts17.setdefault(p1, set()).add(m2)
     rows17 = sorted(([p, len(ms)] for p, ms in counts17.items()), key=lambda r: (-r[1], r[0]))[:10]
     n17 = dump("q17", rows17)
-    # Q4 (harness-reduced): pick top-100 forums, then rank their members by message count.
-    dfm = conn.execute(q4_forum_members()).get_as_df()
-    ranked = sorted(zip((int(x) for x in dfm["fid"]), (int(x) for x in dfm["numberOfMembers"]),
-                        (int(x) for x in dfm["cid"])), key=lambda r: (-r[1], r[0], r[2]))
-    top_ids, seen4 = [], set()
-    for fid, _, _ in ranked:
-        if fid not in seen4:
-            seen4.add(fid)
-            top_ids.append(fid)
-            if len(top_ids) == 100:
-                break
-    dmsg = conn.execute(q4_messages(top_ids)).get_as_df()
-    mc = {int(p): int(c) for p, c in zip(dmsg["pid"], dmsg["cnt"])}
-    members4 = [int(p) for p in conn.execute(q4_members(top_ids)).get_as_df()["pid"]]
-    rows4 = sorted(([p, mc.get(p, 0)] for p in members4), key=lambda r: (-r[1], r[0]))[:100]
-    n4 = dump("q4", rows4)
+    # Q4 (harness-reduced): pick top-100 forums, then rank their members by message
+    # count. Message membership in a forum's reply trees is computed with the algo
+    # extension's WEAKLY_CONNECTED_COMPONENTS (each thread = one component rooted at
+    # a Post) instead of the recursive replyOf*0..30 expansion that doesn't scale.
+    n4 = "SKIP"
+    if not os.environ.get("LDBC_SKIP_Q4"):
+        try:
+            conn.execute("CALL PROJECT_GRAPH('rg', ['Message'], ['replyOf'])")
+        except Exception:
+            pass  # already projected on this connection
+        dfm = conn.execute(q4_forum_members()).get_as_df()
+        ranked = sorted(zip((int(x) for x in dfm["fid"]), (int(x) for x in dfm["numberOfMembers"]),
+                            (int(x) for x in dfm["cid"])), key=lambda r: (-r[1], r[0], r[2]))
+        top_ids, seen4 = [], set()
+        for fid, _, _ in ranked:
+            if fid not in seen4:
+                seen4.add(fid)
+                top_ids.append(fid)
+                if len(top_ids) == 100:
+                    break
+        top_comps = set(int(x) for x in conn.execute(q4_wcc_topcomps(top_ids)).get_as_df()["comp"])
+        dmc = conn.execute(q4_msg_comp()).get_as_df()
+        keep = dmc[dmc["comp"].isin(top_comps)]
+        mc = {int(p): int(n) for p, n in keep.groupby("pid").size().items()}
+        members4 = [int(p) for p in conn.execute(q4_members(top_ids)).get_as_df()["pid"]]
+        rows4 = sorted(([p, mc.get(p, 0)] for p in members4), key=lambda r: (-r[1], r[0]))[:100]
+        n4 = dump("q4", rows4)
 
     print(f"  emitted faithful-Kùzu cross-check JSON to {outdir} "
           f"(q1={n1}, q2={n2}, q5={n5}, q6={n6}, q7={n7}, q8={n8}, q9={n9}, "
