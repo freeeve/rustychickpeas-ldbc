@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::harness::{time_query, Result};
+use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::loader::load_graph;
 use crate::props::*;
 
@@ -252,6 +252,71 @@ pub fn run() -> Result<()> {
         seeds.first_name,
         seeds.max_day
     );
+
+    // Cross-check emit: dump comparable projections (LDBC ids / ms timestamps,
+    // not internal node ids) so `kuzu/run_ic.py` can diff against Kùzu via the
+    // shared `compare.py`. Emit mode skips the timing block.
+    if let Ok(dir) = std::env::var("LDBC_EMIT_JSON") {
+        let plid = |p: u32| pi64(&graph, p, "plid");
+        let arr_ms = |rows: &[(u32, i64)]| {
+            format!(
+                "[{}]",
+                rows.iter()
+                    .map(|(_, ms)| format!("[{ms}]"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        let is2 = is2_recent_of_person(&graph, seeds.person, seeds.max_day);
+        let is5 = is2.first().and_then(|&(m, _)| is5_message_creator(&graph, m));
+        let mut friends: Vec<i64> = is3_friends(&graph, seeds.person)
+            .iter()
+            .map(|&f| plid(f))
+            .collect();
+        friends.sort_unstable();
+        emit_json(
+            &dir,
+            "seeds.json",
+            format!(
+                "{{\"person\":{},\"person_b\":{},\"first_name\":{},\"max_day\":{}}}",
+                plid(seeds.person),
+                plid(seeds.person_b),
+                jstr(&seeds.first_name),
+                seeds.max_day
+            ),
+        );
+        emit_json(
+            &dir,
+            "ic2.rust.json",
+            arr_ms(&ic2_recent_messages(&graph, seeds.person, seeds.max_day)),
+        );
+        emit_json(
+            &dir,
+            "ic9.rust.json",
+            arr_ms(&ic9_fof_messages(&graph, seeds.person, seeds.max_day)),
+        );
+        emit_json(
+            &dir,
+            "ic13.rust.json",
+            format!("[[{}]]", ic13_shortest_path(&graph, seeds.person, seeds.person_b)),
+        );
+        emit_json(&dir, "is2.rust.json", arr_ms(&is2));
+        emit_json(
+            &dir,
+            "is3.rust.json",
+            format!(
+                "[{}]",
+                friends
+                    .iter()
+                    .map(|p| format!("[{p}]"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        );
+        emit_json(&dir, "is5.rust.json", format!("[[{}]]", is5.map(plid).unwrap_or(-1)));
+        println!("emitted IC cross-check JSON (ic2/ic9/ic13, is2/is3/is5) to {dir}");
+        return Ok(());
+    }
 
     // Smoke checks (shape, mirroring the BI "surfaces real data" assertions).
     let ic1 = ic1_friends_by_name(&graph, seeds.person, &seeds.first_name);

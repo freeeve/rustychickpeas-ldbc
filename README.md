@@ -152,6 +152,28 @@ magnitudes still await an unloaded machine** (runs here had load average in the
 tens; Kùzu is also multi-threaded by default while our queries are
 single-threaded — an asymmetry to settle before quoting numbers).
 
+### Interactive (IC) — `kuzu/run_ic.py`
+
+The seed-anchored Interactive workload runs over the *same* SF1 snapshot (no
+extra download): `cargo run --release --bin ic` on our side, `kuzu/run_ic.py
+sf1` against the existing `db-sf1-faithful`, both using the seeds `pick_seeds`
+chose. All six feasible queries are **value-identical** across engines
+(`kuzu/compare.py … ic2 ic9 ic13 is2 is3 is5` → ALL PASS, incl. 848 friend rows).
+
+| IC query | rustychickpeas (ms) | Kùzu (ms) | winner |
+|----------|--------------------:|----------:|--------|
+| IC2 recent friend messages | 19 | 54 | rustychickpeas (~3×) |
+| IC9 recent FoF messages | 181 | 791 | rustychickpeas (~4×) |
+| IC13 unweighted shortest path | 4.2 | 3.6 | Kùzu (~1.2×) |
+| IS2 person recent messages | 0.18 | 7.0 | rustychickpeas (~39×) |
+| IS3 person friends | 0.01 | 1.4 | rustychickpeas |
+
+The interactive shape is where the CSR/RoaringBitmap adjacency shines — the
+multi-hop traversals (IC2/IC9) and sub-millisecond short reads (IS2/IS3); Kùzu's
+native path engine stays competitive on the single IC13 shortest path. IC1/IS1
+(faithful Person omits firstName/lastName) and IC14 (interaction-weight
+semantics) are deferred on the Kùzu side. Full numbers: `results/ic-sf1.txt`.
+
 ## Roadmap
 
 1. **More faithful queries.** Q1/Q2 done. Next, in rough order of loader cost:
