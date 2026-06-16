@@ -1149,27 +1149,42 @@ fn q19_interaction_path(
     city2: u32,
     interaction: &HashMap<(u32, u32), u32>,
 ) -> Vec<(u32, u32, f64)> {
-    let c1 = g.neighbors_by_type(city1, Direction::Incoming, &["isLocatedIn"]);
     let c2: HashSet<u32> = g
-        .neighbors_by_type(city2, Direction::Incoming, &["isLocatedIn"])
-        .into_iter()
+        .neighbors_by_type(city2, Direction::Incoming, "isLocatedIn")
         .collect();
-    let mut results: Vec<(u32, u32, f64)> = Vec::new();
-    for p1 in c1 {
-        let sp = g.dijkstra(p1, Direction::Both, &["knows"], None, |from, rel| {
-            match interaction.get(&(from.min(rel.neighbor), from.max(rel.neighbor))) {
-                Some(&n) if n > 0 => 1.0 / n as f64,
-                _ => f64::INFINITY, // know each other but never interacted: no edge
-            }
-        });
-        for &p2 in &c2 {
-            if let Some(d) = sp.distance(p2) {
-                if d.is_finite() {
-                    results.push((p1, p2, d));
+    // Each city1 person's single-source search is independent: run them in
+    // parallel and concat the partial result lists (sorted deterministically below).
+    let mut results: Vec<(u32, u32, f64)> = g.par_neighbor_fold(
+        city1,
+        Direction::Incoming,
+        "isLocatedIn",
+        Vec::new,
+        |mut acc, p1| {
+            // Bidirectional search per (p1, p2): meets in the middle instead of
+            // flooding the whole ~9.5k-node component to reach just a few targets.
+            for &p2 in &c2 {
+                if let Some(d) = g.weighted_shortest_path(
+                    p1,
+                    p2,
+                    Direction::Both,
+                    "knows",
+                    |from, rel| {
+                        match interaction.get(&(from.min(rel.neighbor), from.max(rel.neighbor))) {
+                            Some(&n) if n > 0 => 1.0 / n as f64,
+                            _ => f64::INFINITY, // know each other but never interacted
+                        }
+                    },
+                ) {
+                    acc.push((p1, p2, d));
                 }
             }
-        }
-    }
+            acc
+        },
+        |mut a, b| {
+            a.extend(b);
+            a
+        },
+    );
     results.sort_by(|a, b| {
         a.2.partial_cmp(&b.2)
             .unwrap_or(std::cmp::Ordering::Equal)
