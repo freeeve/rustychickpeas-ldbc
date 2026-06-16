@@ -316,7 +316,6 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
     };
     let interested: HashSet<u32> = g
         .neighbors_by_type(tag, Direction::Incoming, &["hasInterest"])
-        .into_iter()
         .collect();
     // For each interested p1 and mutual friend m known by p1, each p2 known by m
     // who is interested, distinct from p1, and not directly known by p1.
@@ -324,7 +323,6 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
     for &p1 in &interested {
         let p1_knows: HashSet<u32> = g
             .neighbors_by_type(p1, Direction::Outgoing, &["knows"])
-            .into_iter()
             .collect();
         for &m in &p1_knows {
             for p2 in g.neighbors_by_type(m, Direction::Outgoing, &["knows"]) {

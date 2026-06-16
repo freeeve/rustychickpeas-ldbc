@@ -394,7 +394,6 @@ pub(crate) fn q8_central_person(
     };
     let interested: HashSet<u32> = g
         .neighbors_by_type(tag, Direction::Incoming, &["hasInterest"])
-        .into_iter()
         .collect();
     let mut msgcount: HashMap<u32, i64> = HashMap::new();
     for msg in g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]) {

@@ -94,7 +94,6 @@ pub(crate) fn q10_experts(
     }
     let class_tags: HashSet<u32> = g
         .neighbors_by_type(tc, Direction::Incoming, &["hasType"])
-        .into_iter()
         .collect();
     let mut counts: HashMap<(u32, u32), HashSet<u32>> = HashMap::new(); // (expert, tag) -> messages
     for (&expert, &d) in &dist {
@@ -139,7 +138,6 @@ pub(crate) fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_
     };
     let class_tags: HashSet<u32> = g
         .neighbors_by_type(tc, Direction::Incoming, &["hasType"])
-        .into_iter()
         .collect();
     let has_class_tag = |msg: u32| {
         g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"])
@@ -406,7 +404,6 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
     let ensure = |g: &GraphSnapshot, p: u32, pm: &mut HashMap<u32, HashSet<u32>>| {
         pm.entry(p).or_insert_with(|| {
             g.neighbors_by_type(p, Direction::Incoming, &["hasMember"])
-                .into_iter()
                 .collect()
         });
     };
