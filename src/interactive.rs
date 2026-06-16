@@ -5,7 +5,7 @@
 //! deferred (they need Forum-membership / tag-co-occurrence / organisation
 //! expansions noted in tasks/003).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -215,6 +215,122 @@ pub fn is5_message_creator(g: &GraphSnapshot, message: u32) -> Option<u32> {
         .next()
 }
 
+/// IC4 — "new topics": Tags on the seed's friends' Posts created within
+/// `[start_day, start_day + duration_days)` that were never on those friends'
+/// Posts before `start_day`. Returns (tag, post_count), (count desc, name asc), top 10.
+pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_days: i64) -> Vec<(u32, u32)> {
+    let end_day = start_day + duration_days;
+    let posts = g.nodes_with_label("Post");
+    let mut in_window: HashMap<u32, u32> = HashMap::new();
+    let mut before: HashSet<u32> = HashSet::new();
+    for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
+        for post in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
+            if !posts.is_some_and(|s| s.contains(post)) {
+                continue; // Posts only
+            }
+            let day = pi64(g, post, "day");
+            if day < start_day {
+                for t in g.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
+                    before.insert(t);
+                }
+            } else if day < end_day {
+                for t in g.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
+                    *in_window.entry(t).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut rows: Vec<(u32, u32)> = in_window
+        .into_iter()
+        .filter(|(t, _)| !before.contains(t))
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+    rows.truncate(10);
+    rows
+}
+
+/// IC6 — tag co-occurrence: among Posts created by the seed's friends/FoF
+/// (<=2 `knows` hops, excluding self) tagged `tag_name`, count co-occurring other
+/// Tags. Returns (other_tag, post_count), (count desc, name asc), top 10.
+pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> Vec<(u32, u32)> {
+    let Some(target) = tag_by_name(g, tag_name) else {
+        return Vec::new();
+    };
+    let posts = g.nodes_with_label("Post");
+    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let mut counts: HashMap<u32, u32> = HashMap::new();
+    for (&p, &d) in &reach {
+        if d == 0 {
+            continue;
+        }
+        for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
+            if !posts.is_some_and(|s| s.contains(post)) {
+                continue; // Posts only
+            }
+            let tags: Vec<u32> = g
+                .neighbors_by_type(post, Direction::Outgoing, "hasTag")
+                .collect();
+            if !tags.contains(&target) {
+                continue; // post must carry the given tag
+            }
+            for &t in &tags {
+                if t != target {
+                    *counts.entry(t).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut rows: Vec<(u32, u32)> = counts.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+    rows.truncate(10);
+    rows
+}
+
+/// IC8 — the 20 most recent replies to the start person's messages, ordered by
+/// (replyCreationDate desc, reply id). Returns (reply, ms).
+pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
+    let mut rows: Vec<(u32, i64)> = Vec::new();
+    for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
+        for reply in g.neighbors_by_type(msg, Direction::Incoming, "replyOf") {
+            rows.push((reply, pi64(g, reply, "ms")));
+        }
+    }
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows.truncate(20);
+    rows
+}
+
+/// IS6 — (forum, moderator) for a message. `roots` is the `chain_roots` array
+/// for `replyOf` (hoisted once by the caller); index it to get the message's
+/// root Post, then one `containerOf` hop to the forum.
+pub fn is6_forum_of_message(g: &GraphSnapshot, message: u32, roots: &[u32]) -> Option<(u32, u32)> {
+    let root = *roots.get(message as usize)?; // root Post (a Post maps to itself)
+    let forum = g.neighbors_by_type(root, Direction::Incoming, "containerOf").next()?;
+    let moderator = g.neighbors_by_type(forum, Direction::Outgoing, "hasModerator").next()?;
+    Some((forum, moderator))
+}
+
+/// IS7 — direct replies to a message: (reply, replyMs, replyAuthor, knows).
+/// `knows` = replyAuthor is a `knows` friend of the original message's author
+/// (false if the same person). Ordered (replyMs desc, replyAuthor plid asc).
+pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)> {
+    let author = g.neighbors_by_type(message, Direction::Incoming, "hasCreator").next();
+    let author_friends: HashSet<u32> = author
+        .map(|a| g.neighbors_by_type(a, Direction::Outgoing, "knows").collect())
+        .unwrap_or_default();
+    let mut rows: Vec<(u32, i64, u32, bool)> = Vec::new();
+    for reply in g.neighbors_by_type(message, Direction::Incoming, "replyOf") {
+        let ra = g
+            .neighbors_by_type(reply, Direction::Incoming, "hasCreator")
+            .next()
+            .unwrap_or(u32::MAX);
+        let knows = author.is_some_and(|a| a != ra && author_friends.contains(&ra));
+        rows.push((reply, pi64(g, reply, "ms"), ra, knows));
+    }
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.2, "plid").cmp(&pi64(g, b.2, "plid"))));
+    rows
+}
+
 /// Load the snapshot, pick seeds, smoke-check each feasible IC query, then time
 /// them (median of 5).
 pub fn run() -> Result<()> {
@@ -339,6 +455,55 @@ pub fn run() -> Result<()> {
         ic14.as_ref().map(|(p, _)| p.len()).unwrap_or(0)
     );
 
+    // Deferred-tier queries now enabled with no loader change: IC4/IC6/IC8, IS6/IS7.
+    // IC6 needs a tag the neighbourhood actually posts; derive its most common one.
+    let seed_tag_name = {
+        let mut c: HashMap<u32, u32> = HashMap::new();
+        for f in graph.neighbors_by_type(seeds.person, Direction::Outgoing, "knows") {
+            for post in graph.neighbors_by_type(f, Direction::Outgoing, "hasCreator") {
+                for t in graph.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
+                    *c.entry(t).or_insert(0) += 1;
+                }
+            }
+        }
+        c.into_iter()
+            .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+            .and_then(|(t, _)| pstr(&graph, t, "name"))
+            .unwrap_or("")
+            .to_string()
+    };
+    // IS6/IS7 need a message; use the seed's newest Post.
+    let posts = graph.nodes_with_label("Post");
+    let seed_post = graph
+        .neighbors_by_type(seeds.person, Direction::Outgoing, "hasCreator")
+        .filter(|&m| posts.is_some_and(|p| p.contains(m)))
+        .max_by_key(|&m| pi64(&graph, m, "ms"));
+    let reply_roots = graph
+        .rel_type("replyOf")
+        .map(|rt| graph.chain_roots(Direction::Outgoing, rt));
+
+    let ic4 = ic4_new_topics(&graph, seeds.person, days_from_civil(2011, 1, 1), 365);
+    let ic6 = ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name);
+    let ic8 = ic8_recent_replies(&graph, seeds.person);
+    assert!(ic4.len() <= 10, "IC4 over-returned");
+    assert!(ic6.len() <= 10, "IC6 over-returned");
+    let (is6_ok, is7_n) = match seed_post {
+        Some(msg) => (
+            is6_forum_of_message(&graph, msg, reply_roots.as_deref().unwrap_or(&[])).is_some(),
+            is7_replies(&graph, msg).len(),
+        ),
+        None => (false, 0),
+    };
+    println!(
+        "  IC4 new-topics: {}; IC6 co-tags(\"{}\"): {}; IC8 replies: {}; IS6 forum: {}; IS7 replies: {}",
+        ic4.len(),
+        seed_tag_name,
+        ic6.len(),
+        ic8.len(),
+        is6_ok,
+        is7_n
+    );
+
     let runs = 5;
     println!("\nTimings (median of {runs}):");
     time_query("IC1 friends-by-name", runs, || {
@@ -367,10 +532,26 @@ pub fn run() -> Result<()> {
     time_query("IS3 person friends", runs, || {
         is3_friends(&graph, seeds.person).len()
     });
+    time_query("IC4 new topics", runs, || {
+        ic4_new_topics(&graph, seeds.person, days_from_civil(2011, 1, 1), 365).len()
+    });
+    time_query("IC6 tag co-occurrence", runs, || {
+        ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name).len()
+    });
+    time_query("IC8 recent replies", runs, || {
+        ic8_recent_replies(&graph, seeds.person).len()
+    });
+    if let Some(msg) = seed_post {
+        time_query("IS6 forum of message", runs, || {
+            is6_forum_of_message(&graph, msg, reply_roots.as_deref().unwrap_or(&[])).is_some() as usize
+        });
+        time_query("IS7 replies of message", runs, || {
+            is7_replies(&graph, msg).len()
+        });
+    }
 
     println!(
-        "\nDeferred (need more schema loaded): IC3-IC8, IC10-IC12 (Forum membership, \
-         tag co-occurrence, organisation expansions), IS4/IS6/IS7."
+        "\nDeferred (need a loader addition): IC3, IC5, IC7, IC10, IC11, IC12, IS4."
     );
     Ok(())
 }
