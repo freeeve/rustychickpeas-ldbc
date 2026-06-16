@@ -12,7 +12,7 @@ use std::time::Instant;
 use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
 
 use crate::harness::{emit_json, jstr, time_query, Result};
-use crate::loader::load_graph;
+use crate::loader::load_graph_opts;
 use crate::props::*;
 
 /// Reproducible IC substitution parameters derived from the loaded graph.
@@ -583,6 +583,12 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
     rows
 }
 
+/// IS4 — a message's (creationMs, content). Needs the loader's `load_content`
+/// option (the `ctext` property); image-only Posts fall back to their imageFile.
+pub fn is4_message_content(g: &GraphSnapshot, message: u32) -> Option<(i64, String)> {
+    Some((pi64(g, message, "ms"), pstr(g, message, "ctext")?.to_string()))
+}
+
 /// Load the snapshot, pick seeds, smoke-check each feasible IC query, then time
 /// them (median of 5).
 pub fn run() -> Result<()> {
@@ -600,7 +606,7 @@ pub fn run() -> Result<()> {
 
     eprintln!("Loading LDBC graph from {} ...", snapshot.display());
     let t = Instant::now();
-    let (graph, s) = load_graph(&snapshot)?;
+    let (graph, s) = load_graph_opts(&snapshot, true)?; // IS4 needs message content text
     println!("\n=== LDBC SNB Interactive — SF1 (real data) ===");
     println!(
         "Loaded {} persons, {} posts, {} comments in {:.1}s\n",
@@ -790,6 +796,11 @@ pub fn run() -> Result<()> {
         seed_class_name,
         ic12.len()
     );
+    let is4 = seed_post.and_then(|m| is4_message_content(&graph, m));
+    assert!(is4.is_some(), "IS4 content not loaded (load_content off?)");
+    if let Some((ms, text)) = &is4 {
+        println!("  IS4 content: ms={ms}, {} chars", text.chars().count());
+    }
 
     let runs = 5;
     println!("\nTimings (median of {runs}):");
@@ -854,10 +865,12 @@ pub fn run() -> Result<()> {
     time_query("IC12 expert search", runs, || {
         ic12_expert_search(&graph, seeds.person, &seed_class_name).len()
     });
+    if let Some(msg) = seed_post {
+        time_query("IS4 message content", runs, || {
+            is4_message_content(&graph, msg).is_some() as usize
+        });
+    }
 
-    println!(
-        "\nDeferred: IS4 (message content text — not loaded by design; ~2.8M strings \
-         would bloat the loader for a trivial lookup)."
-    );
+    println!("\nAll IC1-IC14 and short reads IS1-IS7 implemented.");
     Ok(())
 }

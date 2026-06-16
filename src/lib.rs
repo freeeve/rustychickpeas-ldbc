@@ -14,4 +14,4 @@ pub mod interactive;
 pub mod spb;
 
 pub use harness::Result;
-pub use loader::{load_graph, Stats};
+pub use loader::{load_graph, load_graph_opts, Stats};

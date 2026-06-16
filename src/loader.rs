@@ -76,6 +76,15 @@ pub fn set_message_props(b: &mut GraphBuilder, id: u32, creation: &str, content:
 
 /// Load the BI-relevant subgraph from an `initial_snapshot` directory.
 pub fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
+    load_graph_opts(snapshot, false)
+}
+
+/// Like [`load_graph`], but with `load_content` also stores each message's
+/// content text (Post falls back to `imageFile` when content is empty) as the
+/// `ctext` property for the Interactive IS4 read. Off by default so BI/SPB
+/// loads stay lean — content text is ~hundreds of MB at SF1 and the BI queries
+/// only need the `hasContent` bool, which is always stored.
+pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnapshot, Stats)> {
     let dynamic = snapshot.join("dynamic");
     let static_ = snapshot.join("static");
 
@@ -243,6 +252,7 @@ pub fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
             "content",
             "length",
             "language",
+            "imageFile",
         ],
         |v| {
             if let Ok(lid) = v[0].parse::<i64>() {
@@ -251,6 +261,11 @@ pub fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 builder.add_node(Some(id), &["Post"]).unwrap();
                 set_message_props(&mut builder, id, v[2], v[3], v[4]);
                 builder.set_prop_str(id, "lang", v[5]).unwrap();
+                if load_content {
+                    // IS4 content; image-only posts have empty content -> imageFile.
+                    let text = if v[3].is_empty() { v[6] } else { v[3] };
+                    builder.set_prop_str(id, "ctext", text).unwrap();
+                }
                 post.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
                     builder.add_relationship(creator, id, "hasCreator").unwrap();
@@ -281,6 +296,9 @@ pub fn load_graph(snapshot: &Path) -> Result<(GraphSnapshot, Stats)> {
                 next += 1;
                 builder.add_node(Some(id), &["Comment"]).unwrap();
                 set_message_props(&mut builder, id, v[2], v[3], v[4]);
+                if load_content {
+                    builder.set_prop_str(id, "ctext", v[3]).unwrap(); // IS4 content
+                }
                 comment.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
                     builder.add_relationship(creator, id, "hasCreator").unwrap();
