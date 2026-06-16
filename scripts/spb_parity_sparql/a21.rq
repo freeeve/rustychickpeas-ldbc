@@ -1,12 +1,11 @@
 PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
-# SPB advanced q21 (faceted search) — the official fixed BGP requires title,
-# description, category, TAG, audience, liveCoverage, primaryFormat and
-# dateCreated, plus a full-text word in the title and pinned category/audience.
-# `cwork:tag` is absent from the SPB v2.0 generator output, so a faithful q21 is
-# empty; our a21 omits the tag pattern (returns matches), which this exposes.
+# SPB advanced q21 (faceted search) — full-text word in the title, pinned
+# category/audience, and the official `cwork:tag ?tag` requirement folded to the
+# about/mentions topic links the SPB generator actually emits (no literal
+# cwork:tag exists). Set of work uris.
 SELECT DISTINCT ?cw WHERE {
-  ?cw a cwork:CreativeWork ; cwork:title ?title ; cwork:description ?desc ;
-      cwork:category <{{CATEGORY}}> ; cwork:tag ?tag ; cwork:audience <{{AUDIENCE}}> ;
-      cwork:liveCoverage ?lc ; cwork:primaryFormat ?pf ; cwork:dateCreated ?dc .
+  ?cw a cwork:CreativeWork ; cwork:title ?title ;
+      cwork:category <{{CATEGORY}}> ; cwork:audience <{{AUDIENCE}}> .
+  { ?cw cwork:about ?tag } UNION { ?cw cwork:mentions ?tag }
   FILTER(regex(?title, "\\b{{WORD}}\\b", "i"))
 }

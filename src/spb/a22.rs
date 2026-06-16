@@ -52,6 +52,14 @@ fn facet_edge(g: &GraphSnapshot, node: u32, edge: &str, want_uri: Option<&str>) 
     }
 }
 
+/// The official `cwork:tag ?tag` requirement, folded to the `about`/`mentions`
+/// topic links the SPB generator emits (it produces no literal `cwork:tag`):
+/// `Some(uri)` matches an about/mentions edge to that uri; `None` requires at
+/// least one such edge to exist.
+fn folded_tag(g: &GraphSnapshot, node: u32, want_uri: Option<&str>) -> bool {
+    facet_edge(g, node, "about", want_uri) || facet_edge(g, node, "mentions", want_uri)
+}
+
 /// SPB advanced **q22**: creative works whose `title` matches the full-text
 /// `word`, that satisfy the full BGP (a bound `description`, `category`, `tag`,
 /// `audience`, `liveCoverage`, `primaryFormat`, `dateCreated`), and that pass the
@@ -85,7 +93,7 @@ pub fn run(
                 && facet_edge(g, w, "primaryFormat", None)
                 && facet_edge(g, w, "category", category_uri)
                 && facet_edge(g, w, "audience", audience_uri)
-                && facet_edge(g, w, "tag", tag_uri)
+                && folded_tag(g, w, tag_uri)
                 && after.is_none_or(|a| created >= a)
                 && before.is_none_or(|b| created <= b)
                 && live_coverage.is_none_or(|lc| pbool(g, w, "liveCoverage") == lc)
@@ -108,7 +116,7 @@ mod tests {
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/title> "London football derby" .
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/description> "a match report" .
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/category> <http://www.bbc.co.uk/category/sport> .
-<http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/tag> <http://www.bbc.co.uk/things/teamX> .
+<http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/about> <http://www.bbc.co.uk/things/teamX> .
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/audience> <http://www.bbc.co.uk/audience/national> .
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/liveCoverage> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/primaryFormat> <http://www.bbc.co.uk/format/textual> .
@@ -118,7 +126,7 @@ mod tests {
 <http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/title> "Paris football club" .
 <http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/description> "a transfer story" .
 <http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/category> <http://www.bbc.co.uk/category/sport> .
-<http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/tag> <http://www.bbc.co.uk/things/teamY> .
+<http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/about> <http://www.bbc.co.uk/things/teamY> .
 <http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/audience> <http://www.bbc.co.uk/audience/international> .
 <http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/liveCoverage> "false"^^<http://www.w3.org/2001/XMLSchema#boolean> .
 <http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/primaryFormat> <http://www.bbc.co.uk/format/video> .
@@ -128,7 +136,7 @@ mod tests {
 <http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/title> "Wimbledon tennis final" .
 <http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/description> "a championship preview" .
 <http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/category> <http://www.bbc.co.uk/category/sport> .
-<http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/tag> <http://www.bbc.co.uk/things/teamX> .
+<http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/about> <http://www.bbc.co.uk/things/teamX> .
 <http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/audience> <http://www.bbc.co.uk/audience/national> .
 <http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/liveCoverage> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
 <http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/primaryFormat> <http://www.bbc.co.uk/format/textual> .
@@ -138,7 +146,7 @@ mod tests {
 <http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/title> "London football news" .
 <http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/description> "a news brief" .
 <http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/category> <http://www.bbc.co.uk/category/sport> .
-<http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/tag> <http://www.bbc.co.uk/things/teamX> .
+<http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/about> <http://www.bbc.co.uk/things/teamX> .
 <http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/audience> <http://www.bbc.co.uk/audience/national> .
 <http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/liveCoverage> "false"^^<http://www.w3.org/2001/XMLSchema#boolean> .
 <http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/dateCreated> "2012-09-01T12:00:00.000+00:00"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
@@ -147,7 +155,7 @@ mod tests {
 <http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/title> "Berlin football match" .
 <http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/description> "a fixture note" .
 <http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/category> <http://www.bbc.co.uk/category/politics> .
-<http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/tag> <http://www.bbc.co.uk/things/teamZ> .
+<http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/about> <http://www.bbc.co.uk/things/teamZ> .
 <http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/audience> <http://www.bbc.co.uk/audience/national> .
 <http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/liveCoverage> "false"^^<http://www.w3.org/2001/XMLSchema#boolean> .
 <http://ex/cw5> <http://www.bbc.co.uk/ontologies/creativework/primaryFormat> <http://www.bbc.co.uk/format/textual> .

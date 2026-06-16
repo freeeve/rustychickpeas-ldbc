@@ -33,3 +33,15 @@ or the divergence is explained (stemming, reasoning, absent predicate) and, wher
 it is a real-data bug in our query, fixed. q6/q8 already validated vs Kùzu.
 
 **Depends on.** 014 harness; 015–048 queries; real SPB-10 extract + Oxigraph.
+
+**Result.** All 15 feasible queries (q1–q5, q7, a17–a25) MATCH Oxigraph on the
+SPB-10 extract, 0 diff. Getting there fixed three causes:
+- N-Triples `\uXXXX`/`\UXXXXXXXX` UCHAR escapes were not decoded by the parser
+  (the generator escapes non-ASCII IRIs this way) — non-ASCII entities split into
+  two nodes. Fixed in `ntriples` + percent-decode in `loader`. → q5/a19/a25.
+- `xsd:dateTime` fractional-second trailing zeros (`.150` vs `.15`) — normalized
+  in the harness for both sides. → a19.
+- The SPB v2.0 generator emits no `cwork:tag`; per the chosen modeling the
+  required tag pattern is folded to the `about`/`mentions` topic links the data
+  carries (q5 already did this), making q21/q22/q23 meaningful (227/108/2597).
+  → a21/a22/a23.

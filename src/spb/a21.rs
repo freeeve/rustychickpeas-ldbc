@@ -49,6 +49,14 @@ fn matches_facets(
     date_from: Option<&str>,
     date_to: Option<&str>,
 ) -> bool {
+    // SPB q21's fixed BGP requires `cwork:tag ?tag`. The generator emits no literal
+    // `cwork:tag`, so — as the doc above and `q5` describe — the topic tag is the
+    // `about`/`mentions` link: a solution must carry at least one.
+    if g.neighbors_by_type(work, Direction::Outgoing, "about").next().is_none()
+        && g.neighbors_by_type(work, Direction::Outgoing, "mentions").next().is_none()
+    {
+        return false;
+    }
     if let Some(uri) = category_uri {
         if !has_edge_to_uri(g, work, "category", uri) {
             return false;

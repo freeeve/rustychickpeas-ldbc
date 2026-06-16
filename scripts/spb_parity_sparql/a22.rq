@@ -1,12 +1,13 @@
 PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
-# SPB advanced q22 (faceted search) — official fixed BGP (incl. the required
-# `cwork:tag`) + full-text word + pinned category/audience + a dateCreated window.
-# Tag-less generator output => faithfully empty (matches our a22, which also
-# requires a tag edge).
+# SPB advanced q22 (faceted search) — full official BGP (description, category,
+# audience, liveCoverage, primaryFormat, dateCreated) + full-text word + pinned
+# category/audience + a dateCreated window, with the required `cwork:tag ?tag`
+# folded to the about/mentions topic links the generator emits. Set of work uris.
 SELECT DISTINCT ?cw WHERE {
   ?cw a cwork:CreativeWork ; cwork:title ?title ; cwork:description ?desc ;
-      cwork:category <{{CATEGORY}}> ; cwork:tag ?tag ; cwork:audience <{{AUDIENCE}}> ;
+      cwork:category <{{CATEGORY}}> ; cwork:audience <{{AUDIENCE}}> ;
       cwork:liveCoverage ?lc ; cwork:primaryFormat ?pf ; cwork:dateCreated ?dc .
+  { ?cw cwork:about ?tag } UNION { ?cw cwork:mentions ?tag }
   FILTER(regex(?title, "\\b{{WORD}}\\b", "i") &&
          str(?dc) >= "{{DATE_FROM}}" && str(?dc) <= "{{DATE_TO}}")
 }

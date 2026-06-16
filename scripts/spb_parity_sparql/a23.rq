@@ -1,11 +1,13 @@
 PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
-# SPB advanced q23 (faceted search) — per tag, the count of distinct creation
-# days, over the official fixed BGP (which requires `cwork:tag`) + full-text word +
-# pinned category. Tag-less generator output => faithfully empty.
+# SPB advanced q23 (faceted search) — per topic tag, the count of distinct creation
+# days, over the official fixed BGP + full-text word + pinned category. category is
+# a uri edge and the required `cwork:tag ?tag` grouping is folded to the
+# about/mentions topic links the generator emits; key is the topic uri.
 SELECT ?tag (COUNT(DISTINCT ?day) AS ?n) WHERE {
   ?cw a cwork:CreativeWork ; cwork:title ?title ; cwork:description ?desc ;
-      cwork:category <{{CATEGORY}}> ; cwork:tag ?tag ; cwork:audience ?aud ;
+      cwork:category <{{CATEGORY}}> ; cwork:audience ?aud ;
       cwork:liveCoverage ?lc ; cwork:primaryFormat ?pf ; cwork:dateCreated ?dc .
+  { ?cw cwork:about ?tag } UNION { ?cw cwork:mentions ?tag }
   FILTER(regex(?title, "\\b{{WORD}}\\b", "i"))
   BIND(SUBSTR(str(?dc), 1, 10) AS ?day)
 } GROUP BY ?tag
