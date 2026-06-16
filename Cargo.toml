@@ -10,7 +10,6 @@ rustychickpeas-core = { path = "../rustychickpeas/rustychickpeas-core" }
 csv = "1.3"
 flate2 = "1.0"
 hashbrown = "0.16"
-rayon = "1.8"
 
 [[bin]]
 name = "ldbc-bench"

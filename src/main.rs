@@ -550,10 +550,10 @@ fn col_i64(c: Option<&Column>, n: u32) -> i64 {
 type Q1Groups = hashbrown::HashMap<(i64, bool, u8), (u64, i64)>;
 
 fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1Row>, u64) {
-    use rayon::prelude::*;
     // Resolve each property's column once (hoisted out of the multi-million-row
-    // scan). The scan is morsel-parallel — partial per-chunk aggregates merge —
-    // mirroring Kùzu's parallel hash-aggregate (Kùzu's edge on Q1 is threads).
+    // scan). Each label is aggregated with NodeSet::par_fold — a parallel
+    // hash-aggregate that mirrors Kùzu's threaded scan; the parallelism (and the
+    // contiguous-range fast path) lives in core, so the query stays rayon-free.
     let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
     let (day_col, content_col, len_col, year_col) =
         (col("day"), col("content"), col("len"), col("year"));
@@ -603,19 +603,8 @@ fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1Row>, u64) {
             a.1 += b.1;
             a
         };
-        let id = || (Q1Groups::new(), 0u64);
-        // Fast path: a label whose ids are contiguous scans the range directly (no
-        // boxed-iterator collect). `NodeSet::as_range` verifies contiguity in core,
-        // so the fallback collect keeps the result correct for sparse sets.
-        let (part, sub_total) = match nodes.as_range() {
-            Some(range) => range.into_par_iter().fold(id, fold_one).reduce(id, reduce_two),
-            None => nodes
-                .iter()
-                .collect::<Vec<u32>>()
-                .into_par_iter()
-                .fold(id, fold_one)
-                .reduce(id, reduce_two),
-        };
+        let (part, sub_total) =
+            nodes.par_fold(|| (Q1Groups::new(), 0u64), fold_one, reduce_two);
         for (k, (n, s)) in part {
             let e = groups.entry(k).or_insert((0, 0));
             e.0 += n;

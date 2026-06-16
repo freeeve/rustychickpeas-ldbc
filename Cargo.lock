@@ -1822,7 +1822,6 @@ dependencies = [
  "csv",
  "flate2",
  "hashbrown 0.16.0",
- "rayon",
  "rustychickpeas-core",
 ]
 
