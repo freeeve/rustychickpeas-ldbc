@@ -17,6 +17,8 @@ pub mod q3;
 pub mod q4;
 pub mod q5;
 pub mod q7;
+pub mod a5; // advanced q5 (popular topics by category; subClassOf entity type)
+pub mod a8; // advanced q8 (popular topics by type/audience/date; subPropertyOf tag)
 pub mod a17; // advanced q17 (geo)
 pub mod a18; // advanced q18 (date-range)
 pub mod a19; // advanced q19 (popular tags, aggregation)

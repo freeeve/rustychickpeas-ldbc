@@ -1,0 +1,9 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB advanced q8 — most popular topics tagged by works of a type+audience in a
+# dateModified window. `cwork:tag` is the RDFS super-property of about/mentions
+# (materialized in the store). Key is the topic uri, value the count.
+SELECT ?topic (COUNT(*) AS ?n) WHERE {
+  ?cw a cwork:{{CW_TYPE}} ; cwork:tag ?topic ;
+      cwork:dateModified ?dt ; cwork:audience <{{AUDIENCE}}> .
+  FILTER(str(?dt) > "{{DATE_FROM}}" && str(?dt) < "{{DATE_TO}}")
+} GROUP BY ?topic

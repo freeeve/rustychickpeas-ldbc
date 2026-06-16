@@ -27,7 +27,7 @@ PLACEHOLDERS = {
     "word": "WORD", "topic": "TOPIC", "entB": "ENT_B", "category": "CATEGORY",
     "audience": "AUDIENCE", "cwType": "CW_TYPE", "dateFrom": "DATE_FROM",
     "dateTo": "DATE_TO", "lat": "LAT", "lon": "LON", "deviation": "DEV",
-    "q2_cw": "Q2_CW",
+    "q2_cw": "Q2_CW", "catCompany": "CAT_COMPANY", "entityType": "ENTITY_TYPE",
 }
 # How many leading TSV columns form the comparison key/value for each kind.
 KINDS = {

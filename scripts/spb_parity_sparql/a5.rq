@@ -1,0 +1,10 @@
+PREFIX cwork:<http://www.bbc.co.uk/ontologies/creativework/>
+# SPB advanced q5 — most popular about-topics of the given entity type, over works
+# in either of two categories. `?about a <entityType>` relies on the RDFS
+# subClassOf entailment (dbo:Company/Event -> coreconcepts:Thing), materialized in
+# the store. Key is the entity uri, value the work count.
+SELECT ?about (COUNT(*) AS ?n) WHERE {
+  ?cw cwork:about ?about ; cwork:category ?cat .
+  ?about a <{{ENTITY_TYPE}}> .
+  FILTER(?cat = <{{CAT_COMPANY}}> || ?cat = <{{CATEGORY}}>)
+} GROUP BY ?about

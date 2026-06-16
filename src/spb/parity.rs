@@ -13,7 +13,9 @@ use std::time::Instant;
 
 use rustychickpeas_core::GraphSnapshot;
 
-use super::{a17, a18, a19, a20, a21, a22, a23, a24, a25, loader, q1, q2, q3, q4, q5, q7};
+use super::{
+    a17, a18, a19, a20, a21, a22, a23, a24, a25, a5, a8, loader, q1, q2, q3, q4, q5, q7,
+};
 use crate::harness::{emit_json, jstr, Result};
 use crate::props::pstr;
 
@@ -31,6 +33,10 @@ const TOPIC: &str = "http://dbpedia.org/resource/Action_of_25_February_1781";
 // tasks/052. An ASCII partner keeps a24 a real test rather than an artifact.
 const ENT_B: &str = "http://dbpedia.org/resource/International_Telecoms_Week";
 const CATEGORY: &str = "http://www.bbc.co.uk/category/Event";
+const CAT_COMPANY: &str = "http://www.bbc.co.uk/category/Company";
+// coreconcepts:Thing, the super-class dbo:Company/Event carry via subClassOf;
+// our loader materializes it as the label `Thing` (q5's entity-type restriction).
+const ENTITY_LABEL: &str = "Thing";
 const AUDIENCE: &str = "http://www.bbc.co.uk/ontologies/creativework/InternationalAudience";
 const CW_TYPE: &str = "BlogPost";
 const DATE_FROM: &str = "2011-03-01T00:00:00.000+00:00";
@@ -114,7 +120,7 @@ pub fn run() -> Result<()> {
             "{{",
             "\"q1\":{},\"q2\":{},\"q3\":{},\"q4\":{},\"q5\":{},\"q7\":{},",
             "\"a17\":{},\"a18\":{},\"a19\":{},\"a20\":{},\"a21\":{},\"a22\":{},",
-            "\"a23\":{},\"a24\":{},\"a25\":{}",
+            "\"a23\":{},\"a24\":{},\"a25\":{},\"a5\":{},\"a8\":{}",
             "}}"
         ),
         block("uris", uris(&g, &q1_works)),
@@ -138,16 +144,19 @@ pub fn run() -> Result<()> {
         block("kv", rows_kv(&a23::run(&g, WORD, CATEGORY, ALL))),
         block("day_count", a24_rows),
         block("who_days", a25_rows),
+        block("kv", rows_kv(&a5::run(&g, ENTITY_LABEL, CAT_COMPANY, CATEGORY, ALL))),
+        block("kv", rows_kv(&a8::run(&g, CW_TYPE, AUDIENCE, DATE_FROM, DATE_TO))),
     );
 
     let params = format!(
         concat!(
             "{{\"word\":{},\"topic\":{},\"entB\":{},\"category\":{},\"audience\":{},",
             "\"cwType\":{},\"dateFrom\":{},\"dateTo\":{},\"lat\":{},\"lon\":{},",
-            "\"deviation\":{},\"q2_cw\":{}}}"
+            "\"deviation\":{},\"q2_cw\":{},\"catCompany\":{},\"entityType\":{}}}"
         ),
         jstr(WORD), jstr(TOPIC), jstr(ENT_B), jstr(CATEGORY), jstr(AUDIENCE),
         jstr(CW_TYPE), jstr(DATE_FROM), jstr(DATE_TO), LAT, LON, DEVIATION, jstr(q2_in),
+        jstr(CAT_COMPANY), jstr("http://www.bbc.co.uk/ontologies/coreconcepts/Thing"),
     );
 
     emit_json("results", "spb.parity.rust.json", format!("{{\"params\":{params},\"queries\":{queries}}}"));
