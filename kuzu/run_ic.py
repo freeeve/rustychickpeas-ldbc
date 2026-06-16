@@ -72,9 +72,10 @@ def main():
                    WHERE m.cdate <= date('{maxdate}')
                    RETURN m.mts AS mts ORDER BY mts DESC LIMIT 20""",
         # IC9: 20 most recent messages by friends and friends-of-friends (<=2 hops).
-        "ic9": f"""MATCH (:Person {{id:{person}}})-[:knows*1..2]-(f:Person)-[:hasCreator]->(m:Message)
-                   WHERE f.id <> {person} AND m.cdate <= date('{maxdate}')
-                   RETURN DISTINCT m.id AS mid, m.mts AS mts ORDER BY mts DESC, mid LIMIT 20""",
+        "ic9": f"""MATCH (:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
+                   WITH DISTINCT f
+                   MATCH (f)-[:hasCreator]->(m:Message) WHERE m.cdate <= date('{maxdate}')
+                   RETURN m.id AS mid, m.mts AS mts ORDER BY mts DESC, mid LIMIT 20""",
         # IC13: unweighted shortest-path length in the knows graph.
         "ic13": f"""MATCH p = (:Person {{id:{person}}})-[:knows* SHORTEST 1..15]-(:Person {{id:{person_b}}})
                     RETURN length(p) AS hops""",
@@ -97,8 +98,10 @@ def main():
                                        WHERE pre.isComment = false AND pre.cdate < date('{ic4_start}') }}
                    RETURN t.name AS name, cnt ORDER BY cnt DESC, name ASC LIMIT 10""",
         # IC6: tags co-occurring with seed_tag on the neighbourhood's Posts.
-        "ic6": f"""MATCH (:Person {{id:{person}}})-[:knows*1..2]-(f:Person)-[:hasCreator]->(post:Message)-[:hasTag]->(:Tag {{name:'{seed_tag}'}})
-                   WHERE post.isComment = false AND f.id <> {person}
+        "ic6": f"""MATCH (:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
+                   WITH DISTINCT f
+                   MATCH (f)-[:hasCreator]->(post:Message)-[:hasTag]->(:Tag {{name:'{seed_tag}'}})
+                   WHERE post.isComment = false
                    MATCH (post)-[:hasTag]->(other:Tag) WHERE other.name <> '{seed_tag}'
                    RETURN other.name AS name, count(DISTINCT post) AS cnt ORDER BY cnt DESC, name ASC LIMIT 10""",
         # IC8: 20 most recent replies to the seed's messages.
@@ -123,10 +126,9 @@ def main():
                    RETURN length(path) AS dist, f.lname AS lname, f.id AS pid
                    ORDER BY dist, lname, pid LIMIT 20""",
         # IC3: FoF (<=2 hops) foreign to both countries, who posted in both, in window.
-        "ic3": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person)
-                   WHERE f.id <> {person}
-                     AND NOT EXISTS {{ MATCH (f)-[:isLocatedIn]->(:Place)-[:isPartOf]->(h:Place) WHERE h.name IN ['China', 'Germany'] }}
+        "ic3": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
                    WITH DISTINCT f
+                   WHERE NOT EXISTS {{ MATCH (f)-[:isLocatedIn]->(:Place)-[:isPartOf]->(h:Place) WHERE h.name IN ['China', 'Germany'] }}
                    MATCH (f)-[:hasCreator]->(m:Message)-[:msgCountry]->(c:Place)
                    WHERE c.name IN ['China', 'Germany'] AND m.cdate >= date('{ic3_start}') AND m.cdate < date('{ic3_end}')
                    WITH f, sum(CASE WHEN c.name = 'China' THEN 1 ELSE 0 END) AS xc,
@@ -137,8 +139,7 @@ def main():
         "ic5": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
                    WITH DISTINCT f
                    MATCH (forum:Forum)-[hm:hasMember]->(f) WHERE hm.hd > date('{ic5_min}')
-                   WITH forum, collect(DISTINCT f) AS members
-                   MATCH (forum)-[:containerOf]->(post:Message)<-[:hasCreator]-(cr:Person) WHERE cr IN members
+                   MATCH (forum)-[:containerOf]->(post:Message)<-[:hasCreator]-(f)
                    RETURN forum.id AS fid, count(DISTINCT post) AS cnt ORDER BY cnt DESC, fid ASC LIMIT 20""",
         # IC7: latest like per liker of the seed's messages.
         "ic7": f"""MATCH (p:Person {{id:{person}}})-[:hasCreator]->(:Message)<-[lk:likes]-(liker:Person)
@@ -148,13 +149,14 @@ def main():
                    ORDER BY ms DESC, lid ASC LIMIT 20""",
         # IC10: foaf (exactly 2 hops) born in the window, scored by interest overlap.
         "ic10": f"""MATCH (p:Person {{id:{person}}})-[:knows]-(:Person)-[:knows]-(foaf:Person)
-                    WHERE foaf.id <> {person} AND NOT EXISTS {{ MATCH (p)-[:knows]-(foaf) }}
+                    WHERE foaf.id <> {person}
                       AND ((foaf.bmon = 1 AND foaf.bdom >= 21) OR (foaf.bmon = 2 AND foaf.bdom < 22))
                     WITH DISTINCT p, foaf
-                    OPTIONAL MATCH (foaf)-[:hasCreator]->(post:Message) WHERE post.isComment = false
-                    OPTIONAL MATCH (foaf)-[:hasCreator]->(cpost:Message)-[:hasTag]->(:Tag)<-[:hasInterest]-(p)
-                      WHERE cpost.isComment = false
-                    WITH foaf, count(DISTINCT post) AS total, count(DISTINCT cpost) AS common
+                    WHERE NOT EXISTS {{ MATCH (p)-[:knows]-(foaf) }}
+                    WITH foaf,
+                         COUNT {{ MATCH (foaf)-[:hasCreator]->(post:Message) WHERE post.isComment = false }} AS total,
+                         COUNT {{ MATCH (foaf)-[:hasCreator]->(post:Message)
+                                  WHERE post.isComment = false AND EXISTS {{ MATCH (post)-[:hasTag]->(:Tag)<-[:hasInterest]-(p) }} }} AS common
                     RETURN foaf.id AS pid, 2 * common - total AS score ORDER BY score DESC, pid ASC LIMIT 10""",
         # IC11: neighbourhood working (workFrom<2030) at a company in the seed country.
         "ic11": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
@@ -163,10 +165,8 @@ def main():
                     WHERE w.wf < 2030 AND (pl.name = '{seed_country}' OR EXISTS {{ MATCH (pl)-[:isPartOf]->(:Place {{name:'{seed_country}'}}) }})
                     RETURN f.id AS pid, co.name AS cname, w.wf AS wf ORDER BY wf ASC, pid ASC, cname DESC LIMIT 10""",
         # IC12: friends who replied to Posts tagged under the class (or a subclass).
-        "ic12": f"""MATCH (cls:TagClass {{name:'{seed_class}'}})
-                    MATCH (:Person {{id:{person}}})-[:knows]-(f:Person)-[:hasCreator]->(c:Message)-[:replyOf]->(post:Message)
+        "ic12": f"""MATCH (:Person {{id:{person}}})-[:knows]-(f:Person)-[:hasCreator]->(c:Message)-[:replyOf]->(post:Message)-[:hasTag]->(:Tag)-[:hasType]->(:TagClass)-[:isSubclassOf*0..10]->(:TagClass {{name:'{seed_class}'}})
                     WHERE post.isComment = false
-                      AND EXISTS {{ MATCH (post)-[:hasTag]->(:Tag)-[:hasType]->(tc:TagClass)-[:isSubclassOf*0..10]->(cls) }}
                     RETURN f.id AS pid, count(DISTINCT c) AS cnt ORDER BY cnt DESC, pid ASC LIMIT 20""",
         # IS1: the seed's profile (first/last name).
         "is1": f"""MATCH (p:Person {{id:{person}}}) RETURN p.fname AS fn, p.lname AS ln""",
