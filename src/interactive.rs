@@ -654,6 +654,19 @@ pub fn run() -> Result<()> {
     let reply_roots = graph
         .rel_type("replyOf")
         .map(|rt| graph.chain_roots(Direction::Outgoing, rt));
+    // IC11/IC12 params: the seed's home country and the seed_tag's TagClass.
+    let seed_country = graph
+        .neighbors_by_type(seeds.person, Direction::Outgoing, "isLocatedIn")
+        .next()
+        .and_then(|city| graph.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next())
+        .and_then(|country| pstr(&graph, country, "name"))
+        .unwrap_or("India")
+        .to_string();
+    let seed_class_name = tag_by_name(&graph, &seed_tag_name)
+        .and_then(|t| graph.neighbors_by_type(t, Direction::Outgoing, "hasType").next())
+        .and_then(|c| pstr(&graph, c, "name"))
+        .unwrap_or("")
+        .to_string();
 
     // Cross-check emit: dump comparable projections (LDBC ids / ms timestamps /
     // tag names, not internal node ids) so `kuzu/run_ic.py` can diff against Kùzu
@@ -680,14 +693,16 @@ pub fn run() -> Result<()> {
             &dir,
             "seeds.json",
             format!(
-                "{{\"person\":{},\"person_b\":{},\"first_name\":{},\"max_day\":{},\"seed_tag\":{},\"ic4_start\":{},\"ic4_dur\":{}}}",
+                "{{\"person\":{},\"person_b\":{},\"first_name\":{},\"max_day\":{},\"seed_tag\":{},\"ic4_start\":{},\"ic4_dur\":{},\"seed_country\":{},\"seed_class\":{}}}",
                 plid(seeds.person),
                 plid(seeds.person_b),
                 jstr(&seeds.first_name),
                 seeds.max_day,
                 jstr(&seed_tag_name),
                 ic4_start,
-                ic4_dur
+                ic4_dur,
+                jstr(&seed_country),
+                jstr(&seed_class_name)
             ),
         );
         emit_json(
@@ -755,7 +770,31 @@ pub fn run() -> Result<()> {
                     .join(",")
             ),
         );
-        println!("emitted IC cross-check JSON (ic2/4/6/8/9/13, is2/3/5/6/7) to {dir}");
+
+        // Loader-backed tier (task 053): IC1 -> [dist, lastName, plid],
+        // IC3 -> [plid, x, y], IC5 -> [forumFlid, count], IC7 -> [ms, likerPlid, isNew],
+        // IC10 -> [plid, score], IC11 -> [plid, companyName, workFrom],
+        // IC12 -> [plid, count], IS1 -> [firstName, lastName, pday].
+        let join = |v: Vec<String>| format!("[{}]", v.join(","));
+        let ic1 = ic1_friends_by_name(&graph, seeds.person, &seeds.first_name);
+        emit_json(&dir, "ic1.rust.json", join(ic1.iter().map(|(p, d, ln)| format!("[{d},{},{}]", jstr(ln), plid(*p))).collect()));
+        let ic3 = ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500);
+        emit_json(&dir, "ic3.rust.json", join(ic3.iter().map(|(p, x, y)| format!("[{},{x},{y}]", plid(*p))).collect()));
+        let ic5 = ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1));
+        emit_json(&dir, "ic5.rust.json", join(ic5.iter().map(|(f, c)| format!("[{},{c}]", pi64(&graph, *f, "flid"))).collect()));
+        let ic7 = ic7_recent_likers(&graph, seeds.person);
+        emit_json(&dir, "ic7.rust.json", join(ic7.iter().map(|(l, ms, _, new)| format!("[{ms},{},{}]", plid(*l), *new as i32)).collect()));
+        let ic10 = ic10_friend_recommend(&graph, seeds.person, 1);
+        emit_json(&dir, "ic10.rust.json", join(ic10.iter().map(|(p, s)| format!("[{},{s}]", plid(*p))).collect()));
+        let ic11 = ic11_job_referral(&graph, seeds.person, &seed_country, 2030);
+        emit_json(&dir, "ic11.rust.json", join(ic11.iter().map(|(p, co, wf)| format!("[{},{},{wf}]", plid(*p), jstr(pstr(&graph, *co, "name").unwrap_or("")))).collect()));
+        let ic12 = ic12_expert_search(&graph, seeds.person, &seed_class_name);
+        emit_json(&dir, "ic12.rust.json", join(ic12.iter().map(|(f, c, _)| format!("[{},{c}]", plid(*f))).collect()));
+        emit_json(&dir, "is1.rust.json", match is1_profile(&graph, seeds.person) {
+            Some((fname, lname, _pday)) => format!("[[{},{}]]", jstr(&fname), jstr(&lname)),
+            None => "[]".to_string(),
+        });
+        println!("emitted IC cross-check JSON (ic1-13, is1-7 sans is4) to {dir}");
         return Ok(());
     }
 
@@ -803,21 +842,8 @@ pub fn run() -> Result<()> {
         is7_n
     );
 
-    // Loader-backed deferred queries (IC3/IC5/IC7/IC10/IC11/IC12). Country/class
-    // params are derived from the seed so the demo surfaces real rows where the
-    // query isn't inherently selective (IC3 and the IC10 birthday window are).
-    let seed_country = graph
-        .neighbors_by_type(seeds.person, Direction::Outgoing, "isLocatedIn")
-        .next()
-        .and_then(|city| graph.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next())
-        .and_then(|country| pstr(&graph, country, "name"))
-        .unwrap_or("India")
-        .to_string();
-    let seed_class_name = tag_by_name(&graph, &seed_tag_name)
-        .and_then(|t| graph.neighbors_by_type(t, Direction::Outgoing, "hasType").next())
-        .and_then(|c| pstr(&graph, c, "name"))
-        .unwrap_or("")
-        .to_string();
+    // Loader-backed queries (IC3/IC5/IC7/IC10/IC11/IC12); country/class params
+    // (seed_country, seed_class_name) are derived above and shared with the emit.
     let ic3 = ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500);
     let ic5 = ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1));
     let ic7 = ic7_recent_likers(&graph, seeds.person);

@@ -157,30 +157,33 @@ single-threaded — an asymmetry to settle before quoting numbers).
 The seed-anchored Interactive workload runs over the *same* SF1 snapshot (no
 extra download): `cargo run --release --bin ic` on our side, `kuzu/run_ic.py
 sf1` against the existing `db-sf1-faithful`, both using the seeds `pick_seeds`
-chose. All **11 cross-checkable queries are value-identical** across engines
-(`kuzu/compare.py … ic2 ic4 ic6 ic8 ic9 ic13 is2 is3 is5 is6 is7` → ALL PASS,
-incl. 848 friend rows).
+chose. **All 19 cross-checkable queries are value-identical** across engines
+(`kuzu/compare.py` over ic1–ic13 + is1/2/3/5/6/7 → ALL PASS, incl. 848 friend
+rows).
 
 | IC query | rustychickpeas (ms) | Kùzu (ms) | winner |
 |----------|--------------------:|----------:|--------|
-| IC2 recent friend messages | 19 | 54 | rustychickpeas (~3×) |
-| IC4 new topics | 7 | 2120 | rustychickpeas (~300×) |
-| IC6 tag co-occurrence | 32 | 375 | rustychickpeas (~12×) |
-| IC8 recent replies | 0.41 | 16 | rustychickpeas (~40×) |
-| IC9 recent FoF messages | 181 | 791 | rustychickpeas (~4×) |
-| IC13 unweighted shortest path | 4.2 | 3.6 | Kùzu (~1.2×) |
-| IS2 person recent messages | 0.18 | 7.0 | rustychickpeas (~39×) |
-| IS3 person friends | 0.01 | 1.4 | rustychickpeas |
-| IS6 forum of message | 0.00 | 8.2 | rustychickpeas |
-| IS7 replies of message | 0.04 | 27 | rustychickpeas |
+| IC2 recent friend messages | 16.8 | 53.8 | rustychickpeas (~3×) |
+| IC3 friends in two countries | 143.6 | 435.7 | rustychickpeas (~3×) |
+| IC4 new topics | 7.0 | 2119.8 | rustychickpeas (~300×) |
+| IC5 new groups | 768.9 | 1117.0 | rustychickpeas (~1.5×) |
+| IC6 tag co-occurrence | 33.4 | 375.1 | rustychickpeas (~11×) |
+| IC7 recent likers | 1.6 | 88.6 | rustychickpeas (~55×) |
+| IC9 recent FoF messages | 174.4 | 790.5 | rustychickpeas (~4×) |
+| IC10 friend recommendation | 3.8 | 568.7 | rustychickpeas (~150×) |
+| IC12 expert search | 39.3 | 321.7 | rustychickpeas (~8×) |
+| IC13 unweighted shortest path | 3.7 | 3.6 | Kùzu (~1.0×) |
+| IS2/IS3/IS6/IS7 short reads | <0.2 | 1.4–27 | rustychickpeas |
 
-The interactive shape is where the CSR/RoaringBitmap adjacency shines — the
-multi-hop traversals and sub-millisecond short reads; Kùzu's native path engine
-stays competitive only on the single IC13 shortest path (and its `NOT EXISTS`
-subquery makes IC4 ~300× slower). The loader-backed queries
-(IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1/IS4) are validated rust-side only — a Kùzu
-cross-check needs a faithful-import rebuild; IC14 (interaction-weight) is
-deferred. Full numbers: `results/ic-sf1.txt`.
+(IC1/IC8/IC11/IS1 also pass and favour rustychickpeas; full table in
+`results/ic-sf1.txt`.) The interactive shape is where the CSR/RoaringBitmap
+adjacency shines — multi-hop traversals and sub-millisecond short reads; Kùzu's
+native path engine only ties the single IC13 shortest path. The loader-backed
+half (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1) is cross-checked against a faithful
+import extended with the matching edges/properties — additive, so BI stays
+20/20 identical on the rebuilt `db-sf1-faithful`. Not cross-checked: IC14
+(interaction-weight path) and IS4 (content text, kept out of the shared faithful
+import). Full numbers: `results/ic-sf1.txt`.
 
 ## Roadmap
 

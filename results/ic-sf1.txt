@@ -1,39 +1,52 @@
 LDBC SNB Interactive (IC) — SF1, single-machine head-to-head
 rustychickpeas (this engine) vs Kùzu, same data, same seeds (pick_seeds).
 
-Correctness (kuzu/compare.py, value-level): all 11 cross-checkable queries are
+Correctness (kuzu/compare.py, value-level): all 19 cross-checkable queries are
 byte-identical across engines —
-  ic2, ic4, ic6, ic8, ic9, ic13, is2, is3, is5, is6, is7 : ALL PASS
+  ic1 ic2 ic3 ic4 ic5 ic6 ic7 ic8 ic9 ic10 ic11 ic12 ic13
+  is1 is2 is3 is5 is6 is7 : ALL PASS
 
 Query                            rustychickpeas      Kùzu
-IC2  recent friend messages           19.1 ms      53.8 ms
-IC4  new topics                        7.1 ms    2119.8 ms
-IC6  tag co-occurrence                32.2 ms     375.1 ms
-IC8  recent replies                    0.41 ms     16.1 ms
-IC9  recent FoF messages             180.8 ms     790.5 ms
-IC13 unweighted shortest path          4.2 ms       3.6 ms
-IS2  person recent messages            0.18 ms      7.0 ms
+IC1  friends by name                   4.5 ms       4.7 ms
+IC2  recent friend messages           16.8 ms      53.8 ms
+IC3  friends in two countries        143.6 ms     435.7 ms
+IC4  new topics                        7.0 ms    2119.8 ms
+IC5  new groups                      768.9 ms    1117.0 ms
+IC6  tag co-occurrence                33.4 ms     375.1 ms
+IC7  recent likers                     1.6 ms      88.6 ms
+IC8  recent replies                    0.19 ms     16.1 ms
+IC9  recent FoF messages             174.4 ms     790.5 ms
+IC10 friend recommendation             3.8 ms     568.7 ms
+IC11 job referral                      7.1 ms      13.2 ms
+IC12 expert search                    39.3 ms     321.7 ms
+IC13 unweighted shortest path          3.7 ms       3.6 ms
+IS1  person profile                    0.00 ms      0.18 ms
+IS2  person recent messages            0.19 ms      7.0 ms
 IS3  person friends                    0.01 ms      1.4 ms
 IS5  message creator                    —           8.3 ms
 IS6  forum of message                  0.00 ms      8.2 ms
-IS7  replies of message                0.04 ms      27.3 ms
+IS7  replies of message                0.03 ms     27.3 ms
 
 Median of 5 each. IS5 is not timed on the rust side. rustychickpeas wins every
-cross-checkable query except IC13 (Kùzu's native path engine is competitive
-there); IC4's "never-before" NOT-EXISTS subquery is ~300x slower on Kùzu.
+cross-checkable query except IC13 (where Kùzu's native path engine ties); the
+biggest gaps are IC4 (~300x, Kùzu's NOT-EXISTS subquery), IC10 (~150x) and
+IC7 (~55x).
 
 Cross-check tiers:
-- Faithful projection (no rebuild): IC2/IC9/IC13, IS2/IS3/IS5 (task 004) and
+- Faithful projection, no rebuild: IC2/IC9/IC13, IS2/IS3/IS5 (task 004) +
   IC4/IC6/IC8, IS6/IS7 (task 052).
-- Loader-backed (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1/IS4): rust-side only;
-  the Kùzu cross-check needs a faithful-import rebuild (task 053).
-- IC14 weighted path: deferred (task 054).
+- Loader-backed, faithful import extended + rebuilt: IC1/IC3/IC5/IC7/IC10/IC11/
+  IC12, IS1 (task 053). The import additions are BI-safe (BI cross-check still
+  20/20 identical on the rebuilt db-sf1-faithful).
+- Not cross-checked: IC14 (interaction-weight path, task 054) and IS4 (message
+  content text — left out of the shared faithful import to keep BI loads lean,
+  mirroring the rust load_content opt-in). Both run rust-side.
 
 Reproduce:
   cargo run --release --bin ic                     # rust timings
-  .venv-kuzu/bin/python kuzu/run_ic.py sf1         # kuzu timings
+  .venv-kuzu/bin/python kuzu/run_ic.py sf1         # kuzu timings (db-sf1-faithful)
   # value-level cross-check:
   LDBC_EMIT_JSON=/tmp/xchk cargo run --release --bin ic
   .venv-kuzu/bin/python kuzu/run_ic.py sf1 --emit-json /tmp/xchk
   .venv-kuzu/bin/python kuzu/compare.py /tmp/xchk \
-      ic2 ic4 ic6 ic8 ic9 ic13 is2 is3 is5 is6 is7
+      ic1 ic2 ic3 ic4 ic5 ic6 ic7 ic8 ic9 ic10 ic11 ic12 ic13 is1 is2 is3 is5 is6 is7

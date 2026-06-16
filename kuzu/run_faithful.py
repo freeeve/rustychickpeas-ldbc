@@ -92,11 +92,11 @@ def preprocess():
 
     with open(f"{IMPORT}/message_likes.csv", "w", newline="") as out:
         w = csv.writer(out, delimiter="|")
-        w.writerow(["from", "to"])  # Person -> Message
-        for (p, m) in rows("dynamic/Person_likes_Post", ["PersonId", "PostId"]):
-            w.writerow([p, m])
-        for (p, m) in rows("dynamic/Person_likes_Comment", ["PersonId", "CommentId"]):
-            w.writerow([p, m])
+        w.writerow(["from", "to", "ld"])  # Person -> Message + like time (IC7)
+        for (cd, p, m) in rows("dynamic/Person_likes_Post", ["creationDate", "PersonId", "PostId"]):
+            w.writerow([p, m, parse_ms(cd)])
+        for (cd, p, m) in rows("dynamic/Person_likes_Comment", ["creationDate", "PersonId", "CommentId"]):
+            w.writerow([p, m, parse_ms(cd)])
 
     with open(f"{IMPORT}/message_hastag.csv", "w", newline="") as out:
         w = csv.writer(out, delimiter="|")
@@ -106,15 +106,30 @@ def preprocess():
         for (m, t) in rows("dynamic/Comment_hasTag_Tag", ["CommentId", "TagId"]):
             w.writerow([m, t])
 
+    with open(f"{IMPORT}/message_country.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to"])  # Message -> Place(country), for IC3
+        for (m, c) in rows("dynamic/Post", ["id", "LocationCountryId"]):
+            if c:
+                w.writerow([m, c])
+        for (m, c) in rows("dynamic/Comment", ["id", "LocationCountryId"]):
+            if c:
+                w.writerow([m, c])
+
     # --- Person (+ isLocatedIn city as an FK column) ---
     with open(f"{IMPORT}/person.csv", "w", newline="") as out, \
          open(f"{IMPORT}/person_islocatedin.csv", "w", newline="") as li:
         w = csv.writer(out, delimiter="|")
         wl = csv.writer(li, delimiter="|")
-        w.writerow(["id", "pcdate", "pym"])  # creationDate + year*12+month, for Q13
+        # fname/lname for IC1/IS1; bmon/bdom (birthday month/day) for IC10.
+        w.writerow(["id", "pcdate", "pym", "fname", "lname", "bmon", "bdom"])
         wl.writerow(["from", "to"])  # Person -> Place(city)
-        for (i, cd, city) in rows("dynamic/Person", ["id", "creationDate", "LocationCityId"]):
-            w.writerow([i, cd[:10], int(cd[:4]) * 12 + int(cd[5:7])])
+        for (i, cd, city, fn, ln, bday) in rows(
+            "dynamic/Person", ["id", "creationDate", "LocationCityId", "firstName", "lastName", "birthday"]
+        ):
+            bmon = int(bday[5:7]) if len(bday) >= 10 else 0
+            bdom = int(bday[8:10]) if len(bday) >= 10 else 0
+            w.writerow([i, cd[:10], int(cd[:4]) * 12 + int(cd[5:7]), fn, ln, bmon, bdom])
             if city:
                 wl.writerow([i, city])
 
@@ -133,6 +148,13 @@ def preprocess():
         for (i, cid) in rows("static/Tag", ["id", "TypeTagClassId"]):
             if cid:
                 w.writerow([i, cid])
+
+    with open(f"{IMPORT}/tagclass_subclass.csv", "w", newline="") as out:
+        w = csv.writer(out, delimiter="|")
+        w.writerow(["from", "to"])  # TagClass -> parent TagClass, for IC12
+        for (i, parent) in rows("static/TagClass", ["id", "SubclassOfTagClassId"]):
+            if parent:
+                w.writerow([i, parent])
 
     # --- Place (+ isPartOf hierarchy as an FK column) ---
     with open(f"{IMPORT}/place.csv", "w", newline="") as out, \
@@ -160,16 +182,21 @@ def preprocess():
             w.writerow([p, t])
 
     # --- Organisation (Company/University) + workAt, for Q20 ---
-    with open(f"{IMPORT}/organisation.csv", "w", newline="") as out:
+    with open(f"{IMPORT}/organisation.csv", "w", newline="") as out, \
+         open(f"{IMPORT}/org_place.csv", "w", newline="") as op:
         w = csv.writer(out, delimiter="|")
+        wo = csv.writer(op, delimiter="|")
         w.writerow(["id", "name", "type"])
-        for (i, typ, nm) in rows("static/Organisation", ["id", "type", "name"]):
+        wo.writerow(["from", "to"])  # Organisation -> Place, for IC11
+        for (i, typ, nm, place) in rows("static/Organisation", ["id", "type", "name", "LocationPlaceId"]):
             w.writerow([i, nm, typ])
+            if place:
+                wo.writerow([i, place])
     with open(f"{IMPORT}/workat.csv", "w", newline="") as out:
         w = csv.writer(out, delimiter="|")
-        w.writerow(["from", "to"])  # Person -> Company
-        for (p, c) in rows("dynamic/Person_workAt_Company", ["PersonId", "CompanyId"]):
-            w.writerow([p, c])
+        w.writerow(["from", "to", "wf"])  # Person -> Company + workFrom (IC11)
+        for (p, c, wf) in rows("dynamic/Person_workAt_Company", ["PersonId", "CompanyId", "workFrom"]):
+            w.writerow([p, c, wf])
 
     # --- Derived weighted edge tables for the weighted-SP queries (Q19/Q20).
     # These replace the per-edge weight closures rust's dijkstra uses: an edge
@@ -240,9 +267,9 @@ def preprocess():
                 wm.writerow([i, mod_])
     with open(f"{IMPORT}/forum_hasmember.csv", "w", newline="") as out:
         w = csv.writer(out, delimiter="|")
-        w.writerow(["from", "to"])  # Forum -> Person
-        for (f, p) in rows("dynamic/Forum_hasMember_Person", ["ForumId", "PersonId"]):
-            w.writerow([f, p])
+        w.writerow(["from", "to", "hd"])  # Forum -> Person + join date (IC5)
+        for (cd, f, p) in rows("dynamic/Forum_hasMember_Person", ["creationDate", "ForumId", "PersonId"]):
+            w.writerow([f, p, cd[:10]])
     with open(f"{IMPORT}/forum_containerof.csv", "w", newline="") as out:
         w = csv.writer(out, delimiter="|")
         w.writerow(["from", "to"])  # Forum -> Post (a Message)
@@ -311,7 +338,7 @@ def load():
     conn = kuzu.Connection(kuzu.Database(DB))
     ddl = [
         "CREATE NODE TABLE Message(id INT64, year INT64, cdate DATE, length INT64, hasContent BOOLEAN, isComment BOOLEAN, lang STRING, mts INT64, PRIMARY KEY(id))",
-        "CREATE NODE TABLE Person(id INT64, pcdate DATE, pym INT64, PRIMARY KEY(id))",
+        "CREATE NODE TABLE Person(id INT64, pcdate DATE, pym INT64, fname STRING, lname STRING, bmon INT64, bdom INT64, PRIMARY KEY(id))",
         "CREATE NODE TABLE Tag(id INT64, name STRING, PRIMARY KEY(id))",
         "CREATE NODE TABLE TagClass(id INT64, name STRING, PRIMARY KEY(id))",
         "CREATE NODE TABLE Place(id INT64, name STRING, type STRING, PRIMARY KEY(id))",
@@ -319,20 +346,23 @@ def load():
         "CREATE REL TABLE hasTag(FROM Message TO Tag)",
         "CREATE REL TABLE hasCreator(FROM Person TO Message)",
         "CREATE REL TABLE replyOf(FROM Message TO Message)",
-        "CREATE REL TABLE likes(FROM Person TO Message)",
+        "CREATE REL TABLE likes(FROM Person TO Message, ld INT64)",
         "CREATE REL TABLE knows(FROM Person TO Person, cdate DATE)",
         "CREATE REL TABLE hasInterest(FROM Person TO Tag)",
         "CREATE REL TABLE isLocatedIn(FROM Person TO Place)",
         "CREATE REL TABLE isPartOf(FROM Place TO Place)",
         "CREATE NODE TABLE Organisation(id INT64, name STRING, type STRING, PRIMARY KEY(id))",
-        "CREATE REL TABLE workAt(FROM Person TO Organisation)",
+        "CREATE REL TABLE workAt(FROM Person TO Organisation, wf INT64)",
         "CREATE REL TABLE interactsWith(FROM Person TO Person, w DOUBLE)",
         "CREATE REL TABLE cohort(FROM Person TO Person, w DOUBLE)",
         "CREATE NODE TABLE Forum(id INT64, title STRING, fcdate DATE, PRIMARY KEY(id))",
         "CREATE REL TABLE hasModerator(FROM Forum TO Person)",
-        "CREATE REL TABLE hasMember(FROM Forum TO Person)",
+        "CREATE REL TABLE hasMember(FROM Forum TO Person, hd DATE)",
         "CREATE REL TABLE containerOf(FROM Forum TO Message)",
         "CREATE REL TABLE q15weight(FROM Person TO Person, w DOUBLE)",
+        "CREATE REL TABLE msgCountry(FROM Message TO Place)",
+        "CREATE REL TABLE orgPlace(FROM Organisation TO Place)",
+        "CREATE REL TABLE isSubclassOf(FROM TagClass TO TagClass)",
     ]
     for stmt in ddl:
         conn.execute(stmt)
@@ -349,6 +379,8 @@ def load():
         ("Forum", "forum"), ("hasModerator", "forum_hasmoderator"),
         ("hasMember", "forum_hasmember"), ("containerOf", "forum_containerof"),
         ("q15weight", "q15weight"),
+        ("msgCountry", "message_country"), ("orgPlace", "org_place"),
+        ("isSubclassOf", "tagclass_subclass"),
     ]
     for tbl, f in copies:
         conn.execute(f"COPY {tbl} FROM '{IMPORT}/{f}.csv' (HEADER=true, DELIM='|')")

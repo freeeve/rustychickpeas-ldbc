@@ -29,7 +29,8 @@ import kuzu
 # seed_tag / ic4 window are also read from seeds.json in --emit-json mode).
 SEEDS = {
     "person": 4398046519825, "person_b": 15393162798503, "max_day": 15706,
-    "seed_tag": "Augustine_of_Hippo", "ic4_start": 14975, "ic4_dur": 365,
+    "first_name": "John", "seed_tag": "Augustine_of_Hippo", "ic4_start": 14975, "ic4_dur": 365,
+    "seed_country": "Indonesia", "seed_class": "Saint",
 }
 
 
@@ -46,13 +47,19 @@ def main():
     seeds = dict(SEEDS)
     if emit and os.path.exists(f"{emit}/seeds.json"):
         s = json.load(open(f"{emit}/seeds.json"))
-        keys = ("person", "person_b", "max_day", "seed_tag", "ic4_start", "ic4_dur")
+        keys = ("person", "person_b", "max_day", "first_name", "seed_tag", "ic4_start",
+                "ic4_dur", "seed_country", "seed_class")
         seeds.update({k: s[k] for k in keys if k in s})
-    person, person_b, seed_tag = seeds["person"], seeds["person_b"], seeds["seed_tag"]
+    person, person_b = seeds["person"], seeds["person_b"]
+    seed_tag, first_name = seeds["seed_tag"], seeds["first_name"]
+    seed_country, seed_class = seeds["seed_country"], seeds["seed_class"]
     epoch = datetime.date(1970, 1, 1)
     maxdate = (epoch + datetime.timedelta(days=seeds["max_day"])).isoformat()
     ic4_start = (epoch + datetime.timedelta(days=seeds["ic4_start"])).isoformat()
     ic4_end = (epoch + datetime.timedelta(days=seeds["ic4_start"] + seeds["ic4_dur"])).isoformat()
+    # Fixed params matching the rust side's loader-backed smoke calls.
+    ic3_start, ic3_end = "2010-01-01", (datetime.date(2010, 1, 1) + datetime.timedelta(days=1500)).isoformat()
+    ic5_min = "2011-01-01"
 
     conn = kuzu.Connection(kuzu.Database(db, read_only=True))
 
@@ -108,6 +115,60 @@ def main():
                    RETURN reply.mts AS mts, author.id AS aid,
                      CASE WHEN author.id <> p.id AND EXISTS {{ MATCH (author)-[:knows]-(p) }} THEN 1 ELSE 0 END AS knows
                    ORDER BY mts DESC, aid ASC""",
+        # --- Loader-backed tier (task 053) ---
+        # IC1: friends within 3 knows hops with the given first name.
+        "ic1": f"""MATCH path = (:Person {{id:{person}}})-[:knows* SHORTEST 1..3]-(f:Person)
+                   WHERE f.fname = '{first_name}'
+                   RETURN length(path) AS dist, f.lname AS lname, f.id AS pid
+                   ORDER BY dist, lname, pid LIMIT 20""",
+        # IC3: FoF (<=2 hops) foreign to both countries, who posted in both, in window.
+        "ic3": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person)
+                   WHERE f.id <> {person}
+                     AND NOT EXISTS {{ MATCH (f)-[:isLocatedIn]->(:Place)-[:isPartOf]->(h:Place) WHERE h.name IN ['China', 'Germany'] }}
+                   WITH DISTINCT f
+                   MATCH (f)-[:hasCreator]->(m:Message)-[:msgCountry]->(c:Place)
+                   WHERE c.name IN ['China', 'Germany'] AND m.cdate >= date('{ic3_start}') AND m.cdate < date('{ic3_end}')
+                   WITH f, sum(CASE WHEN c.name = 'China' THEN 1 ELSE 0 END) AS xc,
+                           sum(CASE WHEN c.name = 'Germany' THEN 1 ELSE 0 END) AS yc
+                   WHERE xc > 0 AND yc > 0
+                   RETURN f.id AS pid, xc, yc ORDER BY xc + yc DESC, pid ASC LIMIT 20""",
+        # IC5: forums the neighbourhood joined after min_date, ranked by member posts.
+        "ic5": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
+                   WITH DISTINCT f
+                   MATCH (forum:Forum)-[hm:hasMember]->(f) WHERE hm.hd > date('{ic5_min}')
+                   WITH forum, collect(DISTINCT f) AS members
+                   MATCH (forum)-[:containerOf]->(post:Message)<-[:hasCreator]-(cr:Person) WHERE cr IN members
+                   RETURN forum.id AS fid, count(DISTINCT post) AS cnt ORDER BY cnt DESC, fid ASC LIMIT 20""",
+        # IC7: latest like per liker of the seed's messages.
+        "ic7": f"""MATCH (p:Person {{id:{person}}})-[:hasCreator]->(:Message)<-[lk:likes]-(liker:Person)
+                   WITH p, liker, max(lk.ld) AS ld
+                   RETURN ld AS ms, liker.id AS lid,
+                     CASE WHEN NOT EXISTS {{ MATCH (liker)-[:knows]-(p) }} THEN 1 ELSE 0 END AS isnew
+                   ORDER BY ms DESC, lid ASC LIMIT 20""",
+        # IC10: foaf (exactly 2 hops) born in the window, scored by interest overlap.
+        "ic10": f"""MATCH (p:Person {{id:{person}}})-[:knows]-(:Person)-[:knows]-(foaf:Person)
+                    WHERE foaf.id <> {person} AND NOT EXISTS {{ MATCH (p)-[:knows]-(foaf) }}
+                      AND ((foaf.bmon = 1 AND foaf.bdom >= 21) OR (foaf.bmon = 2 AND foaf.bdom < 22))
+                    WITH DISTINCT p, foaf
+                    OPTIONAL MATCH (foaf)-[:hasCreator]->(post:Message) WHERE post.isComment = false
+                    OPTIONAL MATCH (foaf)-[:hasCreator]->(cpost:Message)-[:hasTag]->(:Tag)<-[:hasInterest]-(p)
+                      WHERE cpost.isComment = false
+                    WITH foaf, count(DISTINCT post) AS total, count(DISTINCT cpost) AS common
+                    RETURN foaf.id AS pid, 2 * common - total AS score ORDER BY score DESC, pid ASC LIMIT 10""",
+        # IC11: neighbourhood working (workFrom<2030) at a company in the seed country.
+        "ic11": f"""MATCH (p:Person {{id:{person}}})-[:knows*1..2]-(f:Person) WHERE f.id <> {person}
+                    WITH DISTINCT f
+                    MATCH (f)-[w:workAt]->(co:Organisation)-[:orgPlace]->(pl:Place)
+                    WHERE w.wf < 2030 AND (pl.name = '{seed_country}' OR EXISTS {{ MATCH (pl)-[:isPartOf]->(:Place {{name:'{seed_country}'}}) }})
+                    RETURN f.id AS pid, co.name AS cname, w.wf AS wf ORDER BY wf ASC, pid ASC, cname DESC LIMIT 10""",
+        # IC12: friends who replied to Posts tagged under the class (or a subclass).
+        "ic12": f"""MATCH (cls:TagClass {{name:'{seed_class}'}})
+                    MATCH (:Person {{id:{person}}})-[:knows]-(f:Person)-[:hasCreator]->(c:Message)-[:replyOf]->(post:Message)
+                    WHERE post.isComment = false
+                      AND EXISTS {{ MATCH (post)-[:hasTag]->(:Tag)-[:hasType]->(tc:TagClass)-[:isSubclassOf*0..10]->(cls) }}
+                    RETURN f.id AS pid, count(DISTINCT c) AS cnt ORDER BY cnt DESC, pid ASC LIMIT 20""",
+        # IS1: the seed's profile (first/last name).
+        "is1": f"""MATCH (p:Person {{id:{person}}}) RETURN p.fname AS fn, p.lname AS ln""",
     }
 
     # Map each query's rows to the comparable JSON the rust side emits.
@@ -120,8 +181,12 @@ def main():
             return [[r[0], r[1]] for r in rows]        # [tagName, count]
         if name == "is6":
             return [[r[0], r[1]] for r in rows]        # [forumId, moderatorId]
-        if name == "is7":
-            return [[r[0], r[1], r[2]] for r in rows]  # [mts, authorId, knows]
+        if name in ("is7", "ic1", "ic3", "ic7"):
+            return [[r[0], r[1], r[2]] for r in rows]  # 3-col rows
+        if name in ("ic5", "ic10", "ic12", "is1"):
+            return [[r[0], r[1]] for r in rows]        # 2-col rows
+        if name == "ic11":
+            return [[r[0], r[1], r[2]] for r in rows]  # [pid, cname, wf]
         return [[r[0]] for r in rows]                  # ic13 [hops], is3 [fid], is5 [cid]
 
     def run(q):
@@ -136,7 +201,7 @@ def main():
         for name, q in queries.items():
             rows = project(name, run(q))
             with open(f"{emit}/{name}.kuzu.json", "w") as f:
-                json.dump(rows, f)
+                json.dump(rows, f, default=int)  # coerce Kùzu Decimal aggregates to int
             print(f"  emitted {name}.kuzu.json ({len(rows)} rows)")
         return
 
