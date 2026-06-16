@@ -384,33 +384,35 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
 pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32, u32)> {
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
     let hd_col = g.property_key_from_str("hd").and_then(|id| g.rel_columns.get(&id));
-    let mut forum_members: HashMap<u32, HashSet<u32>> = HashMap::new();
+    // Member-centric: for each qualifying member, count only THEIR posts whose
+    // container forum is one they joined after min_day. This touches only members'
+    // posts, not every post of every forum (a post has one container Post-forum;
+    // Comments have none, so only Posts count, matching the forum-post scan).
+    let mut forum_counts: HashMap<u32, u32> = HashMap::new();
     for (&p, &d) in &reach {
         if d == 0 {
             continue;
         }
+        let mut qforums: HashSet<u32> = HashSet::new();
         for e in g.relationships(p, Direction::Incoming, &["hasMember"]) {
-            let hd = match hd_col.and_then(|c| c.get(e.pos)) {
-                Some(ValueId::I64(day)) => day,
-                _ => continue,
-            };
-            if hd > min_day {
-                forum_members.entry(e.neighbor).or_default().insert(p);
-            }
-        }
-    }
-    let mut rows: Vec<(u32, u32)> = Vec::with_capacity(forum_members.len());
-    for (&forum, members) in &forum_members {
-        let mut cnt = 0u32;
-        for post in g.neighbors_by_type(forum, Direction::Outgoing, "containerOf") {
-            if let Some(creator) = g.neighbors_by_type(post, Direction::Incoming, "hasCreator").next() {
-                if members.contains(&creator) {
-                    cnt += 1;
+            if let Some(ValueId::I64(day)) = hd_col.and_then(|c| c.get(e.pos)) {
+                if day > min_day {
+                    qforums.insert(e.neighbor);
                 }
             }
         }
-        rows.push((forum, cnt));
+        if qforums.is_empty() {
+            continue;
+        }
+        for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
+            if let Some(forum) = g.neighbors_by_type(post, Direction::Incoming, "containerOf").next() {
+                if qforums.contains(&forum) {
+                    *forum_counts.entry(forum).or_insert(0) += 1;
+                }
+            }
+        }
     }
+    let mut rows: Vec<(u32, u32)> = forum_counts.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "flid").cmp(&pi64(g, b.0, "flid"))));
     rows.truncate(20);
     rows
