@@ -62,5 +62,18 @@ perl -ne '
     print "$1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .\n";
   }' $FILES > "$EXTRACT/works.nt"
 
-cat "$EXTRACT/works.nt" "$PLACES" "$ENTITIES" > "$OUT"
+# 1c) TBox (once): the RDFS rdfs:subClassOf / rdfs:subPropertyOf ontology axioms
+#     the loader forward-chains (e.g. about/mentions -> tag; Company/Event ->
+#     coreconcepts:Thing; BlogPost/NewsItem/Programme -> CreativeWork).
+TBOX="$EXTRACT/tbox.nt"
+if [[ ! -s "$TBOX" ]]; then
+    echo "Extracting RDFS TBox from Oxigraph ..." >&2
+    curl -s -X POST http://localhost:7878/query --data-urlencode 'query=
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+CONSTRUCT { ?s rdfs:subClassOf ?c . ?p rdfs:subPropertyOf ?q }
+WHERE { { ?s rdfs:subClassOf ?c } UNION { ?p rdfs:subPropertyOf ?q } }' \
+        -H 'Accept: application/n-triples' -o "$TBOX"
+fi
+
+cat "$EXTRACT/works.nt" "$PLACES" "$ENTITIES" "$TBOX" > "$OUT"
 echo "Wrote $OUT — $(wc -l < "$OUT") triples (works $(wc -l < "$EXTRACT/works.nt") + places $(wc -l < "$PLACES") + entities $(wc -l < "$ENTITIES"))" >&2

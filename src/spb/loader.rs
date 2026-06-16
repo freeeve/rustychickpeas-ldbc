@@ -22,6 +22,33 @@ use crate::harness::Result;
 use super::ntriples::{self, Term};
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const RDFS_SUBCLASS: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
+const RDFS_SUBPROP: &str = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
+/// The trivial universal class: never materialized (no query targets it, and its
+/// local name `Thing` collides with `coreconcepts:Thing`).
+const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+
+/// Close a direct super-of map (`x -> {direct supers}`) under transitivity, so
+/// each key maps to all its ancestors. Inputs are tiny (an ontology TBox).
+fn close_transitively(m: &mut HashMap<String, HashSet<String>>) {
+    loop {
+        let mut changed = false;
+        let keys: Vec<String> = m.keys().cloned().collect();
+        for k in keys {
+            for d in m[&k].iter().cloned().collect::<Vec<_>>() {
+                if let Some(supers) = m.get(&d).cloned() {
+                    let set = m.get_mut(&k).unwrap();
+                    for s in supers {
+                        changed |= set.insert(s);
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
 
 /// Counts from a load, for the run banner.
 #[derive(Debug, Default)]
@@ -42,10 +69,30 @@ pub fn load_ntriples(path: &Path) -> Result<(GraphSnapshot, SpbStats)> {
 pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
     let triples: Vec<_> = ntriples::parse(text).collect();
 
-    // Pass 1: assign a node id to every resource, collect rdf:type labels, and
-    // remember each IRI to store as a `uri` property (the cross-engine join key).
+    // TBox: rdfs:subClassOf / rdfs:subPropertyOf, transitively closed, so RDFS
+    // forward-chaining can materialize each type's super-classes and each
+    // predicate's super-properties (e.g. `about`/`mentions` -> `tag`). The maps
+    // are empty when the input carries no ontology, leaving instance loading
+    // unchanged.
+    let mut subclass: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut subprop: HashMap<String, HashSet<String>> = HashMap::new();
+    for t in &triples {
+        if let (Term::Iri(s), Term::Iri(p), Term::Iri(o)) = (&t.subject, &t.predicate, &t.object) {
+            if p == RDFS_SUBCLASS {
+                subclass.entry(s.clone()).or_default().insert(o.clone());
+            } else if p == RDFS_SUBPROP {
+                subprop.entry(s.clone()).or_default().insert(o.clone());
+            }
+        }
+    }
+    close_transitively(&mut subclass);
+    close_transitively(&mut subprop);
+
+    // Pass 1: assign a node id to every resource, collect each subject's rdf:type
+    // IRIs (expanded with super-classes below), and remember each IRI to store as
+    // a `uri` property (the cross-engine join key). TBox triples are skipped.
     let mut ids: HashMap<String, u32> = HashMap::new();
-    let mut labels: HashMap<u32, Vec<String>> = HashMap::new();
+    let mut types: HashMap<u32, Vec<String>> = HashMap::new();
     let mut uri_of: HashMap<u32, String> = HashMap::new();
     let mut next: u32 = 0;
     let intern = |term: &Term,
@@ -66,27 +113,39 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
         id
     };
     for t in &triples {
+        if is_tbox(t) {
+            continue;
+        }
         let sid = intern(&t.subject, &mut ids, &mut uri_of, &mut next);
         if predicate_is(t, RDF_TYPE) {
             if let Term::Iri(class) = &t.object {
-                labels.entry(sid).or_default().push(ntriples::local_name(class).to_string());
+                types.entry(sid).or_default().push(class.clone());
             }
         } else if t.object.is_resource() {
             intern(&t.object, &mut ids, &mut uri_of, &mut next);
         }
     }
 
-    // Pass 2: create nodes (in id order) with their labels and uri.
+    // Pass 2: create nodes (in id order) with their labels (each type's local name
+    // plus those of its super-classes, minus the trivial owl:Thing) and uri.
     let mut builder = GraphBuilder::new(Some(next as usize), Some(triples.len()));
     for id in 0..next {
-        let node_labels: Vec<&str> = labels.get(&id).map(|v| v.iter().map(String::as_str).collect()).unwrap_or_default();
+        let mut label_iris: HashSet<&str> = HashSet::new();
+        for ty in types.get(&id).map(Vec::as_slice).unwrap_or_default() {
+            label_iris.insert(ty);
+            if let Some(supers) = subclass.get(ty) {
+                label_iris.extend(supers.iter().map(String::as_str).filter(|s| *s != OWL_THING));
+            }
+        }
+        let node_labels: Vec<&str> = label_iris.iter().map(|iri| ntriples::local_name(iri)).collect();
         builder.add_node(Some(id), &node_labels).expect("add_node");
         if let Some(iri) = uri_of.get(&id) {
             builder.set_prop_str(id, "uri", iri).ok();
         }
     }
 
-    // Pass 3: edges (IRI objects) and properties (literal objects).
+    // Pass 3: edges (IRI objects, each materialized for the predicate and its
+    // super-properties) and properties (literal objects). TBox triples are skipped.
     let mut stats = SpbStats {
         resources: next as usize,
         triples: triples.len(),
@@ -94,7 +153,7 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
     };
     let mut seen_props: HashSet<(u32, String)> = HashSet::new();
     for t in &triples {
-        if predicate_is(t, RDF_TYPE) {
+        if predicate_is(t, RDF_TYPE) || is_tbox(t) {
             continue;
         }
         let subj = ids[&resource_key(&t.subject).unwrap()];
@@ -107,6 +166,13 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
                 let dst = ids[&resource_key(obj).unwrap()];
                 builder.add_relationship(subj, dst, key).expect("add_relationship");
                 stats.edges += 1;
+                // RDFS subPropertyOf: the same statement also satisfies every
+                // super-property (e.g. an `about`/`mentions` edge is a `tag` edge).
+                if let Some(supers) = subprop.get(pred) {
+                    for s in supers {
+                        builder.add_relationship(subj, dst, ntriples::local_name(s)).expect("add_relationship");
+                    }
+                }
             }
             // First literal for a (node, key) wins; the guard both dedups and
             // records the (node, key) so later duplicates fall through.
@@ -158,6 +224,12 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+/// Whether a triple is an RDFS TBox statement (subClassOf / subPropertyOf),
+/// consumed for forward-chaining rather than loaded as instance data.
+fn is_tbox(t: &ntriples::Triple) -> bool {
+    predicate_is(t, RDFS_SUBCLASS) || predicate_is(t, RDFS_SUBPROP)
 }
 
 fn predicate_is(t: &ntriples::Triple, iri: &str) -> bool {
@@ -236,5 +308,37 @@ mod tests {
             .neighbors_by_type(cw, rustychickpeas_core::Direction::Outgoing, "about")
             .collect();
         assert_eq!(about.len(), 1);
+    }
+
+    #[test]
+    fn rdfs_forward_chains_subclass_and_subproperty() {
+        // TBox (BlogPost <= CreativeWork <= owl:Thing; Company <= Thing; about <=
+        // tag) + an instance: a BlogPost `about` a Company.
+        const RDFS: &str = r#"
+<http://bbc/BlogPost> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://bbc/CreativeWork> .
+<http://bbc/CreativeWork> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://www.w3.org/2002/07/owl#Thing> .
+<http://dbo/Company> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://cc/Thing> .
+<http://bbc/about> <http://www.w3.org/2000/01/rdf-schema#subPropertyOf> <http://bbc/tag> .
+<http://ex/cw1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://bbc/BlogPost> .
+<http://ex/cw1> <http://bbc/about> <http://ex/Acme> .
+<http://ex/Acme> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbo/Company> .
+"#;
+        let (g, stats) = load_str(RDFS);
+        // TBox triples are not instance data: only cw1 + Acme become nodes.
+        assert_eq!(stats.resources, 2);
+
+        // subClassOf: cw1 is a BlogPost AND a CreativeWork (owl:Thing dropped);
+        // Acme is a Company AND a Thing.
+        let cw1 = g.nodes_with_label("BlogPost").unwrap().iter().next().unwrap();
+        assert!(g.nodes_with_label("CreativeWork").unwrap().contains(cw1));
+        let acme = g.nodes_with_label("Company").unwrap().iter().next().unwrap();
+        let thing = g.nodes_with_label("Thing").unwrap();
+        assert!(thing.contains(acme) && !thing.contains(cw1));
+
+        // subPropertyOf: the `about` edge is also a `tag` edge.
+        use rustychickpeas_core::Direction;
+        let tag: Vec<u32> = g.neighbors_by_type(cw1, Direction::Outgoing, "tag").collect();
+        assert_eq!(tag, g.neighbors_by_type(cw1, Direction::Outgoing, "about").collect::<Vec<_>>());
+        assert_eq!(tag.len(), 1);
     }
 }
