@@ -25,8 +25,12 @@ import time
 
 import kuzu
 
-# Deterministic pick_seeds defaults for SF1 (person/person_b are LDBC ids).
-SEEDS = {"person": 4398046519825, "person_b": 15393162798503, "max_day": 15706}
+# Deterministic pick_seeds defaults for SF1 (person/person_b are LDBC ids;
+# seed_tag / ic4 window are also read from seeds.json in --emit-json mode).
+SEEDS = {
+    "person": 4398046519825, "person_b": 15393162798503, "max_day": 15706,
+    "seed_tag": "Augustine_of_Hippo", "ic4_start": 14975, "ic4_dur": 365,
+}
 
 
 def main():
@@ -42,9 +46,13 @@ def main():
     seeds = dict(SEEDS)
     if emit and os.path.exists(f"{emit}/seeds.json"):
         s = json.load(open(f"{emit}/seeds.json"))
-        seeds.update({k: s[k] for k in ("person", "person_b", "max_day") if k in s})
-    person, person_b = seeds["person"], seeds["person_b"]
-    maxdate = (datetime.date(1970, 1, 1) + datetime.timedelta(days=seeds["max_day"])).isoformat()
+        keys = ("person", "person_b", "max_day", "seed_tag", "ic4_start", "ic4_dur")
+        seeds.update({k: s[k] for k in keys if k in s})
+    person, person_b, seed_tag = seeds["person"], seeds["person_b"], seeds["seed_tag"]
+    epoch = datetime.date(1970, 1, 1)
+    maxdate = (epoch + datetime.timedelta(days=seeds["max_day"])).isoformat()
+    ic4_start = (epoch + datetime.timedelta(days=seeds["ic4_start"])).isoformat()
+    ic4_end = (epoch + datetime.timedelta(days=seeds["ic4_start"] + seeds["ic4_dur"])).isoformat()
 
     conn = kuzu.Connection(kuzu.Database(db, read_only=True))
 
@@ -73,15 +81,48 @@ def main():
         "is5": f"""MATCH (:Person {{id:{person}}})-[:hasCreator]->(m:Message) WHERE m.cdate <= date('{maxdate}')
                    WITH m ORDER BY m.mts DESC LIMIT 1
                    MATCH (c:Person)-[:hasCreator]->(m) RETURN c.id AS cid""",
+        # IC4: tags on the seed's friends' Posts in the window, never on their
+        # Posts before it. (task 052)
+        "ic4": f"""MATCH (p:Person {{id:{person}}})-[:knows]-(:Person)-[:hasCreator]->(post:Message)-[:hasTag]->(t:Tag)
+                   WHERE post.isComment = false AND post.cdate >= date('{ic4_start}') AND post.cdate < date('{ic4_end}')
+                     AND NOT EXISTS {{ MATCH (p)-[:knows]-(:Person)-[:hasCreator]->(pre:Message)-[:hasTag]->(t)
+                                       WHERE pre.isComment = false AND pre.cdate < date('{ic4_start}') }}
+                   RETURN t.name AS name, count(DISTINCT post) AS cnt ORDER BY cnt DESC, name ASC LIMIT 10""",
+        # IC6: tags co-occurring with seed_tag on the neighbourhood's Posts.
+        "ic6": f"""MATCH (:Person {{id:{person}}})-[:knows*1..2]-(f:Person)-[:hasCreator]->(post:Message)-[:hasTag]->(:Tag {{name:'{seed_tag}'}})
+                   WHERE post.isComment = false AND f.id <> {person}
+                   MATCH (post)-[:hasTag]->(other:Tag) WHERE other.name <> '{seed_tag}'
+                   RETURN other.name AS name, count(DISTINCT post) AS cnt ORDER BY cnt DESC, name ASC LIMIT 10""",
+        # IC8: 20 most recent replies to the seed's messages.
+        "ic8": f"""MATCH (:Person {{id:{person}}})-[:hasCreator]->(:Message)<-[:replyOf]-(reply:Message)
+                   RETURN reply.mts AS mts ORDER BY mts DESC LIMIT 20""",
+        # IS6: forum + moderator of the seed's newest Post.
+        "is6": f"""MATCH (:Person {{id:{person}}})-[:hasCreator]->(m:Message) WHERE m.isComment = false
+                   WITH m ORDER BY m.mts DESC LIMIT 1
+                   MATCH (forum:Forum)-[:containerOf]->(m) MATCH (forum)-[:hasModerator]->(mod:Person)
+                   RETURN forum.id AS fid, mod.id AS modid""",
+        # IS7: direct replies to the seed's newest Post + a knows flag.
+        "is7": f"""MATCH (p:Person {{id:{person}}})-[:hasCreator]->(m:Message) WHERE m.isComment = false
+                   WITH p, m ORDER BY m.mts DESC LIMIT 1
+                   MATCH (m)<-[:replyOf]-(reply:Message)<-[:hasCreator]-(author:Person)
+                   RETURN reply.mts AS mts, author.id AS aid,
+                     CASE WHEN author.id <> p.id AND EXISTS {{ MATCH (author)-[:knows]-(p) }} THEN 1 ELSE 0 END AS knows
+                   ORDER BY mts DESC, aid ASC""",
     }
 
     # Map each query's rows to the comparable JSON the rust side emits.
     def project(name, rows):
-        if name in ("ic2", "is2"):
-            return [[r[0]] for r in rows]          # [mts]
+        if name in ("ic2", "is2", "ic8"):
+            return [[r[0]] for r in rows]              # [mts]
         if name == "ic9":
-            return [[r[1]] for r in rows]          # [mts] (col 1)
-        return [[r[0]] for r in rows]              # ic13 [hops], is3 [fid], is5 [cid]
+            return [[r[1]] for r in rows]              # [mts] (col 1)
+        if name in ("ic4", "ic6"):
+            return [[r[0], r[1]] for r in rows]        # [tagName, count]
+        if name == "is6":
+            return [[r[0], r[1]] for r in rows]        # [forumId, moderatorId]
+        if name == "is7":
+            return [[r[0], r[1], r[2]] for r in rows]  # [mts, authorId, knows]
+        return [[r[0]] for r in rows]                  # ic13 [hops], is3 [fid], is5 [cid]
 
     def run(q):
         r = conn.execute(q)

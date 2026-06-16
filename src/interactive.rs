@@ -627,9 +627,37 @@ pub fn run() -> Result<()> {
         seeds.max_day
     );
 
-    // Cross-check emit: dump comparable projections (LDBC ids / ms timestamps,
-    // not internal node ids) so `kuzu/run_ic.py` can diff against Kùzu via the
-    // shared `compare.py`. Emit mode skips the timing block.
+    // Derived params shared by the cross-check emit and the smoke/timing runs.
+    // IC6 needs a tag the neighbourhood actually posts; derive its most common one.
+    let (ic4_start, ic4_dur): (i64, i64) = (days_from_civil(2011, 1, 1), 365);
+    let seed_tag_name = {
+        let mut c: HashMap<u32, u32> = HashMap::new();
+        for f in graph.neighbors_by_type(seeds.person, Direction::Outgoing, "knows") {
+            for post in graph.neighbors_by_type(f, Direction::Outgoing, "hasCreator") {
+                for t in graph.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
+                    *c.entry(t).or_insert(0) += 1;
+                }
+            }
+        }
+        c.into_iter()
+            .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+            .and_then(|(t, _)| pstr(&graph, t, "name"))
+            .unwrap_or("")
+            .to_string()
+    };
+    // IS6/IS7 anchor on the seed's newest Post (both engines derive it the same way).
+    let posts = graph.nodes_with_label("Post");
+    let seed_post = graph
+        .neighbors_by_type(seeds.person, Direction::Outgoing, "hasCreator")
+        .filter(|&m| posts.is_some_and(|p| p.contains(m)))
+        .max_by_key(|&m| pi64(&graph, m, "ms"));
+    let reply_roots = graph
+        .rel_type("replyOf")
+        .map(|rt| graph.chain_roots(Direction::Outgoing, rt));
+
+    // Cross-check emit: dump comparable projections (LDBC ids / ms timestamps /
+    // tag names, not internal node ids) so `kuzu/run_ic.py` can diff against Kùzu
+    // via the shared `compare.py`. Emit mode skips the timing block.
     if let Ok(dir) = std::env::var("LDBC_EMIT_JSON") {
         let plid = |p: u32| pi64(&graph, p, "plid");
         let arr_ms = |rows: &[(u32, i64)]| {
@@ -652,11 +680,14 @@ pub fn run() -> Result<()> {
             &dir,
             "seeds.json",
             format!(
-                "{{\"person\":{},\"person_b\":{},\"first_name\":{},\"max_day\":{}}}",
+                "{{\"person\":{},\"person_b\":{},\"first_name\":{},\"max_day\":{},\"seed_tag\":{},\"ic4_start\":{},\"ic4_dur\":{}}}",
                 plid(seeds.person),
                 plid(seeds.person_b),
                 jstr(&seeds.first_name),
-                seeds.max_day
+                seeds.max_day,
+                jstr(&seed_tag_name),
+                ic4_start,
+                ic4_dur
             ),
         );
         emit_json(
@@ -688,7 +719,43 @@ pub fn run() -> Result<()> {
             ),
         );
         emit_json(&dir, "is5.rust.json", format!("[[{}]]", is5.map(plid).unwrap_or(-1)));
-        println!("emitted IC cross-check JSON (ic2/ic9/ic13, is2/is3/is5) to {dir}");
+
+        // Schema-compatible tier (task 052): IC4/IC6 -> [tagName, count],
+        // IC8 -> [ms], IS6 -> [forumFlid, moderatorPlid], IS7 -> [ms, authorPlid, knows].
+        let arr_tag = |rows: &[(u32, u32)]| {
+            format!(
+                "[{}]",
+                rows.iter()
+                    .map(|(t, c)| format!("[{},{c}]", jstr(pstr(&graph, *t, "name").unwrap_or(""))))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        emit_json(&dir, "ic4.rust.json", arr_tag(&ic4_new_topics(&graph, seeds.person, ic4_start, ic4_dur)));
+        emit_json(&dir, "ic6.rust.json", arr_tag(&ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name)));
+        emit_json(&dir, "ic8.rust.json", arr_ms(&ic8_recent_replies(&graph, seeds.person)));
+        let is6 = seed_post.and_then(|m| is6_forum_of_message(&graph, m, reply_roots.as_deref().unwrap_or(&[])));
+        emit_json(
+            &dir,
+            "is6.rust.json",
+            match is6 {
+                Some((f, mo)) => format!("[[{},{}]]", pi64(&graph, f, "flid"), plid(mo)),
+                None => "[]".to_string(),
+            },
+        );
+        let is7 = seed_post.map(|m| is7_replies(&graph, m)).unwrap_or_default();
+        emit_json(
+            &dir,
+            "is7.rust.json",
+            format!(
+                "[{}]",
+                is7.iter()
+                    .map(|(_, ms, a, k)| format!("[{ms},{},{}]", plid(*a), *k as i32))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        );
+        println!("emitted IC cross-check JSON (ic2/4/6/8/9/13, is2/3/5/6/7) to {dir}");
         return Ok(());
     }
 
@@ -713,34 +780,8 @@ pub fn run() -> Result<()> {
         ic14.as_ref().map(|(p, _)| p.len()).unwrap_or(0)
     );
 
-    // Deferred-tier queries now enabled with no loader change: IC4/IC6/IC8, IS6/IS7.
-    // IC6 needs a tag the neighbourhood actually posts; derive its most common one.
-    let seed_tag_name = {
-        let mut c: HashMap<u32, u32> = HashMap::new();
-        for f in graph.neighbors_by_type(seeds.person, Direction::Outgoing, "knows") {
-            for post in graph.neighbors_by_type(f, Direction::Outgoing, "hasCreator") {
-                for t in graph.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
-                    *c.entry(t).or_insert(0) += 1;
-                }
-            }
-        }
-        c.into_iter()
-            .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
-            .and_then(|(t, _)| pstr(&graph, t, "name"))
-            .unwrap_or("")
-            .to_string()
-    };
-    // IS6/IS7 need a message; use the seed's newest Post.
-    let posts = graph.nodes_with_label("Post");
-    let seed_post = graph
-        .neighbors_by_type(seeds.person, Direction::Outgoing, "hasCreator")
-        .filter(|&m| posts.is_some_and(|p| p.contains(m)))
-        .max_by_key(|&m| pi64(&graph, m, "ms"));
-    let reply_roots = graph
-        .rel_type("replyOf")
-        .map(|rt| graph.chain_roots(Direction::Outgoing, rt));
-
-    let ic4 = ic4_new_topics(&graph, seeds.person, days_from_civil(2011, 1, 1), 365);
+    // Deferred-tier queries enabled with no loader change: IC4/IC6/IC8, IS6/IS7.
+    let ic4 = ic4_new_topics(&graph, seeds.person, ic4_start, ic4_dur);
     let ic6 = ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name);
     let ic8 = ic8_recent_replies(&graph, seeds.person);
     assert!(ic4.len() <= 10, "IC4 over-returned");
@@ -831,7 +872,7 @@ pub fn run() -> Result<()> {
         is3_friends(&graph, seeds.person).len()
     });
     time_query("IC4 new topics", runs, || {
-        ic4_new_topics(&graph, seeds.person, days_from_civil(2011, 1, 1), 365).len()
+        ic4_new_topics(&graph, seeds.person, ic4_start, ic4_dur).len()
     });
     time_query("IC6 tag co-occurrence", runs, || {
         ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name).len()

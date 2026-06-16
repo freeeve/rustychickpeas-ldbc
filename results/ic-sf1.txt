@@ -1,26 +1,33 @@
 LDBC SNB Interactive (IC) — SF1, single-machine head-to-head
 rustychickpeas (this engine) vs Kùzu, same data, same seeds (pick_seeds).
 
-Correctness (kuzu/compare.py, value-level): all 6 feasible queries are
+Correctness (kuzu/compare.py, value-level): all 11 cross-checkable queries are
 byte-identical across engines —
-  ic2, ic9, ic13, is2, is3, is5 : ALL PASS
+  ic2, ic4, ic6, ic8, ic9, ic13, is2, is3, is5, is6, is7 : ALL PASS
 
 Query                            rustychickpeas      Kùzu
 IC2  recent friend messages           19.1 ms      53.8 ms
+IC4  new topics                        7.1 ms    2119.8 ms
+IC6  tag co-occurrence                32.2 ms     375.1 ms
+IC8  recent replies                    0.41 ms     16.1 ms
 IC9  recent FoF messages             180.8 ms     790.5 ms
 IC13 unweighted shortest path          4.2 ms       3.6 ms
 IS2  person recent messages            0.18 ms      7.0 ms
 IS3  person friends                    0.01 ms      1.4 ms
 IS5  message creator                    —           8.3 ms
+IS6  forum of message                  0.00 ms      8.2 ms
+IS7  replies of message                0.04 ms      27.3 ms
 
-Median of 5 each. IS5 is not timed on the rust side. rustychickpeas wins the
-multi-hop traversals (IC2/IC9) and the sub-millisecond short reads (IS2/IS3);
-Kùzu's native path engine is competitive on the single IC13 shortest path.
+Median of 5 each. IS5 is not timed on the rust side. rustychickpeas wins every
+cross-checkable query except IC13 (Kùzu's native path engine is competitive
+there); IC4's "never-before" NOT-EXISTS subquery is ~300x slower on Kùzu.
 
-Feasible tier reuses the faithful Message/Person/knows/hasCreator/replyOf
-projection (kuzu/db-sf1-faithful, read-only). Deferred on the Kùzu side:
-IC1/IS1 (the faithful Person projection omits firstName/lastName) and IC14
-(interaction-weight semantics).
+Cross-check tiers:
+- Faithful projection (no rebuild): IC2/IC9/IC13, IS2/IS3/IS5 (task 004) and
+  IC4/IC6/IC8, IS6/IS7 (task 052).
+- Loader-backed (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1/IS4): rust-side only;
+  the Kùzu cross-check needs a faithful-import rebuild (task 053).
+- IC14 weighted path: deferred (task 054).
 
 Reproduce:
   cargo run --release --bin ic                     # rust timings
@@ -28,4 +35,5 @@ Reproduce:
   # value-level cross-check:
   LDBC_EMIT_JSON=/tmp/xchk cargo run --release --bin ic
   .venv-kuzu/bin/python kuzu/run_ic.py sf1 --emit-json /tmp/xchk
-  .venv-kuzu/bin/python kuzu/compare.py /tmp/xchk ic2 ic9 ic13 is2 is3 is5
+  .venv-kuzu/bin/python kuzu/compare.py /tmp/xchk \
+      ic2 ic4 ic6 ic8 ic9 ic13 is2 is3 is5 is6 is7

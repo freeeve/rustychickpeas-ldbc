@@ -157,22 +157,30 @@ single-threaded — an asymmetry to settle before quoting numbers).
 The seed-anchored Interactive workload runs over the *same* SF1 snapshot (no
 extra download): `cargo run --release --bin ic` on our side, `kuzu/run_ic.py
 sf1` against the existing `db-sf1-faithful`, both using the seeds `pick_seeds`
-chose. All six feasible queries are **value-identical** across engines
-(`kuzu/compare.py … ic2 ic9 ic13 is2 is3 is5` → ALL PASS, incl. 848 friend rows).
+chose. All **11 cross-checkable queries are value-identical** across engines
+(`kuzu/compare.py … ic2 ic4 ic6 ic8 ic9 ic13 is2 is3 is5 is6 is7` → ALL PASS,
+incl. 848 friend rows).
 
 | IC query | rustychickpeas (ms) | Kùzu (ms) | winner |
 |----------|--------------------:|----------:|--------|
 | IC2 recent friend messages | 19 | 54 | rustychickpeas (~3×) |
+| IC4 new topics | 7 | 2120 | rustychickpeas (~300×) |
+| IC6 tag co-occurrence | 32 | 375 | rustychickpeas (~12×) |
+| IC8 recent replies | 0.41 | 16 | rustychickpeas (~40×) |
 | IC9 recent FoF messages | 181 | 791 | rustychickpeas (~4×) |
 | IC13 unweighted shortest path | 4.2 | 3.6 | Kùzu (~1.2×) |
 | IS2 person recent messages | 0.18 | 7.0 | rustychickpeas (~39×) |
 | IS3 person friends | 0.01 | 1.4 | rustychickpeas |
+| IS6 forum of message | 0.00 | 8.2 | rustychickpeas |
+| IS7 replies of message | 0.04 | 27 | rustychickpeas |
 
 The interactive shape is where the CSR/RoaringBitmap adjacency shines — the
-multi-hop traversals (IC2/IC9) and sub-millisecond short reads (IS2/IS3); Kùzu's
-native path engine stays competitive on the single IC13 shortest path. IC1/IS1
-(faithful Person omits firstName/lastName) and IC14 (interaction-weight
-semantics) are deferred on the Kùzu side. Full numbers: `results/ic-sf1.txt`.
+multi-hop traversals and sub-millisecond short reads; Kùzu's native path engine
+stays competitive only on the single IC13 shortest path (and its `NOT EXISTS`
+subquery makes IC4 ~300× slower). The loader-backed queries
+(IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1/IS4) are validated rust-side only — a Kùzu
+cross-check needs a faithful-import rebuild; IC14 (interaction-weight) is
+deferred. Full numbers: `results/ic-sf1.txt`.
 
 ## Roadmap
 
