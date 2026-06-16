@@ -1726,67 +1726,90 @@ fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i64)>, Vec<i
 /// (1.0 if a Post is involved, else 0.5). Returns the path cost, or -1 if
 /// unreachable. Cypher: bi-15.cypher.
 fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_day: i64) -> f64 {
+    use hashbrown::HashMap as FastMap;
     let (Some(src), Some(tgt)) = (person_by_plid(g, p1), person_by_plid(g, p2)) else {
         return -1.0;
     };
     let posts = g.nodes_with_label("Post");
-    let is_post = |n: u32| posts.is_some_and(|p| p.contains(n));
-    let creator = |m: u32| {
-        g.neighbors_by_type(m, Direction::Incoming, &["hasCreator"])
-            .next()
-    };
-    // Root post of a message's thread (walk replyOf up to a Post), memoized.
-    let mut root_cache: HashMap<u32, u32> = HashMap::new();
-    let mut root_of = |g: &GraphSnapshot, start: u32, cache: &mut HashMap<u32, u32>| -> u32 {
-        let mut path = Vec::new();
-        let mut n = start;
-        loop {
-            if let Some(&r) = cache.get(&n) {
-                for p in path {
-                    cache.insert(p, r);
+    // w[(a,b)] over reply interactions whose thread's forum is in the window. Built
+    // in parallel over comments (per-worker partial map + root-post memoization,
+    // merged by par_fold); the contributions are exact 0.5/1.0 so the parallel sum
+    // is deterministic. Relationship types are resolved once, not per call.
+    let w: FastMap<(u32, u32), f64> = match (
+        g.rel_type("replyOf"),
+        g.rel_type("hasCreator"),
+        g.rel_type("containerOf"),
+        g.nodes_with_label("Comment"),
+    ) {
+        (Some(t_reply), Some(t_creator), Some(t_container), Some(comments)) => {
+            let creator = |m: u32| g.neighbors_by_type(m, Direction::Incoming, t_creator).next();
+            let is_post = |n: u32| posts.is_some_and(|p| p.contains(n));
+            let root_of = |start: u32, cache: &mut FastMap<u32, u32>| -> u32 {
+                let mut path = Vec::new();
+                let mut n = start;
+                loop {
+                    if let Some(&r) = cache.get(&n) {
+                        for p in path {
+                            cache.insert(p, r);
+                        }
+                        return r;
+                    }
+                    match g.neighbors_by_type(n, Direction::Outgoing, t_reply).next() {
+                        Some(parent) => {
+                            path.push(n);
+                            n = parent;
+                        }
+                        None => {
+                            for p in &path {
+                                cache.insert(*p, n);
+                            }
+                            cache.insert(n, n);
+                            return n;
+                        }
+                    }
                 }
-                return r;
-            }
-            let parent = g.neighbors_by_type(n, Direction::Outgoing, &["replyOf"]).collect::<Vec<_>>();
-            if parent.is_empty() {
-                for p in &path {
-                    cache.insert(*p, n);
-                }
-                cache.insert(n, n);
-                return n;
-            }
-            path.push(n);
-            n = parent[0];
+            };
+            comments
+                .par_fold(
+                    || (FastMap::<(u32, u32), f64>::new(), FastMap::<u32, u32>::new()),
+                    |mut acc, c| {
+                        let Some(parent) =
+                            g.neighbors_by_type(c, Direction::Outgoing, t_reply).next()
+                        else {
+                            return acc;
+                        };
+                        let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
+                            return acc;
+                        };
+                        if cc == pc {
+                            return acc;
+                        }
+                        let root = root_of(c, &mut acc.1);
+                        let Some(forum) = g
+                            .neighbors_by_type(root, Direction::Incoming, t_container)
+                            .next()
+                        else {
+                            return acc;
+                        };
+                        let fday = pi64(g, forum, "fday");
+                        if fday >= start_day && fday <= end_day {
+                            let contrib = if is_post(parent) { 1.0 } else { 0.5 };
+                            *acc.0.entry((cc.min(pc), cc.max(pc))).or_insert(0.0) += contrib;
+                        }
+                        acc
+                    },
+                    |mut a: (FastMap<(u32, u32), f64>, FastMap<u32, u32>), b| {
+                        for (k, v) in b.0 {
+                            *a.0.entry(k).or_insert(0.0) += v;
+                        }
+                        a
+                    },
+                )
+                .0
         }
+        _ => FastMap::new(),
     };
-    // w[(a,b)] over reply interactions whose thread forum is in the window.
-    let mut w: HashMap<(u32, u32), f64> = HashMap::new();
-    if let Some(comments) = g.nodes_with_label("Comment") {
-        for c in comments.iter() {
-            let Some(parent) = g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]).next() else {
-                continue;
-            };
-            let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
-                continue;
-            };
-            if cc == pc {
-                continue;
-            }
-            let root = root_of(g, c, &mut root_cache);
-            let Some(forum) = g
-                .neighbors_by_type(root, Direction::Incoming, &["containerOf"])
-                .next()
-            else {
-                continue;
-            };
-            let fday = pi64(g, forum, "fday");
-            if fday >= start_day && fday <= end_day {
-                let contrib = if is_post(parent) { 1.0 } else { 0.5 };
-                *w.entry((cc.min(pc), cc.max(pc))).or_insert(0.0) += contrib;
-            }
-        }
-    }
-    let sp = g.dijkstra(src, Direction::Both, &["knows"], Some(tgt), |from, rel| {
+    let sp = g.dijkstra(src, Direction::Both, "knows", Some(tgt), |from, rel| {
         let key = (from.min(rel.neighbor), from.max(rel.neighbor));
         1.0 / (w.get(&key).copied().unwrap_or(0.0) + 1.0)
     });
