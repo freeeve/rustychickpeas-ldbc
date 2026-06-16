@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use rustychickpeas_core::{Direction, GraphSnapshot};
+use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
 
 use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::loader::load_graph;
@@ -331,6 +331,258 @@ pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)
     rows
 }
 
+/// IC3 — friends and friends-of-friends (<=2 `knows` hops, excluding self and
+/// anyone whose home Country is X or Y) who created messages located in BOTH
+/// Country X and Country Y within `[start_day, start_day + duration_days)`.
+/// Returns (person, x_count, y_count), (x+y desc, plid asc), top 20.
+pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str, country_y: &str, start_day: i64, duration_days: i64) -> Vec<(u32, u32, u32)> {
+    let end_day = start_day + duration_days;
+    let by_name = |name: &str| {
+        g.nodes_with_label("Country")
+            .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(name)))
+    };
+    let (Some(cx), Some(cy)) = (by_name(country_x), by_name(country_y)) else {
+        return Vec::new();
+    };
+    let home_country = |p: u32| -> Option<u32> {
+        let city = g.neighbors_by_type(p, Direction::Outgoing, "isLocatedIn").next()?;
+        g.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next()
+    };
+    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let mut rows: Vec<(u32, u32, u32)> = Vec::new();
+    for (&p, &d) in &reach {
+        if d == 0 || matches!(home_country(p), Some(c) if c == cx || c == cy) {
+            continue;
+        }
+        let (mut xc, mut yc) = (0u32, 0u32);
+        for msg in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
+            let day = pi64(g, msg, "day");
+            if day < start_day || day >= end_day {
+                continue;
+            }
+            match g.neighbors_by_type(msg, Direction::Outgoing, "msgCountry").next() {
+                Some(c) if c == cx => xc += 1,
+                Some(c) if c == cy => yc += 1,
+                _ => {}
+            }
+        }
+        if xc > 0 && yc > 0 {
+            rows.push((p, xc, yc));
+        }
+    }
+    rows.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.truncate(20);
+    rows
+}
+
+/// IC5 — Forums the seed's friends/FoF (<=2 `knows` hops, excluding self) joined
+/// after `min_day`, ranked by Posts in each Forum created by those post-`min_day`
+/// members. Returns (forum, post_count), (count desc, flid asc), top 20.
+pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32, u32)> {
+    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let hd_col = g.property_key_from_str("hd").and_then(|id| g.rel_columns.get(&id));
+    let mut forum_members: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for (&p, &d) in &reach {
+        if d == 0 {
+            continue;
+        }
+        for e in g.relationships(p, Direction::Incoming, &["hasMember"]) {
+            let hd = match hd_col.and_then(|c| c.get(e.pos)) {
+                Some(ValueId::I64(day)) => day,
+                _ => continue,
+            };
+            if hd > min_day {
+                forum_members.entry(e.neighbor).or_default().insert(p);
+            }
+        }
+    }
+    let mut rows: Vec<(u32, u32)> = Vec::with_capacity(forum_members.len());
+    for (&forum, members) in &forum_members {
+        let mut cnt = 0u32;
+        for post in g.neighbors_by_type(forum, Direction::Outgoing, "containerOf") {
+            if let Some(creator) = g.neighbors_by_type(post, Direction::Incoming, "hasCreator").next() {
+                if members.contains(&creator) {
+                    cnt += 1;
+                }
+            }
+        }
+        rows.push((forum, cnt));
+    }
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "flid").cmp(&pi64(g, b.0, "flid"))));
+    rows.truncate(20);
+    rows
+}
+
+/// IC7 — the 20 most recent likers of the start person's messages, latest like
+/// per liker, ordered (likeTime desc, liker plid asc). Returns
+/// (liker, like_ms, message, is_new) where is_new = liker is not a `knows` friend.
+pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, bool)> {
+    let friends: HashSet<u32> = g.neighbors_by_type(person, Direction::Outgoing, "knows").collect();
+    let ld_col = g.property_key_from_str("ld").and_then(|id| g.rel_columns.get(&id));
+    let mut best: HashMap<u32, (i64, u32)> = HashMap::new();
+    for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
+        for e in g.relationships(msg, Direction::Incoming, &["likes"]) {
+            let lms = match ld_col.and_then(|c| c.get(e.pos)) {
+                Some(ValueId::I64(v)) => v,
+                _ => 0,
+            };
+            best.entry(e.neighbor)
+                .and_modify(|cur| {
+                    if lms > cur.0 || (lms == cur.0 && msg < cur.1) {
+                        *cur = (lms, msg);
+                    }
+                })
+                .or_insert((lms, msg));
+        }
+    }
+    let mut rows: Vec<(u32, i64, u32, bool)> = best
+        .into_iter()
+        .map(|(liker, (lms, msg))| (liker, lms, msg, !friends.contains(&liker)))
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.truncate(20);
+    rows
+}
+
+/// IC10 — foaf (exactly 2 `knows` hops) born in [21st of `month` .. 22nd of the
+/// next month), scored by (# their Posts tagged with a seed interest) − (# not).
+/// Ordered (score desc, plid asc), top 10. Returns (foaf, score).
+pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<(u32, i64)> {
+    let next = month % 12 + 1;
+    let interests: HashSet<u32> = g.neighbors_by_type(person, Direction::Outgoing, "hasInterest").collect();
+    let posts = g.nodes_with_label("Post");
+    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let mut rows: Vec<(u32, i64)> = Vec::new();
+    for (&foaf, &d) in &reach {
+        if d != 2 {
+            continue;
+        }
+        let (bmon, bdom) = (pi64(g, foaf, "bmon"), pi64(g, foaf, "bdom"));
+        if !((bmon == month && bdom >= 21) || (bmon == next && bdom < 22)) {
+            continue;
+        }
+        let (mut common, mut uncommon) = (0i64, 0i64);
+        for msg in g.neighbors_by_type(foaf, Direction::Outgoing, "hasCreator") {
+            if !posts.is_some_and(|p| p.contains(msg)) {
+                continue;
+            }
+            if g.neighbors_by_type(msg, Direction::Outgoing, "hasTag").any(|t| interests.contains(&t)) {
+                common += 1;
+            } else {
+                uncommon += 1;
+            }
+        }
+        rows.push((foaf, common - uncommon));
+    }
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.truncate(10);
+    rows
+}
+
+/// IC11 — the seed's <=2-hop `knows` neighbourhood who worked (workFrom < `year`)
+/// at a company in `country_name`. Ordered (workFrom asc, person plid asc,
+/// company name desc), top 10. Returns (person, company, work_from).
+pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, year: i64) -> Vec<(u32, u32, i64)> {
+    let Some(country) = g
+        .nodes_with_label("Country")
+        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)))
+    else {
+        return Vec::new();
+    };
+    // Companies located in the country (orgPlace -> the country, or a city in it).
+    let mut places_in_country: HashSet<u32> = HashSet::new();
+    places_in_country.insert(country);
+    for city in g.neighbors_by_type(country, Direction::Incoming, "isPartOf") {
+        places_in_country.insert(city);
+    }
+    let mut in_country: HashSet<u32> = HashSet::new();
+    if let Some(comps) = g.nodes_with_label("Company") {
+        for org in comps.iter() {
+            if g.neighbors_by_type(org, Direction::Outgoing, "orgPlace").any(|pl| places_in_country.contains(&pl)) {
+                in_country.insert(org);
+            }
+        }
+    }
+    let wf_col = g.property_key_from_str("wf").and_then(|id| g.rel_columns.get(&id));
+    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let mut rows: Vec<(u32, u32, i64)> = Vec::new();
+    for (&p, &d) in &reach {
+        if d < 1 {
+            continue;
+        }
+        for e in g.relationships(p, Direction::Outgoing, &["workAt"]) {
+            if !in_country.contains(&e.neighbor) {
+                continue;
+            }
+            let wf = match wf_col.and_then(|c| c.get(e.pos)) {
+                Some(ValueId::I64(y)) => y,
+                _ => continue,
+            };
+            if wf < year {
+                rows.push((p, e.neighbor, wf));
+            }
+        }
+    }
+    rows.sort_by(|a, b| {
+        a.2.cmp(&b.2)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(pstr(g, b.1, "name").cmp(&pstr(g, a.1, "name")))
+    });
+    rows.truncate(10);
+    rows
+}
+
+/// IC12 — the seed's direct friends who replied (Comment -> replyOf -> Post) to
+/// Posts tagged under `class_name` or a transitive subclass. Returns
+/// (friend, reply_count, tag_names), (count desc, plid asc), top 20.
+pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> Vec<(u32, usize, Vec<String>)> {
+    let Some(root_class) = g
+        .nodes_with_label("TagClass")
+        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(class_name)))
+    else {
+        return Vec::new();
+    };
+    // The class plus all descendants (children point at the parent via isSubclassOf).
+    let class_set: HashSet<u32> = g
+        .bfs_distances(root_class, Direction::Incoming, "isSubclassOf", None)
+        .into_keys()
+        .collect();
+    let qual_tag = |t: u32| {
+        g.neighbors_by_type(t, Direction::Outgoing, "hasType").any(|c| class_set.contains(&c))
+    };
+    let posts = g.nodes_with_label("Post");
+    let mut rows: Vec<(u32, usize, Vec<String>)> = Vec::new();
+    for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
+        let mut count = 0usize;
+        let mut tags: std::collections::BTreeSet<String> = Default::default();
+        for c in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
+            for parent in g.neighbors_by_type(c, Direction::Outgoing, "replyOf") {
+                if !posts.is_some_and(|p| p.contains(parent)) {
+                    continue;
+                }
+                let mut matched = false;
+                for t in g.neighbors_by_type(parent, Direction::Outgoing, "hasTag") {
+                    if qual_tag(t) {
+                        matched = true;
+                        if let Some(n) = pstr(g, t, "name") {
+                            tags.insert(n.to_string());
+                        }
+                    }
+                }
+                if matched {
+                    count += 1;
+                }
+            }
+        }
+        if count > 0 {
+            rows.push((friend, count, tags.into_iter().collect()));
+        }
+    }
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.truncate(20);
+    rows
+}
+
 /// Load the snapshot, pick seeds, smoke-check each feasible IC query, then time
 /// them (median of 5).
 pub fn run() -> Result<()> {
@@ -504,6 +756,41 @@ pub fn run() -> Result<()> {
         is7_n
     );
 
+    // Loader-backed deferred queries (IC3/IC5/IC7/IC10/IC11/IC12). Country/class
+    // params are derived from the seed so the demo surfaces real rows where the
+    // query isn't inherently selective (IC3 and the IC10 birthday window are).
+    let seed_country = graph
+        .neighbors_by_type(seeds.person, Direction::Outgoing, "isLocatedIn")
+        .next()
+        .and_then(|city| graph.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next())
+        .and_then(|country| pstr(&graph, country, "name"))
+        .unwrap_or("India")
+        .to_string();
+    let seed_class_name = tag_by_name(&graph, &seed_tag_name)
+        .and_then(|t| graph.neighbors_by_type(t, Direction::Outgoing, "hasType").next())
+        .and_then(|c| pstr(&graph, c, "name"))
+        .unwrap_or("")
+        .to_string();
+    let ic3 = ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500);
+    let ic5 = ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1));
+    let ic7 = ic7_recent_likers(&graph, seeds.person);
+    let ic10 = ic10_friend_recommend(&graph, seeds.person, 1);
+    let ic11 = ic11_job_referral(&graph, seeds.person, &seed_country, 2030);
+    let ic12 = ic12_expert_search(&graph, seeds.person, &seed_class_name);
+    assert!(ic3.len() <= 20 && ic5.len() <= 20 && ic7.len() <= 20);
+    assert!(ic10.len() <= 10 && ic11.len() <= 10 && ic12.len() <= 20);
+    println!(
+        "  IC3 two-countries: {}; IC5 new-groups: {}; IC7 likers: {}; IC10 recommend: {}; IC11 referral(\"{}\"): {}; IC12 experts(\"{}\"): {}",
+        ic3.len(),
+        ic5.len(),
+        ic7.len(),
+        ic10.len(),
+        seed_country,
+        ic11.len(),
+        seed_class_name,
+        ic12.len()
+    );
+
     let runs = 5;
     println!("\nTimings (median of {runs}):");
     time_query("IC1 friends-by-name", runs, || {
@@ -549,9 +836,28 @@ pub fn run() -> Result<()> {
             is7_replies(&graph, msg).len()
         });
     }
+    time_query("IC3 two countries", runs, || {
+        ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500).len()
+    });
+    time_query("IC5 new groups", runs, || {
+        ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1)).len()
+    });
+    time_query("IC7 recent likers", runs, || {
+        ic7_recent_likers(&graph, seeds.person).len()
+    });
+    time_query("IC10 friend recommend", runs, || {
+        ic10_friend_recommend(&graph, seeds.person, 1).len()
+    });
+    time_query("IC11 job referral", runs, || {
+        ic11_job_referral(&graph, seeds.person, &seed_country, 2030).len()
+    });
+    time_query("IC12 expert search", runs, || {
+        ic12_expert_search(&graph, seeds.person, &seed_class_name).len()
+    });
 
     println!(
-        "\nDeferred (need a loader addition): IC3, IC5, IC7, IC10, IC11, IC12, IS4."
+        "\nDeferred: IS4 (message content text — not loaded by design; ~2.8M strings \
+         would bloat the loader for a trivial lookup)."
     );
     Ok(())
 }
