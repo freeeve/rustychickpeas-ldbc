@@ -20,5 +20,7 @@ hasMember join-date, likes date, Person birthday/gender, workAt workFrom +
 Company location, TagClass subclass edges; BI cross-check re-verified 0-diff):
 IC3, IC5, IC7, IC10, IC11, IC12.
 
-Deferred: IS4 (message content text — not loaded by design; ~2.8M strings would
-bloat the loader for a trivial lookup).
+IS4 (message content) added behind the loader's opt-in `load_content` flag
+(`load_graph_opts(.., true)`): `ctext` is stored alongside the `hasContent` bool
+(Post falls back to `imageFile`), so the `ic` binary opts in while BI/SPB loads
+stay lean. The full IC1-IC14 + short reads IS1-IS7 workload is now implemented.
