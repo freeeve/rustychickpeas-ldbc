@@ -63,6 +63,38 @@ pub fn parse_line(line: &str) -> Option<Triple> {
     })
 }
 
+/// Decode N-Triples `UCHAR` escapes (`\uXXXX`, `\UXXXXXXXX`) in an IRI reference
+/// to their characters, matching how an RDF store canonicalizes IRIs on load
+/// (the SPB generator escapes non-ASCII this way, while other inputs keep raw
+/// UTF-8 — without this they would intern as distinct nodes). `UCHAR` is the only
+/// escape an IRI permits; all other bytes are copied verbatim.
+fn unescape_iri(s: &str) -> String {
+    if !s.contains('\\') {
+        return s.to_string();
+    }
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' && i + 1 < b.len() && (b[i + 1] == b'u' || b[i + 1] == b'U') {
+            let n = if b[i + 1] == b'u' { 4 } else { 8 };
+            if let Some(ch) = s
+                .get(i + 2..i + 2 + n)
+                .and_then(|h| u32::from_str_radix(h, 16).ok())
+                .and_then(char::from_u32)
+            {
+                out.push(ch);
+                i += 2 + n;
+                continue;
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 /// The local name of an IRI: the substring after the last `#` or `/`.
 pub fn local_name(iri: &str) -> &str {
     let after_hash = iri.rsplit('#').next().unwrap_or(iri);
@@ -86,7 +118,7 @@ fn read_term(s: &str, i: &mut usize) -> Option<Term> {
             let start = *i + 1;
             let end = s[start..].find('>')? + start;
             *i = end + 1;
-            Some(Term::Iri(s[start..end].to_string()))
+            Some(Term::Iri(unescape_iri(&s[start..end])))
         }
         b'_' => {
             *i += 1;
@@ -127,6 +159,11 @@ fn read_literal(s: &str, i: &mut usize) -> Option<Term> {
                         let hex = s.get(*i + 1..*i + 5)?;
                         value.push(char::from_u32(u32::from_str_radix(hex, 16).ok()?)?);
                         *i += 4;
+                    }
+                    b'U' => {
+                        let hex = s.get(*i + 1..*i + 9)?;
+                        value.push(char::from_u32(u32::from_str_radix(hex, 16).ok()?)?);
+                        *i += 8;
                     }
                     other => value.push(other as char),
                 }

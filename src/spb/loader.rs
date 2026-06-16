@@ -61,7 +61,7 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
         *next += 1;
         ids.insert(key, id);
         if let Term::Iri(iri) = term {
-            uri_of.insert(id, iri.clone());
+            uri_of.insert(id, percent_decode(iri));
         }
         id
     };
@@ -122,12 +122,42 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
 }
 
 /// Resource identity key: namespaced so a blank `x` and an IRI `x` never collide.
+/// IRIs are percent-decoded so the same entity written both percent-encoded and as
+/// raw UTF-8 interns to one node (see [`percent_decode`]).
 fn resource_key(term: &Term) -> Option<String> {
     match term {
-        Term::Iri(iri) => Some(format!("I:{iri}")),
+        Term::Iri(iri) => Some(format!("I:{}", percent_decode(iri))),
         Term::Blank(b) => Some(format!("B:{b}")),
         Term::Literal { .. } => None,
     }
+}
+
+/// Percent-decode an IRI to a canonical form, so an entity referenced both
+/// percent-encoded (`Ottoman%E2%80%93Portuguese`) and as raw UTF-8
+/// (`Ottoman–Portuguese`) resolves to a single node — matching how a SPARQL store
+/// canonicalizes IRIs on load. A `%XX` that is not valid hex, or a decode that is
+/// not valid UTF-8, is left verbatim.
+fn percent_decode(s: &str) -> String {
+    if !s.contains('%') {
+        return s.to_string();
+    }
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 fn predicate_is(t: &ntriples::Triple, iri: &str) -> bool {

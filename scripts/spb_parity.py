@@ -13,6 +13,7 @@ Usage: scripts/spb_parity.py [store] [results/spb.parity.rust.json]
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -49,6 +50,10 @@ def canon(cell):
             s = s[:i]
     if s.startswith("http"):
         s = urllib.parse.unquote(s)
+    # Canonicalize xsd:dateTime fractional seconds (drop trailing zeros, then a
+    # bare dot) so .150 == .15 == .1500 across engines, applied to both sides.
+    s = re.sub(r"(\.\d*?)0+([-+Z])", r"\1\2", s)
+    s = re.sub(r"\.([-+Z])", r"\1", s)
     return s
 
 
