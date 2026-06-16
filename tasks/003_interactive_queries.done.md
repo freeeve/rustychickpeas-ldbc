@@ -11,6 +11,10 @@ IC1/IC9/IC13 are built on the core `bfs_distances` primitive; IC14 reuses
 `dijkstra`. Timings: IC1 4.2ms, IC2 19ms, IC9 173ms, IC13 4ms, IC14 13ms,
 IS* sub-ms.
 
-Deferred (need more schema loaded; listed in the binary's output): IC3-IC8,
-IC10-IC12 (Forum membership / tag co-occurrence / organisation expansions),
-IS4/IS6/IS7. Task 004 (Kùzu IC reference) remains open.
+Also implemented later with no loader change: IC4 (new topics), IC6 (tag
+co-occurrence), IC8 (recent replies), IS6 (forum of message, via chain_roots),
+IS7 (replies of message).
+
+Deferred (need a loader addition): IC3 (msg->country), IC5 (hasMember join
+date), IC7 (likes date), IC10 (birthday/gender), IC11 (workFrom + org
+location), IC12 (TagClass subclass), IS4 (message content text).
