@@ -1,0 +1,48 @@
+# Small SPB-style sample dataset in N-Triples.
+# CreativeWorks (BBC cwork ontology) `about` Places (geo-located) and Concepts
+# (a skos:broader category hierarchy). Demonstrates the SPB loader and queries
+# without the multi-GB reference datasets; see scripts/ for acquiring real data.
+
+<http://ex/cw1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .
+<http://ex/cw1> <http://www.w3.org/2000/01/rdf-schema#label> "London derby" .
+<http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/content> "a football match in london" .
+<http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/Football> .
+<http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/London> .
+
+<http://ex/cw2> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .
+<http://ex/cw2> <http://www.w3.org/2000/01/rdf-schema#label> "Wimbledon final" .
+<http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/content> "tennis championship in london" .
+<http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/Tennis> .
+<http://ex/cw2> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/London> .
+
+<http://ex/cw3> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .
+<http://ex/cw3> <http://www.w3.org/2000/01/rdf-schema#label> "Paris Saint-Germain" .
+<http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/content> "a football club in paris" .
+<http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/Football> .
+<http://ex/cw3> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/Paris> .
+
+<http://ex/cw4> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .
+<http://ex/cw4> <http://www.w3.org/2000/01/rdf-schema#label> "Sport roundup" .
+<http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/content> "general sport news" .
+<http://ex/cw4> <http://www.bbc.co.uk/ontologies/creativework/about> <http://ex/Sport> .
+
+<http://ex/London> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/Place> .
+<http://ex/London> <http://www.w3.org/2000/01/rdf-schema#label> "London" .
+<http://ex/London> <http://www.w3.org/2003/01/geo/wgs84_pos#lat> "51.5074"^^<http://www.w3.org/2001/XMLSchema#double> .
+<http://ex/London> <http://www.w3.org/2003/01/geo/wgs84_pos#long> "-0.1278"^^<http://www.w3.org/2001/XMLSchema#double> .
+
+<http://ex/Paris> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/Place> .
+<http://ex/Paris> <http://www.w3.org/2000/01/rdf-schema#label> "Paris" .
+<http://ex/Paris> <http://www.w3.org/2003/01/geo/wgs84_pos#lat> "48.8566"^^<http://www.w3.org/2001/XMLSchema#double> .
+<http://ex/Paris> <http://www.w3.org/2003/01/geo/wgs84_pos#long> "2.3522"^^<http://www.w3.org/2001/XMLSchema#double> .
+
+<http://ex/Sport> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#Concept> .
+<http://ex/Sport> <http://www.w3.org/2000/01/rdf-schema#label> "Sport" .
+
+<http://ex/Football> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#Concept> .
+<http://ex/Football> <http://www.w3.org/2000/01/rdf-schema#label> "Football" .
+<http://ex/Football> <http://www.w3.org/2004/02/skos/core#broader> <http://ex/Sport> .
+
+<http://ex/Tennis> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2004/02/skos/core#Concept> .
+<http://ex/Tennis> <http://www.w3.org/2000/01/rdf-schema#label> "Tennis" .
+<http://ex/Tennis> <http://www.w3.org/2004/02/skos/core#broader> <http://ex/Sport> .
