@@ -20,6 +20,15 @@ Still open: a streaming `TopK<T>` accumulator for the `BinaryHeap<Reverse<…>>`
 readers (tasks/140) land. BI ranked sites still to sweep.
 
 ## #7 — date helpers (props.rs)
-`parse_ymd(s) -> Option<(i32,u32,u32)>` (retires a24::ymd) and
-`in_window(s, after, before, inclusive)` (unifies the ad-hoc inclusive/exclusive
-window logic; SPB ~11). Keep these in LDBC — they do NOT belong in core or Python.
+`parse_ymd(s) -> Option<(i32,u32,u32)>` — DONE: lifted from a24, the calendar-field
+analog of `parse_date`. Keep in LDBC — does NOT belong in core or Python.
+
+`in_window(s, after, before, inclusive)` — DECLINED. The window sites are single
+inline comparisons (`dt > after && dt < before`) that split three ways: inclusive
+both-bounds (a18, q7), exclusive both-bounds (a3, a4, a8), and inclusive open-ended
+`Option` bounds (a21, a24). A bare-`bool` helper is the same length as the inline
+compare while hiding the inclusive/exclusive intent behind `true`/`false` — a
+readability regression, unlike top-k where the helper removed an error-prone sort +
+tie-break. Only genuine dup is a4≡a8's `pstr(..).filter(!empty).is_some_and(window)`
+predicate; not enough to motivate the helper. Revisit only if a window site grows
+non-trivial.
