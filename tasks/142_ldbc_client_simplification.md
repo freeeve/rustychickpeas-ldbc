@@ -22,9 +22,14 @@ every limit-bearing ranked query — q3/q4/a5/a14/a20 (node id) and a4/a6/a23 (S
 id from label/uri grouping). No `sort_by(...)+truncate` boilerplate remains in SPB.
 Deliberate non-fits left as-is: a3/q5 rank *all* rows (no limit), a19 is a 3-key
 sort with a carried date payload.
+BI done: Q7 (`q7_related_topics`, top 100) and Q17 (`q17_information_propagation`,
+top 10) — the only two BI ranked sites with the 2-tuple `(id, count desc / id asc)`
+shape — now use `top_k_by_key`. The other BI sort+truncate sites are multi-column
+tuples sorted on assorted fields (`b.3`/`b.4`/multi-key blocks) and do NOT fit the
+2-tuple helper; left as-is.
 Still open: a streaming `TopK<T>` accumulator for the `BinaryHeap<Reverse<…>>` sites
 (IC ~9, when IC is free) and a stored-property (plid) tiebreak variant once column
-readers (tasks/140) land. BI ranked sites still to sweep.
+readers (tasks/140) land.
 
 ## #7 — date helpers (props.rs)
 `parse_ymd(s) -> Option<(i32,u32,u32)>` — DONE: lifted from a24, the calendar-field
