@@ -262,6 +262,11 @@ fn lcc_count_range(
         }
         let k = nbrs.len();
         if k >= 2 {
+            // The gallop branch needs `nbrs` sorted; sort once iff some neighbour is
+            // high-degree (the scan branch is order-independent, so skip otherwise).
+            if nbrs.iter().any(|&u| (off[u as usize + 1] - off[u as usize]) as usize > k) {
+                nbrs.sort_unstable();
+            }
             let mut edges = 0u64;
             for &u in &nbrs {
                 let uo = &adj[off[u as usize] as usize..off[u as usize + 1] as usize];
@@ -273,10 +278,17 @@ fn lcc_count_range(
                         }
                     }
                 } else {
-                    // High-degree u: iterate the smaller neighbour set and
-                    // binary-search u's out-list rather than scanning it.
+                    // High-degree u: gallop-merge the sorted neighbour set against
+                    // u's out-list -- one monotonic cursor through `uo` instead of k
+                    // independent (cache-cold) binary searches.
+                    let mut cursor = 0;
                     for &w in &nbrs {
-                        if w != u && uo.binary_search(&w).is_ok() {
+                        if w == u {
+                            continue;
+                        }
+                        let (found, pos) = gallop(uo, cursor, w);
+                        cursor = pos;
+                        if found {
                             edges += 1;
                         }
                     }
@@ -288,6 +300,27 @@ fn lcc_count_range(
         for &u in &nbrs {
             mark[(u >> 6) as usize] &= !(1u64 << (u & 63));
         }
+    }
+}
+
+/// Galloping (exponential) search for `target` in `uo[from..]`: returns whether it
+/// is present and the index where it is or would be inserted (always `>= from`).
+/// Called with a cursor that only advances, so successive lookups walk `uo`
+/// monotonically -- the cache-locality win over independent binary searches.
+fn gallop(uo: &[u32], from: usize, target: u32) -> (bool, usize) {
+    let n = uo.len();
+    if from >= n {
+        return (false, n);
+    }
+    let mut bound = 1;
+    while from + bound < n && uo[from + bound] < target {
+        bound *= 2;
+    }
+    let lo = from + bound / 2;
+    let hi = (from + bound + 1).min(n);
+    match uo[lo..hi].binary_search(&target) {
+        Ok(i) => (true, lo + i),
+        Err(i) => (false, lo + i),
     }
 }
 
@@ -391,5 +424,15 @@ mod tests {
         assert!((coeffs[1] - 1.0).abs() < 1e-9, "{}", coeffs[1]);
         assert!((coeffs[2] - 1.0).abs() < 1e-9, "{}", coeffs[2]);
         assert_eq!(coeffs[3], 0.0);
+    }
+
+    #[test]
+    fn lcc_gallop_branch_on_high_degree_neighbour() {
+        // N(0) = {1,2} (k=2); node 1 has out-degree 3 (> k), so counting edges among
+        // N(0) takes the gallop branch. The single inside-edge is 1->2, giving
+        // LCC(0) = 1 / (2*1) = 0.5.
+        let g = build(5, &[(0, 1), (0, 2), (1, 2), (1, 3), (1, 4)]);
+        let coeffs = lcc(&g, true);
+        assert!((coeffs[0] - 0.5).abs() < 1e-9, "{}", coeffs[0]);
     }
 }
