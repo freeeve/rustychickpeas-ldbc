@@ -62,12 +62,16 @@ pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
 pub fn sssp(g: &GraphSnapshot, source: u32, directed: bool, weighted: bool) -> Vec<f64> {
     let sp = g.dijkstra(source, fwd(directed), &[] as &[&str], None, |_from, rel| {
         if weighted {
-            g.relationship_property(rel.pos, "weight").and_then(|v| v.to_f64()).unwrap_or(1.0)
+            g.rel_prop(rel.pos, "weight")
+                .and_then(|v| v.to_f64())
+                .unwrap_or(1.0)
         } else {
             1.0
         }
     });
-    (0..g.node_count()).map(|v| sp.distance(v).unwrap_or(f64::INFINITY)).collect()
+    (0..g.node_count())
+        .map(|v| sp.distance(v).unwrap_or(f64::INFINITY))
+        .collect()
 }
 
 /// Weakly connected components: each node's label is the smallest node id in
@@ -110,8 +114,14 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
     // Pull formulation: each node sums its in-neighbours' shares, writing `next[v]`
     // disjointly so it parallelizes (the push `next[w] += ...` would race). In-rels
     // are incoming for a directed graph, both for undirected.
-    let in_dir = if directed { Direction::Incoming } else { Direction::Both };
-    let outdeg: Vec<u32> = (0..n as u32).map(|v| g.neighbors(v, out).count() as u32).collect();
+    let in_dir = if directed {
+        Direction::Incoming
+    } else {
+        Direction::Both
+    };
+    let outdeg: Vec<u32> = (0..n as u32)
+        .map(|v| g.neighbors(v, out).count() as u32)
+        .collect();
     let mut pr = vec![1.0 / nf; n];
     let mut next = vec![0.0_f64; n];
     let workers = std::env::var("GA_THREADS")
@@ -346,7 +356,10 @@ fn lcc_count_range(
         if k >= 2 {
             // The gallop branch needs `nbrs` sorted; sort once iff some neighbour is
             // high-degree (the scan branch is order-independent, so skip otherwise).
-            if nbrs.iter().any(|&u| (off[u as usize + 1] - off[u as usize]) as usize > k) {
+            if nbrs
+                .iter()
+                .any(|&u| (off[u as usize + 1] - off[u as usize]) as usize > k)
+            {
                 nbrs.sort_unstable();
             }
             let mut rels = 0u64;
