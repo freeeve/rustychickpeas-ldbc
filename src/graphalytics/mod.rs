@@ -224,32 +224,61 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
     // range across cores: each worker owns its membership bitset + neighbour
     // buffer, reads the shared adjacency, and writes a disjoint slice of `result`.
     let mut result = vec![0.0_f64; n as usize];
-    let workers = std::thread::available_parallelism().map_or(1, |p| p.get());
-    let chunk = (((n as usize) + workers - 1) / workers).max(1);
-    let (off, adj) = (&off, &adj);
+    let workers = std::env::var("GA_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get()));
+    // Dynamic work-stealing over small batches: workers pull the next [start,end)
+    // range via an atomic cursor, so an uneven hub distribution can't strand one
+    // worker with all the heavy vertices (static contiguous chunks could).
+    let cursor = std::sync::atomic::AtomicU32::new(0);
+    let rptr = result.as_mut_ptr() as usize;
+    const BATCH: u32 = 2048;
+    let (off, adj, cursor) = (&off, &adj, &cursor);
     std::thread::scope(|scope| {
-        for (c, slice) in result.chunks_mut(chunk).enumerate() {
-            let start = (c * chunk) as u32;
-            scope.spawn(move || lcc_count_range(g, off, adj, n, start, slice));
+        for _ in 0..workers {
+            scope.spawn(move || {
+                // Per-worker scratch, allocated once and reused across every batch
+                // this worker steals (not per call -- that would allocate a bitset
+                // per batch).
+                let mut mark = vec![0u64; (n as usize + 63) / 64];
+                let mut nbrs: Vec<u32> = Vec::new();
+                loop {
+                    let start = cursor.fetch_add(BATCH, std::sync::atomic::Ordering::Relaxed);
+                    if start >= n {
+                        break;
+                    }
+                    let end = (start + BATCH).min(n);
+                    // SAFETY: atomic fetch_add hands out disjoint [start,end) batches,
+                    // so the slices never alias; `result` outlives the scope.
+                    let slice = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            (rptr as *mut f64).add(start as usize),
+                            (end - start) as usize,
+                        )
+                    };
+                    lcc_count_range(g, off, adj, start, slice, &mut mark, &mut nbrs);
+                }
+            });
         }
     });
     result
 }
 
 /// Local clustering coefficient for vertices `start .. start + result.len()`,
-/// written into `result`. Worker body for [`lcc`]: owns the per-thread membership
-/// bitset (N(v): ~1/32 the size of a u32 marker array, cache-resident) and the
-/// neighbour buffer; `off`/`adj` are the shared sorted forward-adjacency.
+/// written into `result`. Worker body for [`lcc`]: `mark` (the N(v) membership
+/// bitset -- ~1/32 a u32 marker array, cache-resident) and `nbrs` are caller-owned
+/// scratch reused across every batch a worker steals; `off`/`adj` are the shared
+/// sorted forward-adjacency.
 fn lcc_count_range(
     g: &GraphSnapshot,
     off: &[u32],
     adj: &[u32],
-    n: u32,
     start: u32,
     result: &mut [f64],
+    mark: &mut [u64],
+    nbrs: &mut Vec<u32>,
 ) {
-    let mut mark = vec![0u64; (n as usize + 63) / 64];
-    let mut nbrs: Vec<u32> = Vec::new();
     for (i, slot) in result.iter_mut().enumerate() {
         let v = start + i as u32;
         nbrs.clear();
@@ -268,7 +297,7 @@ fn lcc_count_range(
                 nbrs.sort_unstable();
             }
             let mut edges = 0u64;
-            for &u in &nbrs {
+            for &u in nbrs.iter() {
                 let uo = &adj[off[u as usize] as usize..off[u as usize + 1] as usize];
                 if uo.len() <= k {
                     // Short out-list: scan it, testing N(v) membership by bit.
@@ -282,7 +311,7 @@ fn lcc_count_range(
                     // u's out-list -- one monotonic cursor through `uo` instead of k
                     // independent (cache-cold) binary searches.
                     let mut cursor = 0;
-                    for &w in &nbrs {
+                    for &w in nbrs.iter() {
                         if w == u {
                             continue;
                         }
@@ -297,7 +326,7 @@ fn lcc_count_range(
             *slot = edges as f64 / (k as f64 * (k as f64 - 1.0));
         }
         // Reset N(v)'s bits for the next vertex (including the k < 2 case).
-        for &u in &nbrs {
+        for &u in nbrs.iter() {
             mark[(u >> 6) as usize] &= !(1u64 << (u & 63));
         }
     }
