@@ -1,5 +1,6 @@
 /target
 /data/
+/.cache/
 .venv-kuzu/
 kuzu/import-*
 kuzu/db-*
