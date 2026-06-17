@@ -17,10 +17,7 @@ pub(crate) fn q13_zombies(
     end_day: i64,
     end_ym: i64,
 ) -> Vec<(u32, u64, u64)> {
-    let country = g.nodes_with_label("Country").and_then(|cs| {
-        cs.iter()
-            .find(|&c| pstr(g, c, "name") == Some(country_name))
-    });
+    let country = g.node_by_label_property("Country", "name", country_name);
     let Some(country) = country else {
         return Vec::new();
     };
@@ -194,8 +191,7 @@ pub(crate) fn q19_interaction_path(
 
 /// Find an Organisation node (Company/University) by name.
 pub(crate) fn org_by_name(g: &GraphSnapshot, label: &str, name: &str) -> Option<u32> {
-    g.nodes_with_label(label)
-        .and_then(|ns| ns.iter().find(|&n| pstr(g, n, "name") == Some(name)))
+    g.node_by_label_property(label, "name", name)
 }
 
 /// Find a Person node by its globally-unique LDBC id (`plid`), via the cached
@@ -350,10 +346,7 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
 /// the presence of interaction types (4: p1 replied to p2; 1: p2 replied to p1;
 /// 10: p1 likes p2's message; 1: p2 likes p1's). Cypher: bi-14.cypher.
 pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name: &str) -> Vec<(u32, u32, String, i64)> {
-    let country = |name: &str| {
-        g.nodes_with_label("Country")
-            .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(name)))
-    };
+    let country = |name: &str| g.node_by_label_property("Country", "name", name);
     let (Some(country1), Some(country2)) = (country(c1_name), country(c2_name)) else {
         return Vec::new();
     };

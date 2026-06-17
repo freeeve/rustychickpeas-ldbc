@@ -77,12 +77,8 @@ pub(crate) fn q10_experts(
     // Shortest knows hop-distance from start, bounded to max_dist, via the core
     // bounded-BFS primitive.
     let dist = g.bfs_distances(start, Direction::Outgoing, &["knows"], Some(max_dist));
-    let country = g
-        .nodes_with_label("Country")
-        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)));
-    let tc = g
-        .nodes_with_label("TagClass")
-        .and_then(|t| t.iter().find(|&x| pstr(g, x, "name") == Some(tagclass_name)));
+    let country = g.node_by_label_property("Country", "name", country_name);
+    let tc = g.node_by_label_property("TagClass", "name", tagclass_name);
     let (Some(country), Some(tc)) = (country, tc) else {
         return Vec::new();
     };
@@ -127,12 +123,8 @@ pub(crate) fn q10_experts(
 /// `country`, count distinct messages in the forums' post reply-trees that carry
 /// a tag of `tagclass`; top 20 by count. Cypher: bi-3.cypher.
 pub(crate) fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_name: &str) -> Vec<(i64, String, i64, i64, i64)> {
-    let country = g
-        .nodes_with_label("Country")
-        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)));
-    let tc = g
-        .nodes_with_label("TagClass")
-        .and_then(|t| t.iter().find(|&x| pstr(g, x, "name") == Some(tagclass_name)));
+    let country = g.node_by_label_property("Country", "name", country_name);
+    let tc = g.node_by_label_property("TagClass", "name", tagclass_name);
     let (Some(country), Some(tc)) = (country, tc) else {
         return Vec::new();
     };
