@@ -25,8 +25,6 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::pstr;
 
-use super::queries::has_label;
-
 /// Creative works `mentions`-linked to a geonames `Feature` inside the square box
 /// of half-extent `deviation` degrees centered on `(ref_lat, ref_lon)` — the
 /// SPARQL's `refLatitude` / `refLongtitude` / `refDeviation` — restricted to
@@ -36,10 +34,13 @@ pub fn run(g: &GraphSnapshot, ref_lat: f64, ref_lon: f64, deviation: f64) -> Vec
     let min = (ref_lat - deviation, ref_lon - deviation);
     let max = (ref_lat + deviation, ref_lon + deviation);
 
+    let Some(cworks) = g.nodes_with_label("CreativeWork") else {
+        return Vec::new();
+    };
     let mut works: HashSet<u32> = HashSet::new();
     for f in g.geo_within_bbox("Feature", "lat", "long", min, max).iter() {
-        for w in g.neighbors_by_type(f, Direction::Incoming, "mentions") {
-            if has_label(g, w, "CreativeWork") && pstr(g, w, "dateModified").is_some() {
+        for w in g.neighbors_in_set(f, Direction::Incoming, "mentions", cworks) {
+            if pstr(g, w, "dateModified").is_some() {
                 works.insert(w);
             }
         }

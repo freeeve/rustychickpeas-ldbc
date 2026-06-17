@@ -19,21 +19,19 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use super::queries::{has_label, node_by_uri};
+use super::queries::node_by_uri;
 use crate::props::pstr;
 
 /// Creative works with a `pred` edge ("about" or "mentions") to the node with uri
 /// `thing_uri` and a non-empty `dateModified`, ordered by `dateModified`
 /// descending then node id ascending. Empty when the thing is unknown.
 pub fn run(g: &GraphSnapshot, pred: &str, thing_uri: &str) -> Vec<u32> {
-    let Some(thing) = node_by_uri(g, thing_uri) else {
+    let (Some(thing), Some(cworks)) = (node_by_uri(g, thing_uri), g.nodes_with_label("CreativeWork"))
+    else {
         return Vec::new();
     };
     let mut works: Vec<(String, u32)> = Vec::new();
-    for w in g.neighbors_by_type(thing, Direction::Incoming, pred) {
-        if !has_label(g, w, "CreativeWork") {
-            continue;
-        }
+    for w in g.neighbors_in_set(thing, Direction::Incoming, pred, cworks) {
         let Some(modified) = pstr(g, w, "dateModified").filter(|s| !s.is_empty()) else {
             continue;
         };

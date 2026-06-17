@@ -45,7 +45,7 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
     };
     let mut posts: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
-        posts.extend(g.neighbors_in(topic, Direction::Incoming, pred, blogposts));
+        posts.extend(g.neighbors_in_set(topic, Direction::Incoming, pred, blogposts));
     }
 
     // `cwork:dateCreated ?created` is required, so a post with no `dateCreated`

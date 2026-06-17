@@ -50,12 +50,10 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
     let mut out: Vec<(u32, &str)> = Vec::new();
     let mut seen: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
-        for w in g.neighbors_by_type(topic, Direction::Incoming, pred) {
-            if cworks.contains(w) {
-                if let Some(d) = pstr(g, w, "dateCreated") {
-                    if seen.insert(w) {
-                        out.push((w, d));
-                    }
+        for w in g.neighbors_in_set(topic, Direction::Incoming, pred, cworks) {
+            if let Some(d) = pstr(g, w, "dateCreated") {
+                if seen.insert(w) {
+                    out.push((w, d));
                 }
             }
         }

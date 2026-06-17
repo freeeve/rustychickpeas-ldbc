@@ -16,11 +16,9 @@
 //! directly — no per-query about/mentions fold. Counts each topic over the type /
 //! audience / `dateModified` (exclusive, lexicographic) restrictions.
 
-use std::collections::HashMap;
-
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_count};
 
 /// Topics (`tag` targets) ranked by how many works of `cw_type` with audience
 /// `audience_uri` and `dateModified` strictly within `(after, before)` tag them.
@@ -29,31 +27,19 @@ pub fn run(g: &GraphSnapshot, cw_type: &str, audience_uri: &str, after: &str, be
     let Some(works) = g.nodes_with_label(cw_type) else {
         return Vec::new();
     };
-    let mut counts: HashMap<u32, usize> = HashMap::new();
-    for w in works.iter() {
-        let Some(dt) = pstr(g, w, "dateModified").filter(|s| !s.is_empty()) else {
-            continue;
-        };
-        if !(dt > after && dt < before) {
-            continue;
-        }
-        let audience = g
-            .neighbors_by_type(w, Direction::Outgoing, "audience")
-            .any(|a| pstr(g, a, "uri") == Some(audience_uri));
-        if !audience {
-            continue;
-        }
-        // cwork:tag — the materialized super-property of about/mentions.
-        for topic in g.neighbors_by_type(w, Direction::Outgoing, "tag") {
-            *counts.entry(topic).or_default() += 1;
-        }
-    }
-    let mut rows: Vec<(String, usize)> = counts
+    // Works in the dateModified window with the pinned audience; count their
+    // `tag` targets (materialized about/mentions) via the core histogram.
+    let qualifying = works.iter().filter(|&w| {
+        pstr(g, w, "dateModified").filter(|s| !s.is_empty()).is_some_and(|dt| dt > after && dt < before)
+            && g
+                .neighbors_by_type(w, Direction::Outgoing, "audience")
+                .any(|a| pstr(g, a, "uri") == Some(audience_uri))
+    });
+    let counts = g.neighbor_counts(qualifying, Direction::Outgoing, "tag");
+    top_k_by_count(counts, usize::MAX)
         .into_iter()
         .map(|(t, n)| (pstr(g, t, "uri").unwrap_or("?").to_string(), n))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows
+        .collect()
 }
 
 #[cfg(test)]

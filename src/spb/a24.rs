@@ -42,9 +42,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use rustychickpeas_core::{Direction, GraphSnapshot};
+use rustychickpeas_core::{bitmap::NodeSet, Direction, GraphSnapshot};
 
-use super::queries::{has_label, node_by_uri};
+use super::queries::node_by_uri;
 use crate::props::pstr;
 
 /// Parse the leading `YYYY-MM-DD` of an ISO-8601 `dateCreated` into
@@ -75,14 +75,17 @@ pub fn run(
         return Vec::new();
     };
 
-    // Works `about` entityA (the build side of the intersection).
-    let about_a: HashSet<u32> = g.neighbors_by_type(a, Direction::Incoming, "about").collect();
+    // Works `about` entityA, as a node set (the build side of the intersection).
+    let mut about_a = NodeSet::empty();
+    for w in g.neighbors_by_type(a, Direction::Incoming, "about") {
+        about_a.insert(w);
+    }
 
-    // Works `about` BOTH entities, kept iff they are CreativeWorks; the HashSet
-    // dedups a work reached twice (duplicate triples / `entityA == entityB`).
+    // Works `about` BOTH entities — entityB's `about` sources that are in
+    // `about_a` — kept iff CreativeWorks; the HashSet dedups a work reached twice.
     let mut both: HashSet<u32> = HashSet::new();
-    for w in g.neighbors_by_type(b, Direction::Incoming, "about") {
-        if about_a.contains(&w) && has_label(g, w, "CreativeWork") {
+    for w in g.neighbors_in_set(b, Direction::Incoming, "about", &about_a) {
+        if g.has_label(w, "CreativeWork") {
             both.insert(w);
         }
     }
