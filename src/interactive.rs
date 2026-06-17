@@ -129,19 +129,56 @@ pub fn ic2_recent_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<
 /// (<=2 `knows` hops, excluding self), created on/before `max_day`.
 pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u32, i64)> {
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
-    let mut rows: Vec<(u32, i64)> = Vec::new();
+    // Hoist day/ms columns (no pi64 key re-resolution per message), and keep only
+    // the top 20 by (ms desc, id asc) in a heap instead of collecting every FoF
+    // message (millions) and sorting the lot.
+    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
+    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let ms_col = g.property_key_from_str("ms").and_then(|id| g.columns.get(&id));
+    let ms_s = ms_col.and_then(|c| c.as_i64_slice());
+    let day_of = |n: u32| -> i64 {
+        match day_s {
+            Some(s) => s[n as usize],
+            None => match day_col.and_then(|c| c.get(n)) {
+                Some(ValueId::I64(d)) => d,
+                _ => 0,
+            },
+        }
+    };
+    let ms_of = |n: u32| -> i64 {
+        match ms_s {
+            Some(s) => s[n as usize],
+            None => match ms_col.and_then(|c| c.get(n)) {
+                Some(ValueId::I64(d)) => d,
+                _ => 0,
+            },
+        }
+    };
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(21);
     for (&p, &d) in &reach {
         if d == 0 {
             continue;
         }
         for msg in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
-            if pi64(g, msg, "day") <= max_day {
-                rows.push((msg, pi64(g, msg, "ms")));
+            if day_of(msg) > max_day {
+                continue;
+            }
+            let key = (ms_of(msg), Reverse(msg));
+            if top.len() < 20 {
+                top.push(Reverse(key));
+            } else if key > top.peek().unwrap().0 {
+                top.pop();
+                top.push(Reverse(key));
             }
         }
     }
+    let mut rows: Vec<(u32, i64)> = top
+        .into_iter()
+        .map(|Reverse((ms, Reverse(id)))| (id, ms))
+        .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows.truncate(20);
     rows
 }
 
