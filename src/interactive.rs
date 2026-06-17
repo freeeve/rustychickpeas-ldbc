@@ -823,10 +823,11 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
     let posts = g.nodes_with_label("Post");
     // Collect qualifying tag *ids* per friend (dedup, no String allocation in the
     // hot loop); resolve the names only for the top-20 friends returned.
-    let mut rows: Vec<(u32, usize, HashSet<u32>)> = Vec::new();
+    let mut rows: Vec<(u32, usize, Vec<u32>)> = Vec::new();
+    let mut tag_ids: HashSet<u32> = HashSet::new(); // reused across friends
     for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
         let mut count = 0usize;
-        let mut tag_ids: HashSet<u32> = HashSet::new();
+        tag_ids.clear();
         for c in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
             for parent in g.neighbors_by_type(c, Direction::Outgoing, "replyOf") {
                 if !posts.is_some_and(|p| p.contains(parent)) {
@@ -845,7 +846,7 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
             }
         }
         if count > 0 {
-            rows.push((friend, count, tag_ids));
+            rows.push((friend, count, tag_ids.iter().copied().collect()));
         }
     }
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
