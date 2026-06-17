@@ -32,15 +32,23 @@ Still open: a streaming `TopK<T>` accumulator for the `BinaryHeap<Reverse<…>>`
 UNBLOCKED, the tasks/140 `i64_col`/`i64_edge_col` readers landed (see Tier 1).
 
 ## Tier 1 — adopt the tasks/140 core primitives (NOW UNBLOCKED, core landed)
-`tasks/140` shipped in core (`d34c6f9`): `i64_col`/`bool_col`/`i64_edge_col`
-(resolve-once typed column readers), `str_prop` (None on absent OR empty), and
-`first_neighbor` / `follow`. Client adoption (BI + SPB now; IC when free):
-- `str_prop` → the `pstr(g, n, k).filter(|s| !s.is_empty())` sites (SPB ~9: a20,
-  a24, q3, … and BI date-modified reads).
-- `i64_col` / `i64_edge_col` → retire LDBC `col_i64` (BI ~21, incl. the per-compare
-  re-resolve in the plid/date tiebreak comparators — hoist the reader out of the sort).
-- `first_neighbor` → the `neighbors_by_type(..).next()` idiom (BI ~14, SPB facets).
-- `follow` → BI person→city→country and the re-defined `creator_of` closures (BI ~6).
+`tasks/140` shipped in core (`d34c6f9`); `I64Col`/`BoolCol` made `Copy` + `as_slice`
+in core (`e862d13`). Client adoption (BI + SPB done; IC when free):
+- `str_prop` — DONE (SPB, `741fc89`): 13 `pstr(..).filter(non-empty)` sites + dropped
+  a23's `req_str`. Parity 30/30.
+- `i64_col` — DONE (BI, `1af8c31`): `col_i64` retyped to `I64Col` (Copy → comparator
+  reads unchanged) + `col_bool` added; the ~17 `property_key_from_str(..).and_then(
+  columns.get)` hoists collapse to `g.i64_col`/`g.bool_col`; Q1's manual dense-slice
+  scan now sources its slice via `as_slice` (hot path byte-identical). Result counts
+  unchanged, Q1/Q2 within 1%.
+- `first_neighbor` — DONE (BI, `3cafdf3`): 9 `neighbors_by_type(..).next()` sites.
+- `follow` — NOT ADOPTED. BI's person→city→country path uses pre-resolved
+  `RelationshipType` for speed; `follow` takes `&str` and would re-resolve each step
+  in that hot path, so those stay as chained `first_neighbor` calls. `follow` only
+  fits sites already using `&str` rel names (none found hot in BI).
+- Remaining (minor): `i64_edge_col` for the 2 rel-column reads (`cy`/`kd`, currently
+  `property_key_from_str(..).and_then(rel_columns.get)` + ValueId match); SPB facet
+  `first_neighbor` sites; IC adoption when `interactive.rs` is free.
 
 ## #7 — date helpers (props.rs)
 `parse_ymd(s) -> Option<(i32,u32,u32)>` — DONE: lifted from a24, the calendar-field
