@@ -137,8 +137,7 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
         }
     };
     use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(21);
+    let mut top = TopK::new(20);
     for (&p, &d) in &reach {
         if d == 0 {
             continue;
@@ -147,21 +146,10 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
             if day_of(msg) > max_day {
                 continue;
             }
-            let key = (ms_of(msg), Reverse(msg));
-            if top.len() < 20 {
-                top.push(Reverse(key));
-            } else if key > top.peek().unwrap().0 {
-                top.pop();
-                top.push(Reverse(key));
-            }
+            top.push((ms_of(msg), Reverse(msg)));
         }
     }
-    let mut rows: Vec<(u32, i64)> = top
-        .into_iter()
-        .map(|Reverse((ms, Reverse(id)))| (id, ms))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows
+    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
 }
 
 /// IC13 — unweighted shortest-path length between two persons in the `knows`
@@ -230,26 +218,14 @@ pub fn is2_recent_of_person(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec
     // Top 10 by (ms desc, id asc) via a size-10 heap rather than collecting every
     // message of a prolific person and sorting the lot (IC8 shape).
     use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(11);
+    let mut top = TopK::new(10);
     for m in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         if pi64(g, m, "day") > max_day {
             continue;
         }
-        let key = (pi64(g, m, "ms"), Reverse(m));
-        if top.len() < 10 {
-            top.push(Reverse(key));
-        } else if key > top.peek().unwrap().0 {
-            top.pop();
-            top.push(Reverse(key));
-        }
+        top.push((pi64(g, m, "ms"), Reverse(m)));
     }
-    let mut rows: Vec<(u32, i64)> = top
-        .into_iter()
-        .map(|Reverse((ms, Reverse(id)))| (id, ms))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows
+    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
 }
 
 /// IS3 — a person's direct `knows` friends (sorted by id).
@@ -315,25 +291,19 @@ pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_d
         // result ordering reversed (root = worst kept), and names are borrowed
         // (no allocation). Tag names are unique, so the top-10 is unambiguous.
         use std::cmp::Reverse;
-        use std::collections::BinaryHeap;
-        let mut top: BinaryHeap<Reverse<(u32, Reverse<&str>, u32)>> = BinaryHeap::with_capacity(11);
+        let mut top = TopK::new(10);
         for i in 0..count.len() {
             let c = count[i];
             if c == 0 || c == BEFORE {
                 continue;
             }
             let tag = lo + i as u32;
-            let item = (c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag);
-            if top.len() < 10 {
-                top.push(Reverse(item));
-            } else if item > top.peek().unwrap().0 {
-                top.pop();
-                top.push(Reverse(item));
-            }
+            top.push((c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag));
         }
         let mut rows: Vec<(u32, u32)> = top
+            .into_sorted_desc()
             .into_iter()
-            .map(|Reverse((c, _, tag))| (tag, c))
+            .map(|(c, _, tag)| (tag, c))
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
         return rows;
@@ -406,25 +376,19 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
             }
         }
         use std::cmp::Reverse;
-        use std::collections::BinaryHeap;
-        let mut top: BinaryHeap<Reverse<(u32, Reverse<&str>, u32)>> = BinaryHeap::with_capacity(11);
+        let mut top = TopK::new(10);
         for i in 0..count.len() {
             let c = count[i];
             if c == 0 {
                 continue;
             }
             let tag = lo + i as u32;
-            let item = (c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag);
-            if top.len() < 10 {
-                top.push(Reverse(item));
-            } else if item > top.peek().unwrap().0 {
-                top.pop();
-                top.push(Reverse(item));
-            }
+            top.push((c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag));
         }
         let mut rows: Vec<(u32, u32)> = top
+            .into_sorted_desc()
             .into_iter()
-            .map(|Reverse((c, _, tag))| (tag, c))
+            .map(|(c, _, tag)| (tag, c))
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
         return rows;
@@ -465,25 +429,13 @@ pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
     // Keep the top 20 by (ms desc, id asc) in a size-20 heap rather than collecting
     // every reply (a high-degree seed has thousands) and sorting the lot.
     use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(21);
+    let mut top = TopK::new(20);
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         for reply in g.neighbors_by_type(msg, Direction::Incoming, "replyOf") {
-            let key = (pi64(g, reply, "ms"), Reverse(reply));
-            if top.len() < 20 {
-                top.push(Reverse(key));
-            } else if key > top.peek().unwrap().0 {
-                top.pop();
-                top.push(Reverse(key));
-            }
+            top.push((pi64(g, reply, "ms"), Reverse(reply)));
         }
     }
-    let mut rows: Vec<(u32, i64)> = top
-        .into_iter()
-        .map(|Reverse((ms, Reverse(id)))| (id, ms))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows
+    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
 }
 
 /// IS6 — (forum, moderator) for a message. `roots` is the `chain_roots` array
@@ -632,20 +584,14 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
     // sorting every liker — the full sort (a plid lookup per comparison) dominated.
     // plid is resolved once per liker here, not O(n log n) times.
     use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut top: BinaryHeap<Reverse<(i64, Reverse<i64>, u32, u32)>> = BinaryHeap::with_capacity(21);
+    let mut top = TopK::new(20);
     for (&liker, &(lms, msg)) in &best {
-        let item = (lms, Reverse(pi64(g, liker, "plid")), liker, msg);
-        if top.len() < 20 {
-            top.push(Reverse(item));
-        } else if item > top.peek().unwrap().0 {
-            top.pop();
-            top.push(Reverse(item));
-        }
+        top.push((lms, Reverse(pi64(g, liker, "plid")), liker, msg));
     }
     let mut rows: Vec<(u32, i64, u32, bool)> = top
+        .into_sorted_desc()
         .into_iter()
-        .map(|Reverse((lms, _, liker, msg))| (liker, lms, msg, !friends.contains(&liker)))
+        .map(|(lms, _, liker, msg)| (liker, lms, msg, !friends.contains(&liker)))
         .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows
@@ -671,8 +617,7 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
     };
     // Top 10 by (score desc, plid asc) in a heap; plid resolved once per FoF.
     use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut top: BinaryHeap<Reverse<(i64, Reverse<i64>, u32)>> = BinaryHeap::with_capacity(11);
+    let mut top = TopK::new(10);
     for (&foaf, &d) in &reach {
         if d != 2 {
             continue;
@@ -692,17 +637,12 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
                 uncommon += 1;
             }
         }
-        let item = (common - uncommon, Reverse(rd(plid_c, foaf)), foaf);
-        if top.len() < 10 {
-            top.push(Reverse(item));
-        } else if item > top.peek().unwrap().0 {
-            top.pop();
-            top.push(Reverse(item));
-        }
+        top.push((common - uncommon, Reverse(rd(plid_c, foaf)), foaf));
     }
     let mut rows: Vec<(u32, i64)> = top
+        .into_sorted_desc()
         .into_iter()
-        .map(|Reverse((score, _, foaf))| (foaf, score))
+        .map(|(score, _, foaf)| (foaf, score))
         .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows
@@ -735,9 +675,7 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
     // resolved once per matching row, not per sort comparison. (The workAt scan
     // is the inherent CSR cost.)
     use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut top: BinaryHeap<Reverse<(Reverse<i64>, Reverse<i64>, &str, u32, u32)>> =
-        BinaryHeap::with_capacity(11);
+    let mut top = TopK::new(10);
     for (&p, &d) in &reach {
         if d < 1 {
             continue;
@@ -761,17 +699,13 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
                 p,
                 e.neighbor,
             );
-            if top.len() < 10 {
-                top.push(Reverse(item));
-            } else if item > top.peek().unwrap().0 {
-                top.pop();
-                top.push(Reverse(item));
-            }
+            top.push(item);
         }
     }
     let mut rows: Vec<(u32, u32, i64)> = top
+        .into_sorted_desc()
         .into_iter()
-        .map(|Reverse((Reverse(wf), _, _, p, company))| (p, company, wf))
+        .map(|(Reverse(wf), _, _, p, company)| (p, company, wf))
         .collect();
     rows.sort_by(|a, b| {
         a.2.cmp(&b.2)
