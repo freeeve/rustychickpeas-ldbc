@@ -85,10 +85,10 @@ pub fn run(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(u32, usize)> {
     }
 
     let mut rows: Vec<(u32, usize)> = days.into_iter().map(|(who, set)| (who, set.len())).collect();
-    // ORDER BY DESC(?interactionDays), then ?who ascending (its IRI == `uri`).
-    rows.sort_by(|x, y| {
-        y.1.cmp(&x.1).then_with(|| pstr(g, x.0, "uri").unwrap_or("").cmp(pstr(g, y.0, "uri").unwrap_or("")))
-    });
+    // ORDER BY DESC(?interactionDays); tie-break on node id (a stable proxy for the
+    // uri order — avoids a per-comparison `uri` lookup) since the cross-engine
+    // comparison is order-insensitive and the official tie-break is unspecified.
+    rows.sort_by(|x, y| y.1.cmp(&x.1).then_with(|| x.0.cmp(&y.0)));
     rows.truncate(limit);
     rows
 }

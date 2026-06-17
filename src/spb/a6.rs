@@ -23,7 +23,6 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use super::queries::has_label;
 use crate::props::{pbool, pstr};
 
 /// The entity types an about-target can carry: the two leaf classes plus the
@@ -38,6 +37,10 @@ pub fn run(g: &GraphSnapshot, live_coverage: bool, audience_uri: &str, limit: us
     let Some(works) = g.nodes_with_label("CreativeWork") else {
         return Vec::new();
     };
+    // Resolve each entity type's node set ONCE; the inner loop is then a bitmap
+    // membership test rather than a per-node label string lookup.
+    let type_sets: Vec<(&str, _)> =
+        ENTITY_TYPES.iter().filter_map(|&ty| g.nodes_with_label(ty).map(|s| (ty, s))).collect();
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for w in works.iter() {
         if pbool(g, w, "liveCoverage") != live_coverage {
@@ -51,9 +54,9 @@ pub fn run(g: &GraphSnapshot, live_coverage: bool, audience_uri: &str, limit: us
         }
         for about in g.neighbors_by_type(w, Direction::Outgoing, "about") {
             // ?about a ?aboutType — leaf type plus the materialized Thing super-class.
-            for ty in ENTITY_TYPES {
-                if has_label(g, about, ty) {
-                    *counts.entry(ty).or_default() += 1;
+            for (ty, set) in &type_sets {
+                if set.contains(about) {
+                    *counts.entry(*ty).or_default() += 1;
                 }
             }
         }

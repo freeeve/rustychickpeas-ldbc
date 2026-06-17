@@ -21,7 +21,6 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use super::queries::has_label;
 use crate::props::pstr;
 
 /// About-targets of the given entity-type `label` ranked by how many works
@@ -29,7 +28,11 @@ use crate::props::pstr;
 /// `(entity_uri, count)` ordered by count descending then uri, truncated to
 /// `limit` (the template's `LIMIT 1000`).
 pub fn run(g: &GraphSnapshot, entity_label: &str, cat1: &str, cat2: &str, limit: usize) -> Vec<(String, usize)> {
-    let Some(works) = g.nodes_with_label("CreativeWork") else {
+    // Resolve the entity-type node set ONCE (the `?about a {{{entityType}}}`
+    // restriction is then a bitmap test, not a per-node label string lookup).
+    let (Some(entities), Some(works)) =
+        (g.nodes_with_label(entity_label), g.nodes_with_label("CreativeWork"))
+    else {
         return Vec::new();
     };
     let mut counts: HashMap<u32, usize> = HashMap::new();
@@ -42,19 +45,16 @@ pub fn run(g: &GraphSnapshot, entity_label: &str, cat1: &str, cat2: &str, limit:
             continue;
         }
         for about in g.neighbors_by_type(w, Direction::Outgoing, "about") {
-            // ?about a {{{cwAboutEntityType}}} — served by the materialized super-class.
-            if has_label(g, about, entity_label) {
+            if entities.contains(about) {
                 *counts.entry(about).or_default() += 1;
             }
         }
     }
-    let mut rows: Vec<(String, usize)> = counts
-        .into_iter()
-        .map(|(a, n)| (pstr(g, a, "uri").unwrap_or("?").to_string(), n))
-        .collect();
+    // Sort / truncate on node ids, then resolve uris only for the kept rows.
+    let mut rows: Vec<(u32, usize)> = counts.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     rows.truncate(limit);
-    rows
+    rows.into_iter().map(|(a, n)| (pstr(g, a, "uri").unwrap_or("?").to_string(), n)).collect()
 }
 
 #[cfg(test)]

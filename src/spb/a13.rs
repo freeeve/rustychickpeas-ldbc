@@ -29,7 +29,9 @@ pub fn run(g: &GraphSnapshot, cat1: &str, cat2: &str, limit: usize) -> Vec<(Stri
     let Some(works) = g.nodes_with_label("CreativeWork") else {
         return Vec::new();
     };
-    let mut rows: Vec<(String, String)> = Vec::new();
+    // Collect `(work, tag)` as node ids (no per-pair string allocation), then sort
+    // / DISTINCT / truncate on the ids and resolve uris only for the kept rows.
+    let mut pairs: Vec<(u32, u32)> = Vec::new();
     for w in works.iter() {
         let in_category = g.neighbors_by_type(w, Direction::Outgoing, "category").any(|c| {
             let u = pstr(g, c, "uri");
@@ -41,19 +43,27 @@ pub fn run(g: &GraphSnapshot, cat1: &str, cat2: &str, limit: usize) -> Vec<(Stri
         if pstr(g, w, "dateModified").filter(|s| !s.is_empty()).is_none() {
             continue;
         }
-        let Some(work_uri) = pstr(g, w, "uri").map(str::to_string) else {
-            continue;
-        };
         // cwork:tag — the materialized super-property of about/mentions.
         for tag in g.neighbors_by_type(w, Direction::Outgoing, "tag") {
-            if let Some(tag_uri) = pstr(g, tag, "uri") {
-                rows.push((work_uri.clone(), tag_uri.to_string()));
-            }
+            pairs.push((w, tag));
         }
     }
-    rows.sort();
-    rows.dedup(); // SELECT DISTINCT over (?thing, ?tag)
-    rows.truncate(limit);
+    pairs.sort_unstable();
+    pairs.dedup(); // SELECT DISTINCT over (?thing, ?tag)
+    pairs.truncate(limit);
+
+    // Resolve uris once per work (pairs are grouped by work after the sort).
+    let mut rows: Vec<(String, String)> = Vec::with_capacity(pairs.len());
+    let (mut last_work, mut work_uri) = (u32::MAX, "?");
+    for (w, tag) in pairs {
+        if w != last_work {
+            work_uri = pstr(g, w, "uri").unwrap_or("?");
+            last_work = w;
+        }
+        if let Some(tag_uri) = pstr(g, tag, "uri") {
+            rows.push((work_uri.to_string(), tag_uri.to_string()));
+        }
+    }
     rows
 }
 
