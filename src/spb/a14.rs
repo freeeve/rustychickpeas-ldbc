@@ -41,7 +41,7 @@
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::node_by_uri;
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_key};
 
 /// Whether `work` has an outgoing `edge`-typed link at all (the required `?thing
 /// cwork:<edge> ?x` star pattern: ≥1 edge of that type must be bound).
@@ -73,7 +73,7 @@ pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limi
     ) else {
         return Vec::new();
     };
-    let mut rows: Vec<(u32, &str)> = works
+    let rows: Vec<(u32, &str)> = works
         .iter()
         .filter(|&w| has_required_star(g, w))
         .filter(|&w| g.neighbors_by_type(w, Direction::Outgoing, "primaryFormat").any(|t| t == pf))
@@ -87,8 +87,7 @@ pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limi
         // treat empty as absent. Carry the value to sort without re-lookup.
         .filter_map(|w| pstr(g, w, "dateModified").filter(|d| !d.is_empty()).map(|d| (w, d)))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(&b.0)));
-    rows.into_iter().take(limit).map(|(w, _)| w).collect()
+    top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
 }
 
 #[cfg(test)]

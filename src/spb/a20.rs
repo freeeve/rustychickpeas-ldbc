@@ -34,7 +34,7 @@
 
 use rustychickpeas_core::GraphSnapshot;
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_key};
 
 /// Creative works whose `title` OR `description` contains `word` (core inverted
 /// index, whole-word), ranked by `dateModified` descending (tie-broken by node id
@@ -46,12 +46,11 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
     // work without it is excluded; carry the value to sort without re-lookup.
     // A node missing a dense string property reads back as `Some("")`, so treat
     // empty as absent for the required `dateModified` sort key.
-    let mut rows: Vec<(u32, &str)> = hits
+    let rows: Vec<(u32, &str)> = hits
         .iter()
         .filter_map(|w| pstr(g, w, "dateModified").filter(|d| !d.is_empty()).map(|d| (w, d)))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(&b.0)));
-    rows.into_iter().take(limit).map(|(w, _)| w).collect()
+    top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
 }
 
 #[cfg(test)]

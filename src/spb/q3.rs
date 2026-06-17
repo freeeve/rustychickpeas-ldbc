@@ -28,7 +28,7 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_key};
 
 use super::queries::node_by_uri;
 
@@ -59,9 +59,7 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
         }
     }
 
-    out.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(&b.0)));
-    out.truncate(limit);
-    out.into_iter().map(|(w, _)| w).collect()
+    top_k_by_key(out, limit).into_iter().map(|(w, _)| w).collect()
 }
 
 #[cfg(test)]
