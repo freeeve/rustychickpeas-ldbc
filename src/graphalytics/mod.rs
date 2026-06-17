@@ -173,6 +173,26 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
     let n = g.node_count();
     let out = fwd(directed);
     let mut result = vec![0.0_f64; n as usize];
+
+    // Sorted forward-adjacency (CSR), built once, so the triangle count can probe
+    // the smaller side of each intersection: scan u's out-list when it is short,
+    // else binary-search it. Without this a single mega-hub u that sits in many
+    // N(v) has its whole out-list rescanned every time.
+    let mut off = vec![0u32; n as usize + 1];
+    for v in 0..n {
+        off[v as usize + 1] = off[v as usize] + g.neighbors(v, out).count() as u32;
+    }
+    let mut adj = vec![0u32; off[n as usize] as usize];
+    for v in 0..n {
+        let s = off[v as usize] as usize;
+        let mut p = s;
+        for w in g.neighbors(v, out) {
+            adj[p] = w;
+            p += 1;
+        }
+        adj[s..p].sort_unstable();
+    }
+
     // Dense membership marker for N(v): mark[node] == gen means "in N(v)". The gen
     // stamp is bumped per vertex so the array never needs clearing, and it doubles
     // as the dedup for N(v). Reused across all vertices (no per-vertex allocation).
@@ -199,9 +219,21 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
         }
         let mut edges = 0u64;
         for &u in &nbrs {
-            for w in g.neighbors(u, out) {
-                if w != u && mark[w as usize] == gen {
-                    edges += 1;
+            let uo = &adj[off[u as usize] as usize..off[u as usize + 1] as usize];
+            if uo.len() <= k {
+                // Short out-list: scan it, testing N(v) membership by marker.
+                for &w in uo {
+                    if w != u && mark[w as usize] == gen {
+                        edges += 1;
+                    }
+                }
+            } else {
+                // High-degree u: iterate the smaller neighbour set and
+                // binary-search u's out-list rather than scanning it.
+                for &w in &nbrs {
+                    if w != u && uo.binary_search(&w).is_ok() {
+                        edges += 1;
+                    }
                 }
             }
         }
