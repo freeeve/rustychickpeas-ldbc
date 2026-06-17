@@ -24,11 +24,12 @@ pub(crate) fn has_label(g: &GraphSnapshot, node: u32, label: &str) -> bool {
     g.nodes_with_label(label).is_some_and(|ns| ns.contains(node))
 }
 
-/// Find a node by its `uri` property, across the labelled entity types the
-/// extract keeps: creative works, geonames features, and dbpedia `about`-targets
-/// (Company / Event, with their `label`). Returns `None` for an unknown uri.
+/// Find a node by its `uri` property: creative works, geonames features and
+/// dbpedia `about`-targets (Company / Event), falling back to `Facet` for an
+/// otherwise-untyped resource (category / audience / format / webDocument …).
+/// Each lookup uses the cached `nodes_with_property` index. `None` for unknown.
 pub(crate) fn node_by_uri(g: &GraphSnapshot, uri: &str) -> Option<u32> {
-    ["CreativeWork", "Feature", "Company", "Event"]
+    ["CreativeWork", "Feature", "Company", "Event", "Facet"]
         .iter()
         .find_map(|lbl| g.nodes_with_property(lbl, "uri", uri).and_then(|ns| ns.iter().next()))
 }

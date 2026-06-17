@@ -40,13 +40,8 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
+use super::queries::node_by_uri;
 use crate::props::pstr;
-
-/// Whether `node` has an outgoing `edge`-typed link to a node whose `uri`
-/// property equals `uri`.
-fn has_edge_to_uri(g: &GraphSnapshot, node: u32, edge: &str, uri: &str) -> bool {
-    g.neighbors_by_type(node, Direction::Outgoing, edge).any(|t| pstr(g, t, "uri") == Some(uri))
-}
 
 /// Whether `work` has an outgoing `edge`-typed link at all (the required `?thing
 /// cwork:<edge> ?x` star pattern: ≥1 edge of that type must be bound).
@@ -63,28 +58,30 @@ fn has_required_star(g: &GraphSnapshot, work: u32) -> bool {
         && has_edge(g, work, "audience")
 }
 
-/// Whether `work` has a `primaryContentOf` web document whose `webDocumentType`
-/// edge targets `web_doc_type` — the template's
-/// `?thing bbc:primaryContentOf ?pc . ?pc bbc:webDocumentType ?webdoc . FILTER(?webdoc = …)`.
-fn has_web_document_of_type(g: &GraphSnapshot, work: u32, web_doc_type: &str) -> bool {
-    g.neighbors_by_type(work, Direction::Outgoing, "primaryContentOf")
-        .any(|pc| has_edge_to_uri(g, pc, "webDocumentType", web_doc_type))
-}
-
 /// q14: creative works satisfying the full required star (≥1 `tag`/`category`/
 /// `thumbnail`/`audience` edge, a non-empty `dateModified`, a `primaryFormat` edge
 /// to `primary_format_uri`, and a `primaryContentOf` web document of type
 /// `web_doc_type`), ordered by `dateModified` descending then id, truncated to
 /// `limit`.
 pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limit: usize) -> Vec<u32> {
-    let Some(works) = g.nodes_with_label("CreativeWork") else {
+    // Resolve the two pinned facet targets to node ids once (a `Facet`-labelled
+    // uri lookup), so the filters are id comparisons, not per-edge uri reads.
+    let (Some(works), Some(pf), Some(wdt)) = (
+        g.nodes_with_label("CreativeWork"),
+        node_by_uri(g, primary_format_uri),
+        node_by_uri(g, web_doc_type),
+    ) else {
         return Vec::new();
     };
     let mut rows: Vec<(u32, &str)> = works
         .iter()
         .filter(|&w| has_required_star(g, w))
-        .filter(|&w| has_edge_to_uri(g, w, "primaryFormat", primary_format_uri))
-        .filter(|&w| has_web_document_of_type(g, w, web_doc_type))
+        .filter(|&w| g.neighbors_by_type(w, Direction::Outgoing, "primaryFormat").any(|t| t == pf))
+        .filter(|&w| {
+            g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf").any(|pc| {
+                g.neighbors_by_type(pc, Direction::Outgoing, "webDocumentType").any(|t| t == wdt)
+            })
+        })
         // `cwork:dateModified ?dateModified` is required and is the ORDER BY key;
         // a dense string property missing on a node reads back as Some(""), so
         // treat empty as absent. Carry the value to sort without re-lookup.
