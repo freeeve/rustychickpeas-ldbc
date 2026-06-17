@@ -127,9 +127,9 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
     // Hoist day/ms columns (no pi64 key re-resolution per message), and keep only
     // the top 20 by (ms desc, id asc) in a heap instead of collecting every FoF
     // message (millions) and sorting the lot.
-    let day_col = g.i64_col("day");
+    let day_col = g.col("day").map(|c| c.i64());
     let day_s = day_col.and_then(|c| c.as_slice());
-    let ms_col = g.i64_col("ms");
+    let ms_col = g.col("ms").map(|c| c.i64());
     let ms_s = ms_col.and_then(|c| c.as_slice());
     let day_of = |n: u32| -> i64 {
         match day_s {
@@ -265,7 +265,7 @@ pub fn ic4_new_topics(
     let end_day = start_day + duration_days;
     let posts = g.nodes_with_label("Post");
     // Hoist the day column (avoid pi64 re-resolving "day" per post).
-    let day_col = g.i64_col("day");
+    let day_col = g.col("day").map(|c| c.i64());
     let day_s = day_col.and_then(|c| c.as_slice());
     let day_of = |post: u32| -> i64 {
         match day_s {
@@ -528,7 +528,7 @@ pub fn ic3_friends_two_countries(
     let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     // Hoist the day column once instead of pi64() re-resolving the "day" key
     // (an interner lookup) for every friend-of-friend message.
-    let day_col = g.i64_col("day");
+    let day_col = g.col("day").map(|c| c.i64());
     let day_s = day_col.and_then(|c| c.as_slice());
     let day_of = |msg: u32| -> i64 {
         match day_s {
@@ -571,7 +571,7 @@ pub fn ic3_friends_two_countries(
 /// members. Returns (forum, post_count), (count desc, flid asc), top 20.
 pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32, u32)> {
     let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
-    let hd_col = g.i64_rel_col("hd");
+    let hd_col = g.rel_col("hd").map(|c| c.i64());
     // Member-centric: for each qualifying member, count only THEIR posts whose
     // container forum is one they joined after min_day. This touches only members'
     // posts, not every post of every forum (a post has one container Post-forum;
@@ -616,7 +616,7 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
     let friends: HashSet<u32> = g
         .neighbors_by_type(person, Direction::Outgoing, "knows")
         .collect();
-    let ld_col = g.i64_rel_col("ld");
+    let ld_col = g.rel_col("ld").map(|c| c.i64());
     let mut best: HashMap<u32, (i64, u32)> = HashMap::new();
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         for e in g.relationships(msg, Direction::Incoming, &["likes"]) {
@@ -733,7 +733,7 @@ pub fn ic11_job_referral(
             }
         }
     }
-    let wf_col = g.i64_rel_col("wf");
+    let wf_col = g.rel_col("wf").map(|c| c.i64());
     let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     // Top 10 by (workFrom asc, plid asc, company name desc) in a heap; plid/name
     // resolved once per matching row, not per sort comparison. (The workAt scan

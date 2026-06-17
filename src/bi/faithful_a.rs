@@ -14,8 +14,12 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
     // scan). Each label is aggregated with NodeSet::par_fold — a parallel
     // hash-aggregate that mirrors Kùzu's threaded scan; the parallelism (and the
     // contiguous-range fast path) lives in core, so the query stays rayon-free.
-    let (day_col, content_col, len_col, year_col) =
-        (g.i64_col("day"), g.bool_col("content"), g.i64_col("len"), g.i64_col("year"));
+    let (day_col, content_col, len_col, year_col) = (
+        g.col("day").map(|c| c.i64()),
+        g.col("content").map(|c| c.bool()),
+        g.col("len").map(|c| c.i64()),
+        g.col("year").map(|c| c.i64()),
+    );
     // Dense columns expose a typed slice: index it directly instead of building
     // a ValueId per cell. Falls back to the per-cell read for sparse/absent cols.
     let (day_s, len_s, year_s) = (
@@ -83,8 +87,7 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             a.1 += b.1;
             a
         };
-        let (part, sub_total) =
-            nodes.par_fold(|| (Q1Groups::new(), 0u64), fold_one, reduce_two);
+        let (part, sub_total) = nodes.par_fold(|| (Q1Groups::new(), 0u64), fold_one, reduce_two);
         for (k, (n, s)) in part {
             let e = groups.entry(k).or_insert((0, 0));
             e.0 += n;
@@ -119,7 +122,9 @@ pub(crate) fn q2_tag_evolution(
     let mut qualifying: FastSet<u32> = FastSet::new();
     if let Some(tags) = g.nodes_with_label("Tag") {
         for t in tags.iter() {
-            if g.neighbors_by_type(t, Direction::Outgoing, "hasType").any(|n| n == target) {
+            if g.neighbors_by_type(t, Direction::Outgoing, "hasType")
+                .any(|n| n == target)
+            {
                 qualifying.insert(t);
             }
         }
@@ -129,7 +134,7 @@ pub(crate) fn q2_tag_evolution(
     let (w2_lo, w2_hi) = (date0_day + 100, date0_day + 200);
     // Resolve the day column + hasTag type once; the window filter scans every msg.
     // Index the dense slice directly, falling back to the per-cell read.
-    let day_col = g.i64_col("day");
+    let day_col = g.col("day").map(|c| c.i64());
     let day_s = day_col.and_then(|c| c.as_slice());
     let mut c1: FastMap<u32, u64> = FastMap::new();
     let mut c2: FastMap<u32, u64> = FastMap::new();
@@ -205,7 +210,9 @@ pub(crate) fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(Strin
     let mut related: HashMap<u32, HashSet<u32>> = HashMap::new();
     for msg in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
         for comment in g.neighbors_by_type(msg, Direction::Incoming, &["replyOf"]) {
-            let ctags: Vec<u32> = g.neighbors_by_type(comment, Direction::Outgoing, "hasTag").collect();
+            let ctags: Vec<u32> = g
+                .neighbors_by_type(comment, Direction::Outgoing, "hasTag")
+                .collect();
             if !ctags.contains(&target) {
                 for &rt in &ctags {
                     related.entry(rt).or_default().insert(comment);
@@ -233,7 +240,9 @@ pub(crate) fn q12_message_counts(
     // terminal (root Post) via the functional `replyOf` chain; index it (built
     // once) and read the root's language. A Post has no `replyOf` parent, so its
     // terminal is itself.
-    let reply_roots = g.rel_type("replyOf").map(|rt| g.chain_roots(Direction::Outgoing, rt));
+    let reply_roots = g
+        .rel_type("replyOf")
+        .map(|rt| g.chain_roots(Direction::Outgoing, rt));
     let root_lang = |start: u32| -> Option<&str> {
         let root = match &reply_roots {
             Some(roots) => roots[start as usize],
@@ -300,14 +309,21 @@ pub(crate) fn q12_message_counts(
 /// Q5 — Most active posters of a given topic. For a tag, score each creator of
 /// tagged messages by 1*messages + 2*replies + 10*likes-received, top 100 by
 /// score. Returns (person, messages, replies, likes, score). Cypher: bi-5.cypher.
-pub(crate) fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u64, u64, u64, u64)> {
+pub(crate) fn q5_active_posters(
+    g: &GraphSnapshot,
+    tag_name: &str,
+) -> Vec<(u32, u64, u64, u64, u64)> {
     let Some(target) = tag_by_name(g, tag_name) else {
         return Vec::new();
     };
     let mut agg: HashMap<u32, (u64, u64, u64)> = HashMap::new(); // person -> (msgs, replies, likes)
     for message in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
-        let likes = g.neighbors_by_type(message, Direction::Incoming, "likes").count() as u64;
-        let replies = g.neighbors_by_type(message, Direction::Incoming, "replyOf").count() as u64;
+        let likes = g
+            .neighbors_by_type(message, Direction::Incoming, "likes")
+            .count() as u64;
+        let replies = g
+            .neighbors_by_type(message, Direction::Incoming, "replyOf")
+            .count() as u64;
         for person in g.neighbors_by_type(message, Direction::Incoming, &["hasCreator"]) {
             let e = agg.entry(person).or_insert((0, 0, 0));
             e.0 += 1;
@@ -321,7 +337,7 @@ pub(crate) fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, 
         .collect();
     // Hoist the plid column once so the comparator indexes it instead of
     // re-resolving the property key on every comparison.
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.4.cmp(&a.4)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -339,7 +355,9 @@ pub(crate) fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u
     };
     let mut p1_to_p2: HashMap<u32, HashSet<u32>> = HashMap::new();
     for message1 in g.neighbors_by_type(target, Direction::Incoming, &["hasTag"]) {
-        let likers: Vec<u32> = g.neighbors_by_type(message1, Direction::Incoming, "likes").collect();
+        let likers: Vec<u32> = g
+            .neighbors_by_type(message1, Direction::Incoming, "likes")
+            .collect();
         if likers.is_empty() {
             continue;
         }
@@ -356,12 +374,15 @@ pub(crate) fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u
             let score: u64 = p2set
                 .iter()
                 .flat_map(|&p2| g.neighbors_by_type(p2, Direction::Outgoing, &["hasCreator"]))
-                .map(|m2| g.neighbors_by_type(m2, Direction::Incoming, "likes").count() as u64)
+                .map(|m2| {
+                    g.neighbors_by_type(m2, Direction::Incoming, "likes")
+                        .count() as u64
+                })
                 .sum();
             (p1, score)
         })
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -414,7 +435,7 @@ pub(crate) fn q8_central_person(
             (p, s, fs)
         })
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
@@ -451,7 +472,9 @@ pub(crate) fn q11_friend_triangles(
     // Hoist the edge `kd` (creationDate) column once; the traversal reads it for
     // every knows edge, so index it by CSR position instead of re-resolving the
     // property key per edge.
-    let kd_col = g.property_key_from_str("kd").and_then(|id| g.rel_columns.get(&id));
+    let kd_col = g
+        .property_key_from_str("kd")
+        .and_then(|id| g.rel_columns.get(&id));
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
     for &a in &in_country {
         for e in g.relationships(a, Direction::Outgoing, &["knows"]) {
@@ -489,11 +512,15 @@ pub(crate) fn q11_friend_triangles(
 /// Q9 — Top thread initiators. For each person, count their posts in a date
 /// window (threads) and the messages in those posts' reply trees, also in the
 /// window. Cypher: bi-9.cypher.
-pub(crate) fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i64) -> Vec<(u32, u64, u64)> {
+pub(crate) fn q9_thread_initiators(
+    g: &GraphSnapshot,
+    start_day: i64,
+    end_day: i64,
+) -> Vec<(u32, u64, u64)> {
     let mut per_person: HashMap<u32, (u64, u64)> = HashMap::new(); // (threads, messages)
-    // Hoist the day column once; the reply-tree DFS reads it for every visited
-    // message, so index the dense slice instead of re-resolving the key per node.
-    let day_col = g.i64_col("day");
+                                                                   // Hoist the day column once; the reply-tree DFS reads it for every visited
+                                                                   // message, so index the dense slice instead of re-resolving the key per node.
+    let day_col = g.col("day").map(|c| c.i64());
     let day_s = day_col.and_then(|c| c.as_slice());
     let day_at = |n: u32| -> i64 {
         match day_s {
@@ -533,7 +560,7 @@ pub(crate) fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i
         .into_iter()
         .map(|(p, (t, m))| (p, t, m))
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -541,4 +568,3 @@ pub(crate) fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i
     rows.truncate(100);
     rows
 }
-

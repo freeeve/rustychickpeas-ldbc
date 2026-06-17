@@ -55,7 +55,7 @@ pub(crate) fn q13_zombies(
             (z, zlc, tlc)
         })
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         let sa = if a.2 == 0 {
             0.0
@@ -155,18 +155,14 @@ pub(crate) fn q19_interaction_path(
             // Bidirectional search per (p1, p2): meets in the middle instead of
             // flooding the whole ~9.5k-node component to reach just a few targets.
             for &p2 in &c2 {
-                if let Some(d) = g.weighted_shortest_path(
-                    p1,
-                    p2,
-                    Direction::Both,
-                    "knows",
-                    |from, rel| {
+                if let Some(d) =
+                    g.weighted_shortest_path(p1, p2, Direction::Both, "knows", |from, rel| {
                         match interaction.get(&(from.min(rel.neighbor), from.max(rel.neighbor))) {
                             Some(&n) if n > 0 => 1.0 / n as f64,
                             _ => f64::INFINITY, // know each other but never interacted
                         }
-                    },
-                ) {
+                    })
+                {
                     acc.push((p1, p2, d));
                 }
             }
@@ -177,7 +173,7 @@ pub(crate) fn q19_interaction_path(
             a
         },
     );
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     results.sort_by(|a, b| {
         a.2.partial_cmp(&b.2)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -206,7 +202,9 @@ pub(crate) fn build_studyat(g: &GraphSnapshot) -> HashMap<u32, Vec<(u32, i64)>> 
     let mut m: HashMap<u32, Vec<(u32, i64)>> = HashMap::new();
     // Hoist the edge `cy` (classYear) column once instead of resolving the key
     // per studyAt edge.
-    let cy_col = g.property_key_from_str("cy").and_then(|id| g.rel_columns.get(&id));
+    let cy_col = g
+        .property_key_from_str("cy")
+        .and_then(|id| g.rel_columns.get(&id));
     if let Some(persons) = g.nodes_with_label("Person") {
         for p in persons.iter() {
             let recs: Vec<(u32, i64)> = g
@@ -291,7 +289,7 @@ pub(crate) fn q20_recruitment(
             }
         }
     }
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     results.sort_by(|a, b| {
         a.1.partial_cmp(&b.1)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -331,7 +329,7 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
         .into_iter()
         .map(|((p1, p2), ms)| (p1, p2, ms.len() as u64))
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -345,13 +343,17 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
 /// knows-pair (person1 in that city, person2 in country2) where score rewards
 /// the presence of interaction types (4: p1 replied to p2; 1: p2 replied to p1;
 /// 10: p1 likes p2's message; 1: p2 likes p1's). Cypher: bi-14.cypher.
-pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name: &str) -> Vec<(u32, u32, String, i64)> {
+pub(crate) fn q14_international_dialog(
+    g: &GraphSnapshot,
+    c1_name: &str,
+    c2_name: &str,
+) -> Vec<(u32, u32, String, i64)> {
     let country = |name: &str| g.node_by_label_property("Country", "name", name);
     let (Some(country1), Some(country2)) = (country(c1_name), country(c2_name)) else {
         return Vec::new();
     };
     // Hoist the plid column once for the candidate tiebreaks below.
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     // persons whose message `p` replied to (via p's comments).
     let commented_on = |p: u32| -> HashSet<u32> {
         let mut s = HashSet::new();
@@ -436,4 +438,3 @@ pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name
     rows.truncate(100);
     rows
 }
-

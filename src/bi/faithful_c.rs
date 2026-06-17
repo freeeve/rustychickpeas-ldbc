@@ -14,7 +14,12 @@ use crate::props::*;
 /// Cypher: bi-16.cypher.
 /// Q16 per-param: persons who made a message with `tag_name` on `day` and have
 /// at most `max_knows` friends who did the same, with their message count.
-pub(crate) fn q16_param_result(g: &GraphSnapshot, tag_name: &str, day: i64, max_knows: i64) -> HashMap<u32, i64> {
+pub(crate) fn q16_param_result(
+    g: &GraphSnapshot,
+    tag_name: &str,
+    day: i64,
+    max_knows: i64,
+) -> HashMap<u32, i64> {
     let Some(tag) = tag_by_name(g, tag_name) else {
         return HashMap::new();
     };
@@ -49,7 +54,7 @@ pub(crate) fn q16_fake_news(
         .iter()
         .filter_map(|(&p, &ca)| rb.get(&p).map(|&cb| (p, ca, cb)))
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
@@ -97,7 +102,9 @@ pub(crate) fn q10_experts(
             continue;
         }
         for msg in g.neighbors_by_type(expert, Direction::Outgoing, &["hasCreator"]) {
-            let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]).collect::<Vec<_>>();
+            let tags = g
+                .neighbors_by_type(msg, Direction::Outgoing, &["hasTag"])
+                .collect::<Vec<_>>();
             if tags.iter().any(|t| class_tags.contains(t)) {
                 for &t in &tags {
                     counts.entry((expert, t)).or_default().insert(msg);
@@ -107,9 +114,15 @@ pub(crate) fn q10_experts(
     }
     let mut rows: Vec<(u32, String, i64)> = counts
         .into_iter()
-        .map(|((e, t), msgs)| (e, pstr(g, t, "name").unwrap_or("").to_string(), msgs.len() as i64))
+        .map(|((e, t), msgs)| {
+            (
+                e,
+                pstr(g, t, "name").unwrap_or("").to_string(),
+                msgs.len() as i64,
+            )
+        })
         .collect();
-    let plid_col = g.i64_col("plid");
+    let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(a.1.cmp(&b.1))
@@ -122,7 +135,11 @@ pub(crate) fn q10_experts(
 /// Q3 — Popular topics in a country. For forums whose moderator lives in
 /// `country`, count distinct messages in the forums' post reply-trees that carry
 /// a tag of `tagclass`; top 20 by count. Cypher: bi-3.cypher.
-pub(crate) fn q3_popular_topics(g: &GraphSnapshot, country_name: &str, tagclass_name: &str) -> Vec<(i64, String, i64, i64, i64)> {
+pub(crate) fn q3_popular_topics(
+    g: &GraphSnapshot,
+    country_name: &str,
+    tagclass_name: &str,
+) -> Vec<(i64, String, i64, i64, i64)> {
     let country = g.node_by_label_property("Country", "name", country_name);
     let tc = g.node_by_label_property("TagClass", "name", tagclass_name);
     let (Some(country), Some(tc)) = (country, tc) else {
@@ -181,14 +198,7 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
     // The string-based, Vec-returning neighbors_by_type allocated a HashSet + Vec
     // on every call (~74% of this query's time); the zero-alloc *_of_type
     // accessors below match the type by an integer compare instead.
-    let (
-        Some(t_member),
-        Some(t_loc),
-        Some(t_part),
-        Some(t_cont),
-        Some(t_creator),
-        Some(t_reply),
-    ) = (
+    let (Some(t_member), Some(t_loc), Some(t_part), Some(t_cont), Some(t_creator), Some(t_reply)) = (
         g.relationship_type_from_str("hasMember"),
         g.relationship_type_from_str("isLocatedIn"),
         g.relationship_type_from_str("isPartOf"),
@@ -271,7 +281,9 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
     let mut top_flids: Vec<i64> = top_forums.iter().map(|&f| pi64(g, f, "flid")).collect();
     top_flids.sort();
     (
-        rows.into_iter().map(|(p, c)| (pi64(g, p, "plid"), c)).collect(),
+        rows.into_iter()
+            .map(|(p, c)| (pi64(g, p, "plid"), c))
+            .collect(),
         top_flids,
     )
 }
@@ -281,7 +293,13 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
 /// people whose thread root-post forum was created in [start_day, end_day]
 /// (1.0 if a Post is involved, else 0.5). Returns the path cost, or -1 if
 /// unreachable. Cypher: bi-15.cypher.
-pub(crate) fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: i64, end_day: i64) -> f64 {
+pub(crate) fn q15_weighted_path(
+    g: &GraphSnapshot,
+    p1: i64,
+    p2: i64,
+    start_day: i64,
+    end_day: i64,
+) -> f64 {
     use hashbrown::HashMap as FastMap;
     let (Some(src), Some(tgt)) = (person_by_plid(g, p1), person_by_plid(g, p2)) else {
         return -1.0;
@@ -307,8 +325,7 @@ pub(crate) fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: 
             comments.par_fold(
                 FastMap::<(u32, u32), f64>::new,
                 |mut acc, c| {
-                    let Some(parent) = g.first_neighbor(c, Direction::Outgoing, t_reply)
-                    else {
+                    let Some(parent) = g.first_neighbor(c, Direction::Outgoing, t_reply) else {
                         return acc;
                     };
                     let (Some(cc), Some(pc)) = (creator(c), creator(parent)) else {
@@ -353,7 +370,11 @@ pub(crate) fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: 
 /// posted a tagged comment replying to message2 (by a different forum1 member
 /// person3, also tagged) in a different forum2; message2 is >delta hours after
 /// message1; and person1 is not a forum2 member. Top 10. Cypher: bi-17.cypher.
-pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, delta_hours: i64) -> Vec<(i64, i64)> {
+pub(crate) fn q17_information_propagation(
+    g: &GraphSnapshot,
+    tag_name: &str,
+    delta_hours: i64,
+) -> Vec<(i64, i64)> {
     let Some(tag) = tag_by_name(g, tag_name) else {
         return Vec::new();
     };
@@ -364,7 +385,9 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
     };
     // Forest-root array for replyOf, built once; the closure indexes it then
     // takes one containerOf hop to the forum.
-    let reply_roots = g.rel_type("replyOf").map(|rt| g.chain_roots(Direction::Outgoing, rt));
+    let reply_roots = g
+        .rel_type("replyOf")
+        .map(|rt| g.chain_roots(Direction::Outgoing, rt));
     let forum_of = |g: &GraphSnapshot, m: u32| -> Option<u32> {
         let root = match &reply_roots {
             Some(roots) => roots[m as usize],
@@ -373,7 +396,9 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
         g.neighbors_by_type(root, Direction::Incoming, &["containerOf"])
             .next()
     };
-    let tagged: Vec<u32> = g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]).collect();
+    let tagged: Vec<u32> = g
+        .neighbors_by_type(tag, Direction::Incoming, &["hasTag"])
+        .collect();
     let tagged_set: HashSet<u32> = tagged.iter().copied().collect();
     // message1 tuples (person1, forum1, ms1) and candidate (person2, person3, message2, forum2, ms2).
     let mut m1_list: Vec<(u32, u32, i64)> = Vec::new();
@@ -423,7 +448,9 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
             }
         }
     }
-    let rows = counts.into_iter().map(|(p, m)| (pi64(g, p, "plid"), m.len() as i64));
+    let rows = counts
+        .into_iter()
+        .map(|(p, m)| (pi64(g, p, "plid"), m.len() as i64));
     top_k_by_key(rows, 10)
 }
 
@@ -434,7 +461,9 @@ pub(crate) fn bi1_tag_evolution(g: &GraphSnapshot) -> usize {
     for label in ["Post", "Comment"] {
         if let Some(nodes) = g.nodes_with_label(label) {
             for msg in nodes.iter() {
-                let tags = g.neighbors_by_type(msg, Direction::Outgoing, &["hasTag"]).collect::<Vec<_>>();
+                let tags = g
+                    .neighbors_by_type(msg, Direction::Outgoing, &["hasTag"])
+                    .collect::<Vec<_>>();
                 for i in 0..tags.len() {
                     for j in (i + 1)..tags.len() {
                         let pair = if tags[i] < tags[j] {
@@ -479,4 +508,3 @@ pub(crate) fn top_creators(g: &GraphSnapshot, label: &str) -> usize {
     }
     counts.len()
 }
-
