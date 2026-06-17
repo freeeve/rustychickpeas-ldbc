@@ -368,6 +368,19 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
         g.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next()
     };
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    // Hoist the day column once instead of pi64() re-resolving the "day" key
+    // (an interner lookup) for every friend-of-friend message.
+    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
+    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let day_of = |msg: u32| -> i64 {
+        match day_s {
+            Some(s) => s[msg as usize],
+            None => match day_col.and_then(|c| c.get(msg)) {
+                Some(ValueId::I64(d)) => d,
+                _ => 0,
+            },
+        }
+    };
     let mut rows: Vec<(u32, u32, u32)> = Vec::new();
     for (&p, &d) in &reach {
         if d == 0 || matches!(home_country(p), Some(c) if c == cx || c == cy) {
@@ -375,7 +388,7 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
         }
         let (mut xc, mut yc) = (0u32, 0u32);
         for msg in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
-            let day = pi64(g, msg, "day");
+            let day = day_of(msg);
             if day < start_day || day >= end_day {
                 continue;
             }
