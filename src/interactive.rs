@@ -347,20 +347,74 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
     };
     let posts = g.nodes_with_label("Post");
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+
+    // Dense co-occurrence counts over the contiguous Tag id range (like IC4), a
+    // reusable per-post tag buffer (no Vec allocation per post), and a size-10
+    // heap for the result instead of collect-all-then-sort.
+    if let Some(range) = g.nodes_with_label("Tag").and_then(|t| t.as_range()) {
+        let lo = range.start;
+        let mut count = vec![0u32; (range.end - lo) as usize];
+        let mut tags: Vec<u32> = Vec::new();
+        for (&p, &d) in &reach {
+            if d == 0 {
+                continue;
+            }
+            for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
+                if !posts.is_some_and(|s| s.contains(post)) {
+                    continue; // Posts only
+                }
+                tags.clear();
+                tags.extend(g.neighbors_by_type(post, Direction::Outgoing, "hasTag"));
+                if !tags.contains(&target) {
+                    continue; // post must carry the given tag
+                }
+                for &t in &tags {
+                    if t != target {
+                        count[(t - lo) as usize] += 1;
+                    }
+                }
+            }
+        }
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let mut top: BinaryHeap<Reverse<(u32, Reverse<&str>, u32)>> = BinaryHeap::with_capacity(11);
+        for i in 0..count.len() {
+            let c = count[i];
+            if c == 0 {
+                continue;
+            }
+            let tag = lo + i as u32;
+            let item = (c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag);
+            if top.len() < 10 {
+                top.push(Reverse(item));
+            } else if item > top.peek().unwrap().0 {
+                top.pop();
+                top.push(Reverse(item));
+            }
+        }
+        let mut rows: Vec<(u32, u32)> = top
+            .into_iter()
+            .map(|Reverse((c, _, tag))| (tag, c))
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+        return rows;
+    }
+
+    // Fallback for non-contiguous Tag ids: HashMap (still reuses the tag buffer).
     let mut counts: HashMap<u32, u32> = HashMap::new();
+    let mut tags: Vec<u32> = Vec::new();
     for (&p, &d) in &reach {
         if d == 0 {
             continue;
         }
         for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
             if !posts.is_some_and(|s| s.contains(post)) {
-                continue; // Posts only
+                continue;
             }
-            let tags: Vec<u32> = g
-                .neighbors_by_type(post, Direction::Outgoing, "hasTag")
-                .collect();
+            tags.clear();
+            tags.extend(g.neighbors_by_type(post, Direction::Outgoing, "hasTag"));
             if !tags.contains(&target) {
-                continue; // post must carry the given tag
+                continue;
             }
             for &t in &tags {
                 if t != target {
