@@ -10,11 +10,11 @@
 //! edge-property-during-traversal capability (per-edge `ts` / `amt` read via the
 //! relationship accessor's CSR position) — the queries below (`tasks/008`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::time::Instant;
 
-use rustychickpeas_core::{GraphBuilder, GraphSnapshot, PropertyValue};
+use rustychickpeas_core::{Direction, GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
 
 /// Load report, mirroring the BI loader.
 pub struct Stats {
@@ -332,45 +332,181 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
     ))
 }
 
-/// TCR1-style — given an account, trace all `transfer` paths (≤k hops) reaching
-/// it inside `[start_ms, end_ms]`, returning the touched accounts. The window
-/// filter reads each edge's timestamp during traversal.
+// --- queries (tasks/008): temporal traversals that read each edge's ts / amount
+// mid-traversal via the relationship accessor's CSR position. ---
+
+/// Edge timestamp (`ts`, epoch ms) at CSR position `pos`.
+fn rel_ts(g: &GraphSnapshot, pos: u32) -> i64 {
+    match g.relationship_property(pos, "ts") {
+        Some(ValueId::I64(t)) => t,
+        _ => i64::MIN,
+    }
+}
+
+/// Edge amount (`amt`) at CSR position `pos`.
+fn rel_amt(g: &GraphSnapshot, pos: u32) -> f64 {
+    g.relationship_property(pos, "amt")
+        .and_then(|v| v.to_f64())
+        .unwrap_or(0.0)
+}
+
+/// TCR1-style — trace `transfer` paths (≤`max_hops`) feeding into `account`
+/// within `[start_ms, end_ms]`, returning the upstream accounts. The window
+/// filter reads each edge's timestamp during the reverse BFS.
 pub fn trace_transfers_in(
-    _g: &GraphSnapshot,
-    _account: u32,
-    _start_ms: i64,
-    _end_ms: i64,
-    _max_hops: u32,
+    g: &GraphSnapshot,
+    account: u32,
+    start_ms: i64,
+    end_ms: i64,
+    max_hops: u32,
 ) -> Vec<u32> {
-    todo!("bounded reverse BFS over `transfer`, filter edge timestamp in window")
+    let mut visited = HashSet::new();
+    visited.insert(account);
+    let mut queue: VecDeque<(u32, u32)> = VecDeque::new();
+    queue.push_back((account, 0));
+    let mut reached = Vec::new();
+    while let Some((node, depth)) = queue.pop_front() {
+        if depth >= max_hops {
+            continue;
+        }
+        for r in g.relationships(node, Direction::Incoming, "transfer") {
+            let ts = rel_ts(g, r.pos);
+            if ts < start_ms || ts > end_ms {
+                continue;
+            }
+            if visited.insert(r.neighbor) {
+                reached.push(r.neighbor);
+                queue.push_back((r.neighbor, depth + 1));
+            }
+        }
+    }
+    reached
 }
 
-/// TCR8-style — detect fund-transfer cycles through a given account where each
-/// hop is strictly increasing in time and the amount exceeds a threshold.
+/// Max cycle length and a cap on cycles returned, to keep the DFS bounded.
+const MAX_CYCLE_LEN: usize = 6;
+const MAX_CYCLES: usize = 1000;
+
+/// TCR8-style — fund-transfer cycles back to `account` where each hop is strictly
+/// later in time, each amount ≥ `min_amount`, and the cycle completes within
+/// `window_ms` of its first hop.
 pub fn transfer_cycles(
-    _g: &GraphSnapshot,
-    _account: u32,
-    _min_amount: f64,
-    _window_ms: i64,
+    g: &GraphSnapshot,
+    account: u32,
+    min_amount: f64,
+    window_ms: i64,
 ) -> Vec<Vec<u32>> {
-    todo!("DFS for time-ordered cycles; prune on amount and monotone timestamp")
+    let mut cycles = Vec::new();
+    let mut path = vec![account];
+    let mut on_path = HashSet::new();
+    on_path.insert(account);
+    cycle_dfs(
+        g,
+        account,
+        account,
+        i64::MIN,
+        None,
+        min_amount,
+        window_ms,
+        &mut path,
+        &mut on_path,
+        &mut cycles,
+    );
+    cycles
 }
 
-/// TCR3-style — shortest `transfer` path between two accounts within a window;
-/// edge weight is unit (hop count). Reuses `g.dijkstra`, with the weight closure
-/// rejecting out-of-window edges via the relationship accessor's `pos`.
+#[allow(clippy::too_many_arguments)]
+fn cycle_dfs(
+    g: &GraphSnapshot,
+    start: u32,
+    node: u32,
+    last_ts: i64,
+    first_ts: Option<i64>,
+    min_amount: f64,
+    window_ms: i64,
+    path: &mut Vec<u32>,
+    on_path: &mut HashSet<u32>,
+    out: &mut Vec<Vec<u32>>,
+) {
+    if path.len() > MAX_CYCLE_LEN || out.len() >= MAX_CYCLES {
+        return;
+    }
+    for r in g.relationships(node, Direction::Outgoing, "transfer") {
+        let ts = rel_ts(g, r.pos);
+        if ts <= last_ts || rel_amt(g, r.pos) < min_amount {
+            continue; // strictly increasing time + amount threshold
+        }
+        let f0 = first_ts.unwrap_or(ts);
+        if ts - f0 > window_ms {
+            continue; // outside the cycle window
+        }
+        if r.neighbor == start {
+            if path.len() >= 2 {
+                out.push(path.clone());
+            }
+            continue;
+        }
+        if on_path.contains(&r.neighbor) {
+            continue;
+        }
+        path.push(r.neighbor);
+        on_path.insert(r.neighbor);
+        cycle_dfs(
+            g,
+            start,
+            r.neighbor,
+            ts,
+            Some(f0),
+            min_amount,
+            window_ms,
+            path,
+            on_path,
+            out,
+        );
+        path.pop();
+        on_path.remove(&r.neighbor);
+    }
+}
+
+/// TCR3-style — shortest in-window `transfer` path (hop count) from `src` to
+/// `dst`, or -1 if unreachable. Out-of-window edges are pruned by the Dijkstra
+/// weight closure reading each edge's timestamp.
 pub fn shortest_transfer_path(
-    _g: &GraphSnapshot,
-    _src: u32,
-    _dst: u32,
-    _start_ms: i64,
-    _end_ms: i64,
+    g: &GraphSnapshot,
+    src: u32,
+    dst: u32,
+    start_ms: i64,
+    end_ms: i64,
 ) -> i64 {
-    todo!("g.dijkstra over `transfer` with in-window guard in the weight closure")
+    g.weighted_shortest_path(src, dst, Direction::Outgoing, "transfer", |_from, r| {
+        if (start_ms..=end_ms).contains(&rel_ts(g, r.pos)) {
+            1.0
+        } else {
+            f64::INFINITY
+        }
+    })
+    .map(|cost| cost as i64)
+    .unwrap_or(-1)
 }
 
-/// TCR11-style — sum a person's loan exposure by walking `guarantee` chains and
-/// the `apply`/`own` edges out to the loans they are on the hook for.
-pub fn guarantee_exposure(_g: &GraphSnapshot, _person: u32) -> f64 {
-    todo!("traverse guarantee chain -> apply/own -> loan, accumulate amounts")
+/// TCR11-style — a person's loan exposure: walk the `guarantee` chain out from
+/// `person`, summing the `apply` (loan) amounts they and everyone they guarantee
+/// are on the hook for.
+pub fn guarantee_exposure(g: &GraphSnapshot, person: u32) -> f64 {
+    let mut visited = HashSet::new();
+    visited.insert(person);
+    let mut queue = VecDeque::new();
+    queue.push_back(person);
+    let mut total = 0.0;
+    while let Some(p) = queue.pop_front() {
+        for r in g.relationships(p, Direction::Outgoing, "apply") {
+            total += rel_amt(g, r.pos);
+        }
+        for r in g.relationships(p, Direction::Outgoing, "guarantee") {
+            if visited.insert(r.neighbor) {
+                queue.push_back(r.neighbor);
+            }
+        }
+    }
+    total
 }
