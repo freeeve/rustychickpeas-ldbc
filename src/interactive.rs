@@ -596,12 +596,26 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
                 .or_insert((lms, msg));
         }
     }
-    let mut rows: Vec<(u32, i64, u32, bool)> = best
+    // Keep the top 20 by (likeDate desc, plid asc) in a size-20 heap instead of
+    // sorting every liker — the full sort (a plid lookup per comparison) dominated.
+    // plid is resolved once per liker here, not O(n log n) times.
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(i64, Reverse<i64>, u32, u32)>> = BinaryHeap::with_capacity(21);
+    for (&liker, &(lms, msg)) in &best {
+        let item = (lms, Reverse(pi64(g, liker, "plid")), liker, msg);
+        if top.len() < 20 {
+            top.push(Reverse(item));
+        } else if item > top.peek().unwrap().0 {
+            top.pop();
+            top.push(Reverse(item));
+        }
+    }
+    let mut rows: Vec<(u32, i64, u32, bool)> = top
         .into_iter()
-        .map(|(liker, (lms, msg))| (liker, lms, msg, !friends.contains(&liker)))
+        .map(|Reverse((lms, _, liker, msg))| (liker, lms, msg, !friends.contains(&liker)))
         .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
-    rows.truncate(20);
     rows
 }
 
