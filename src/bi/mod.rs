@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use rustychickpeas_core::{Column, ValueId};
+use rustychickpeas_core::{BoolCol, I64Col};
 
 use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::loader::load_graph;
@@ -22,14 +22,19 @@ use faithful_c::*;
 /// One Q1 output group: (year, isComment, lengthCategory, messageCount, sumLength).
 pub(crate) type Q1Row = (i64, bool, u8, u64, i64);
 
-/// Read a dense/sparse i64 column at `n` (0 if absent). Free fn (not a closure)
-/// so it stays `Sync` for the parallel scan in Q1.
+/// Read a resolved i64 column at `n` (0 if absent). Takes the [`I64Col`] reader
+/// (dense-slice fast path) by value — it is `Copy` and `Sync`, so it stays usable
+/// in the parallel scan in Q1.
 #[inline]
-pub(crate) fn col_i64(c: Option<&Column>, n: u32) -> i64 {
-    match c.and_then(|c| c.get(n)) {
-        Some(ValueId::I64(v)) => v,
-        _ => 0,
-    }
+pub(crate) fn col_i64(c: Option<I64Col>, n: u32) -> i64 {
+    c.and_then(|c| c.get(n)).unwrap_or(0)
+}
+
+/// Read a resolved boolean column at `n` (false if absent) — the boolean analogue
+/// of [`col_i64`].
+#[inline]
+pub(crate) fn col_bool(c: Option<BoolCol>, n: u32) -> bool {
+    c.and_then(|c| c.get(n)).unwrap_or(false)
 }
 pub fn run() -> Result<()> {
     let default = PathBuf::from(

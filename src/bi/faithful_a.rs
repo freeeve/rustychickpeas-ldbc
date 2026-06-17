@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
 
-use super::{col_i64, Q1Row};
+use super::{col_bool, col_i64, Q1Row};
 use crate::props::*;
 
 type Q1Groups = hashbrown::HashMap<(i64, bool, u8), (u64, i64)>;
@@ -14,17 +14,16 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
     // scan). Each label is aggregated with NodeSet::par_fold — a parallel
     // hash-aggregate that mirrors Kùzu's threaded scan; the parallelism (and the
     // contiguous-range fast path) lives in core, so the query stays rayon-free.
-    let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
     let (day_col, content_col, len_col, year_col) =
-        (col("day"), col("content"), col("len"), col("year"));
+        (g.i64_col("day"), g.bool_col("content"), g.i64_col("len"), g.i64_col("year"));
     // Dense columns expose a typed slice: index it directly instead of building
     // a ValueId per cell. Falls back to the per-cell read for sparse/absent cols.
     let (day_s, len_s, year_s) = (
-        day_col.and_then(|c| c.as_i64_slice()),
-        len_col.and_then(|c| c.as_i64_slice()),
-        year_col.and_then(|c| c.as_i64_slice()),
+        day_col.and_then(|c| c.as_slice()),
+        len_col.and_then(|c| c.as_slice()),
+        year_col.and_then(|c| c.as_slice()),
     );
-    let content_s = content_col.and_then(|c| c.as_bool_slice());
+    let content_s = content_col.and_then(|c| c.as_slice());
 
     let mut groups: Q1Groups = Q1Groups::new();
     let mut total = 0u64;
@@ -48,7 +47,7 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             acc.1 += 1;
             let has_content = match content_s {
                 Some(s) => s[i],
-                None => matches!(content_col.and_then(|c| c.get(msg)), Some(ValueId::Bool(true))),
+                None => col_bool(content_col, msg),
             };
             if !has_content {
                 return acc;
@@ -133,8 +132,8 @@ pub(crate) fn q2_tag_evolution(
     let (w2_lo, w2_hi) = (date0_day + 100, date0_day + 200);
     // Resolve the day column + hasTag type once; the window filter scans every msg.
     // Index the dense slice directly, falling back to the per-cell read.
-    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
-    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let day_col = g.i64_col("day");
+    let day_s = day_col.and_then(|c| c.as_slice());
     let mut c1: FastMap<u32, u64> = FastMap::new();
     let mut c2: FastMap<u32, u64> = FastMap::new();
     if let Some(t_hastag) = g.rel_type("hasTag") {
@@ -327,7 +326,7 @@ pub(crate) fn q5_active_posters(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, 
         .collect();
     // Hoist the plid column once so the comparator indexes it instead of
     // re-resolving the property key on every comparison.
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         b.4.cmp(&a.4)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -367,7 +366,7 @@ pub(crate) fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u
             (p1, score)
         })
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -420,7 +419,7 @@ pub(crate) fn q8_central_person(
             (p, s, fs)
         })
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
@@ -502,8 +501,8 @@ pub(crate) fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i
     let mut per_person: HashMap<u32, (u64, u64)> = HashMap::new(); // (threads, messages)
     // Hoist the day column once; the reply-tree DFS reads it for every visited
     // message, so index the dense slice instead of re-resolving the key per node.
-    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
-    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let day_col = g.i64_col("day");
+    let day_s = day_col.and_then(|c| c.as_slice());
     let day_at = |n: u32| -> i64 {
         match day_s {
             Some(s) => s[n as usize],
@@ -542,7 +541,7 @@ pub(crate) fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i
         .into_iter()
         .map(|(p, (t, m))| (p, t, m))
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))

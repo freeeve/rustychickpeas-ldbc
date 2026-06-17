@@ -49,7 +49,7 @@ pub(crate) fn q16_fake_news(
         .iter()
         .filter_map(|(&p, &ca)| rb.get(&p).map(|&cb| (p, ca, cb)))
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
@@ -113,7 +113,7 @@ pub(crate) fn q10_experts(
         .into_iter()
         .map(|((e, t), msgs)| (e, pstr(g, t, "name").unwrap_or("").to_string(), msgs.len() as i64))
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(a.1.cmp(&b.1))

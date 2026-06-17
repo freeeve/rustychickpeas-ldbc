@@ -58,7 +58,7 @@ pub(crate) fn q13_zombies(
             (z, zlc, tlc)
         })
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         let sa = if a.2 == 0 {
             0.0
@@ -180,7 +180,7 @@ pub(crate) fn q19_interaction_path(
             a
         },
     );
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     results.sort_by(|a, b| {
         a.2.partial_cmp(&b.2)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -295,7 +295,7 @@ pub(crate) fn q20_recruitment(
             }
         }
     }
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     results.sort_by(|a, b| {
         a.1.partial_cmp(&b.1)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -335,7 +335,7 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
         .into_iter()
         .map(|((p1, p2), ms)| (p1, p2, ms.len() as u64))
         .collect();
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
@@ -358,7 +358,7 @@ pub(crate) fn q14_international_dialog(g: &GraphSnapshot, c1_name: &str, c2_name
         return Vec::new();
     };
     // Hoist the plid column once for the candidate tiebreaks below.
-    let plid_col = g.property_key_from_str("plid").and_then(|id| g.columns.get(&id));
+    let plid_col = g.i64_col("plid");
     // persons whose message `p` replied to (via p's comments).
     let commented_on = |p: u32| -> HashSet<u32> {
         let mut s = HashSet::new();
