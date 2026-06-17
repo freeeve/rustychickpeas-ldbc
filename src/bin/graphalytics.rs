@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     let ds = ga::load(dir, name)?;
     let g = &ds.graph;
     let d = ds.params.directed;
-    println!("Loaded {name}: {} vertices, directed={d}  [{:.2}s]", ds.len(), t.elapsed().as_secs_f64());
+    println!("Loaded {name}: {} nodes, directed={d}  [{:.2}s]", ds.len(), t.elapsed().as_secs_f64());
     println!("Graphalytics algorithms:");
 
     // BFS — exact depths.

@@ -3,8 +3,8 @@
 //! the reference-output validator ([`validate`]). Implemented to the spec v1.0.x §2.3.
 //!
 //! SSSP wraps core's `dijkstra`; the other five are implemented directly over the
-//! snapshot adjacency. Edges are a single `e` type with a `weight` f64 property;
-//! algorithms take a `directed` flag (forward edges = outgoing for directed, both
+//! snapshot adjacency. Rels are a single `e` type with a `weight` f64 property;
+//! algorithms take a `directed` flag (forward rels = outgoing for directed, both
 //! for undirected).
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
@@ -14,8 +14,8 @@ pub mod validate;
 
 pub use load::{load, Dataset, Params};
 
-/// Forward edge direction (BFS/SSSP/out-neighbours): outgoing for a directed
-/// graph, both for an undirected one (whose edges are stored once).
+/// Forward rel direction (BFS/SSSP/out-neighbours): outgoing for a directed
+/// graph, both for an undirected one (whose rels are stored once).
 pub(crate) fn fwd(directed: bool) -> Direction {
     if directed {
         Direction::Outgoing
@@ -24,11 +24,11 @@ pub(crate) fn fwd(directed: bool) -> Direction {
     }
 }
 
-/// Breadth-first depth from `source` over forward edges; unreachable vertices get
+/// Breadth-first depth from `source` over forward rels; unreachable nodes get
 /// `i64::MAX` (9223372036854775807), per the spec. Level-synchronous BFS over a
 /// dense distance array with two reused frontier buffers -- avoids the per-call
 /// `HashMap` that `bfs_distances` materialises for a graph reaching millions of
-/// vertices.
+/// nodes.
 pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
     let n = g.node_count();
     let dir = fwd(directed);
@@ -39,7 +39,7 @@ pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
     dist[source as usize] = 0;
     // Single FIFO queue (the growing visited list, read via `head`) rather than two
     // level frontiers: allocated once at the reached-set bound instead of
-    // reallocating per level. Each vertex's depth is its parent's plus one.
+    // reallocating per level. Each node's depth is its parent's plus one.
     let mut queue: Vec<u32> = Vec::with_capacity(n as usize);
     queue.push(source);
     let mut head = 0;
@@ -57,8 +57,8 @@ pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
     dist
 }
 
-/// Single-source shortest paths over forward edges (`weight` edge property when
-/// `weighted`, else unit); unreachable vertices get `f64::INFINITY`.
+/// Single-source shortest paths over forward rels (`weight` rel property when
+/// `weighted`, else unit); unreachable nodes get `f64::INFINITY`.
 pub fn sssp(g: &GraphSnapshot, source: u32, directed: bool, weighted: bool) -> Vec<f64> {
     let sp = g.dijkstra(source, fwd(directed), &[] as &[&str], None, |_from, rel| {
         if weighted {
@@ -70,9 +70,9 @@ pub fn sssp(g: &GraphSnapshot, source: u32, directed: bool, weighted: bool) -> V
     (0..g.node_count()).map(|v| sp.distance(v).unwrap_or(f64::INFINITY)).collect()
 }
 
-/// Weakly connected components: each vertex's label is the smallest vertex id in
-/// its component, found by flooding undirected (`Direction::Both`) edges. Vertices
-/// are swept in ascending id order, so the first-reached vertex of a component is
+/// Weakly connected components: each node's label is the smallest node id in
+/// its component, found by flooding undirected (`Direction::Both`) rels. Nodes
+/// are swept in ascending id order, so the first-reached node of a component is
 /// its minimum and becomes the label.
 pub fn wcc(g: &GraphSnapshot) -> Vec<u32> {
     let n = g.node_count();
@@ -99,7 +99,7 @@ pub fn wcc(g: &GraphSnapshot) -> Vec<u32> {
 /// PageRank after `iterations` synchronous updates with damping `damping`:
 /// `PR0(v) = 1/|V|`, then `PRi(v) = (1-d)/|V| + d*(Σ_{u∈Nin(v)} PRi-1(u)/|Nout(u)|
 /// + Σ_{sink w} PRi-1(w)/|V|)`. Sinks (out-degree 0) redistribute their rank
-/// uniformly. Forward edges are outgoing (directed) or both (undirected).
+/// uniformly. Forward rels are outgoing (directed) or both (undirected).
 pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32) -> Vec<f64> {
     let n = g.node_count() as usize;
     if n == 0 {
@@ -107,8 +107,8 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
     }
     let nf = n as f64;
     let out = fwd(directed);
-    // Pull formulation: each vertex sums its in-neighbours' shares, writing `next[v]`
-    // disjointly so it parallelizes (the push `next[w] += ...` would race). In-edges
+    // Pull formulation: each node sums its in-neighbours' shares, writing `next[v]`
+    // disjointly so it parallelizes (the push `next[w] += ...` would race). In-rels
     // are incoming for a directed graph, both for undirected.
     let in_dir = if directed { Direction::Incoming } else { Direction::Both };
     let outdeg: Vec<u32> = (0..n as u32).map(|v| g.neighbors(v, out).count() as u32).collect();
@@ -143,7 +143,7 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
                                 pull += pr_ref[u as usize] / d as f64;
                             }
                         }
-                        // SAFETY: the atomic cursor hands out disjoint vertex batches,
+                        // SAFETY: the atomic cursor hands out disjoint node batches,
                         // so the `next` slots never alias; `next` outlives the scope.
                         unsafe {
                             *(nxt_ptr as *mut f64).add(v as usize) = base + damping * pull;
@@ -158,10 +158,10 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
 }
 
 /// Community detection by synchronous label propagation: `L0(v) = v`, then each
-/// vertex adopts the most frequent label among its neighbours (incoming and
-/// outgoing tallied separately for directed graphs, so a mutual edge counts the
+/// node adopts the most frequent label among its neighbours (incoming and
+/// outgoing tallied separately for directed graphs, so a mutual rel counts the
 /// label twice; each neighbour once for undirected), smallest label breaking
-/// ties. A vertex with no neighbours keeps its label. Runs `iterations` rounds.
+/// ties. A node with no neighbours keeps its label. Runs `iterations` rounds.
 pub fn cdlp(g: &GraphSnapshot, directed: bool, iterations: u32) -> Vec<u32> {
     let init: Vec<u32> = (0..g.node_count()).collect();
     cdlp_seeded(g, directed, iterations, &init)
@@ -175,8 +175,8 @@ pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u
     let n = g.node_count();
     let mut cur: Vec<u32> = init.to_vec();
     let mut nxt: Vec<u32> = vec![0; n as usize];
-    // Each iteration is a synchronous map over independent vertices (read `cur`,
-    // write `nxt`), so parallelize it: workers steal vertex batches via an atomic
+    // Each iteration is a synchronous map over independent nodes (read `cur`,
+    // write `nxt`), so parallelize it: workers steal node batches via an atomic
     // cursor and write disjoint `nxt` slots, with the scope as the barrier before
     // the swap. Per-worker label buffers are reused across batches and iterations.
     let workers = std::env::var("GA_THREADS")
@@ -200,7 +200,7 @@ pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u
                     let end = (start + BATCH).min(n);
                     for v in start..end {
                         let label = cdlp_label(g, directed, cur_ref, v, buf);
-                        // SAFETY: the atomic cursor hands out disjoint vertex batches,
+                        // SAFETY: the atomic cursor hands out disjoint node batches,
                         // so the `nxt` slots never alias; `nxt` outlives the scope.
                         unsafe {
                             *(nxt_ptr as *mut u32).add(v as usize) = label;
@@ -214,8 +214,8 @@ pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u
     cur
 }
 
-/// One synchronous CDLP update for vertex `v`: gather neighbour labels from `cur`
-/// (in+out for directed, so a mutual edge counts the label twice; each neighbour
+/// One synchronous CDLP update for node `v`: gather neighbour labels from `cur`
+/// (in+out for directed, so a mutual rel counts the label twice; each neighbour
 /// once for undirected) into the reused `buf`, then return the most frequent label
 /// -- smallest on a tie, via a sort + run scan -- defaulting to `cur[v]` when `v`
 /// has no neighbours.
@@ -246,10 +246,10 @@ fn cdlp_label(g: &GraphSnapshot, directed: bool, cur: &[u32], v: u32, buf: &mut 
     best_label
 }
 
-/// Local clustering coefficient: for each vertex `v` with undirected neighbour set
+/// Local clustering coefficient: for each node `v` with undirected neighbour set
 /// `N(v)` (each neighbour once, self excluded), `0` if `|N(v)| <= 1` else the
-/// number of forward edges running between members of `N(v)` divided by
-/// `|N(v)|*(|N(v)|-1)`. Forward edges are outgoing (directed) or both (undirected).
+/// number of forward rels running between members of `N(v)` divided by
+/// `|N(v)|*(|N(v)|-1)`. Forward rels are outgoing (directed) or both (undirected).
 pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
     let n = g.node_count();
     let out = fwd(directed);
@@ -273,7 +273,7 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
         adj[s..p].sort_unstable();
     }
 
-    // The per-vertex triangle count is independent across vertices, so split the
+    // The per-node triangle count is independent across nodes, so split the
     // range across cores: each worker owns its membership bitset + neighbour
     // buffer, reads the shared adjacency, and writes a disjoint slice of `result`.
     let mut result = vec![0.0_f64; n as usize];
@@ -283,7 +283,7 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get()));
     // Dynamic work-stealing over small batches: workers pull the next [start,end)
     // range via an atomic cursor, so an uneven hub distribution can't strand one
-    // worker with all the heavy vertices (static contiguous chunks could).
+    // worker with all the heavy nodes (static contiguous chunks could).
     let cursor = std::sync::atomic::AtomicU32::new(0);
     let rptr = result.as_mut_ptr() as usize;
     const BATCH: u32 = 2048;
@@ -318,7 +318,7 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
     result
 }
 
-/// Local clustering coefficient for vertices `start .. start + result.len()`,
+/// Local clustering coefficient for nodes `start .. start + result.len()`,
 /// written into `result`. Worker body for [`lcc`]: `mark` (the N(v) membership
 /// bitset -- ~1/32 a u32 marker array, cache-resident) and `nbrs` are caller-owned
 /// scratch reused across every batch a worker steals; `off`/`adj` are the shared
@@ -349,14 +349,14 @@ fn lcc_count_range(
             if nbrs.iter().any(|&u| (off[u as usize + 1] - off[u as usize]) as usize > k) {
                 nbrs.sort_unstable();
             }
-            let mut edges = 0u64;
+            let mut rels = 0u64;
             for &u in nbrs.iter() {
                 let uo = &adj[off[u as usize] as usize..off[u as usize + 1] as usize];
                 if uo.len() <= k {
                     // Short out-list: scan it, testing N(v) membership by bit.
                     for &w in uo {
                         if w != u && mark[(w >> 6) as usize] >> (w & 63) & 1 != 0 {
-                            edges += 1;
+                            rels += 1;
                         }
                     }
                 } else {
@@ -371,14 +371,14 @@ fn lcc_count_range(
                         let (found, pos) = gallop(uo, cursor, w);
                         cursor = pos;
                         if found {
-                            edges += 1;
+                            rels += 1;
                         }
                     }
                 }
             }
-            *slot = edges as f64 / (k as f64 * (k as f64 - 1.0));
+            *slot = rels as f64 / (k as f64 * (k as f64 - 1.0));
         }
-        // Reset N(v)'s bits for the next vertex (including the k < 2 case).
+        // Reset N(v)'s bits for the next node (including the k < 2 case).
         for &u in nbrs.iter() {
             mark[(u >> 6) as usize] &= !(1u64 << (u & 63));
         }
@@ -411,25 +411,25 @@ mod tests {
     use super::*;
     use rustychickpeas_core::GraphBuilder;
 
-    /// Build a graph of `n` vertices (labelled `V`) wired by the given `e` edges.
-    fn build(n: u32, edges: &[(u32, u32)]) -> GraphSnapshot {
-        let mut b = GraphBuilder::new(Some(n as usize), Some(edges.len()));
+    /// Build a graph of `n` nodes (labelled `V`) wired by the given `e` rels.
+    fn build(n: u32, rels: &[(u32, u32)]) -> GraphSnapshot {
+        let mut b = GraphBuilder::new(Some(n as usize), Some(rels.len()));
         for i in 0..n {
             b.add_node(Some(i), &["V"]).unwrap();
         }
-        for &(u, v) in edges {
+        for &(u, v) in rels {
             b.add_relationship(u, v, "e").unwrap();
         }
         b.finalize(None)
     }
 
-    /// As [`build`], but each edge carries a `weight` f64 property for SSSP.
-    fn build_weighted(n: u32, edges: &[(u32, u32, f64)]) -> GraphSnapshot {
-        let mut b = GraphBuilder::new(Some(n as usize), Some(edges.len()));
+    /// As [`build`], but each rel carries a `weight` f64 property for SSSP.
+    fn build_weighted(n: u32, rels: &[(u32, u32, f64)]) -> GraphSnapshot {
+        let mut b = GraphBuilder::new(Some(n as usize), Some(rels.len()));
         for i in 0..n {
             b.add_node(Some(i), &["V"]).unwrap();
         }
-        for &(u, v, w) in edges {
+        for &(u, v, w) in rels {
             b.add_relationship(u, v, "e").unwrap();
             b.set_relationship_prop_f64(u, v, "e", "weight", w);
         }
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn cdlp_triangle_converges_to_min_label() {
-        // Undirected triangle: every vertex collapses to the smallest label (0).
+        // Undirected triangle: every node collapses to the smallest label (0).
         let g = build(3, &[(0, 1), (1, 2), (2, 0)]);
         assert_eq!(cdlp(&g, false, 2), vec![0, 0, 0]);
     }
@@ -510,8 +510,8 @@ mod tests {
 
     #[test]
     fn lcc_gallop_branch_on_high_degree_neighbour() {
-        // N(0) = {1,2} (k=2); node 1 has out-degree 3 (> k), so counting edges among
-        // N(0) takes the gallop branch. The single inside-edge is 1->2, giving
+        // N(0) = {1,2} (k=2); node 1 has out-degree 3 (> k), so counting rels among
+        // N(0) takes the gallop branch. The single inside-rel is 1->2, giving
         // LCC(0) = 1 / (2*1) = 0.5.
         let g = build(5, &[(0, 1), (0, 2), (1, 2), (1, 3), (1, 4)]);
         let coeffs = lcc(&g, true);
