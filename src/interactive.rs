@@ -240,14 +240,64 @@ pub fn is5_message_creator(g: &GraphSnapshot, message: u32) -> Option<u32> {
 pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_days: i64) -> Vec<(u32, u32)> {
     let end_day = start_day + duration_days;
     let posts = g.nodes_with_label("Post");
+    // Hoist the day column (avoid pi64 re-resolving "day" per post).
+    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
+    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let day_of = |post: u32| -> i64 {
+        match day_s {
+            Some(s) => s[post as usize],
+            None => match day_col.and_then(|c| c.get(post)) {
+                Some(ValueId::I64(d)) => d,
+                _ => 0,
+            },
+        }
+    };
+
+    // Tag ids form a contiguous block, so tally in-window tag uses in a dense
+    // array indexed by (tag - lo) instead of a growing HashMap+HashSet; a BEFORE
+    // sentinel marks tags also used before the window (excluded from "new").
+    if let Some(range) = g.nodes_with_label("Tag").and_then(|t| t.as_range()) {
+        const BEFORE: u32 = u32::MAX;
+        let lo = range.start;
+        let mut count = vec![0u32; (range.end - lo) as usize];
+        for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
+            for post in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
+                if !posts.is_some_and(|s| s.contains(post)) {
+                    continue; // Posts only
+                }
+                let day = day_of(post);
+                if day < start_day {
+                    for t in g.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
+                        count[(t - lo) as usize] = BEFORE;
+                    }
+                } else if day < end_day {
+                    for t in g.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
+                        let c = &mut count[(t - lo) as usize];
+                        if *c != BEFORE {
+                            *c += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let mut rows: Vec<(u32, u32)> = (0..count.len())
+            .filter(|&i| count[i] != 0 && count[i] != BEFORE)
+            .map(|i| (lo + i as u32, count[i]))
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+        rows.truncate(10);
+        return rows;
+    }
+
+    // Fallback for non-contiguous Tag ids: growing HashMap/HashSet.
     let mut in_window: HashMap<u32, u32> = HashMap::new();
     let mut before: HashSet<u32> = HashSet::new();
     for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
         for post in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
             if !posts.is_some_and(|s| s.contains(post)) {
-                continue; // Posts only
+                continue;
             }
-            let day = pi64(g, post, "day");
+            let day = day_of(post);
             if day < start_day {
                 for t in g.neighbors_by_type(post, Direction::Outgoing, "hasTag") {
                     before.insert(t);

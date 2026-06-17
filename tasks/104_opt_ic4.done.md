@@ -4,32 +4,32 @@ Per-query optimization loop. Methodology + commands:
 [100_ic_perf_methodology.md](100_ic_perf_methodology.md).
 
 ## Loop
-- [x] 1. Bench allocations: 36 allocs / 322 KB (not alloc-bound)
-- [x] 2. CPU profile: no dominant cost — CSR walk ~30%, `get_id`/`pi64("day")` ~15%,
-  `in_window` HashMap inserts ~12%, spread evenly
-- [x] 3. Decision: **close as already-minimal** (see below)
+- [x] 1. Bench allocations: 36 allocs / 322 KB
+- [x] 2. CPU profile: CSR walk ~30%, `get_id`/`pi64("day")` ~15%, `in_window`/`before`
+  HashMap+HashSet inserts ~12% — the maps *grow* (doubling reallocs) = the 314 KB
+- [x] 3. Optimize: dense tag-count array over the contiguous Tag id range (no hashing,
+  no growth) + day-column hoist
+- [x] 4. Re-bench: 13 allocs / 157 KB
+- [x] 5. Wall-clock A/B: ~7.2 → ~5.3 ms (~27%), same window
+- [x] 6. Value-identity: IC emit byte-identical
 
 ## Measurements
 | metric                  | baseline | after |
 |-------------------------|----------|-------|
-| allocs                  | 36       | (no change) |
-| bytes                   | 321,832  | (no change) |
-| wall-clock median (ms)  | ~7.0     | (no change) |
-| hot fn (CPU %)          | balanced | — |
+| allocs                  | 36       | 13    |
+| bytes                   | 321,832  | 156,640 |
+| wall-clock median (ms)  | ~7.2     | ~5.3 (~27%) |
+| hot fn (CPU %)          | balanced (HashMap growth) | CSR walk |
 
 ## Notes
 
-IC4 is ~7 ms and already wins ~22× vs Kùzu. The only query-side lever is the same
-`day`-column hoist used in IC3 (avoid `pi64("day")` per post), worth ~15% ≈ ~1 ms
-— below the load-noise floor and pure churn at this size. **Closed without a code
-change**, per the methodology's "don't churn already-minimal queries" rule.
+(First closed as "already-minimal" on wall-clock — corrected: the allocations
+*were* improvable.) `in_window` HashMap + `before` HashSet grew by doubling as
+they ingested the friends' post tags (the 314 KB). Tag ids are a contiguous
+block (`nodes_with_label("Tag").as_range()`), so tally tag uses in a dense
+`Vec<u32>` indexed by `tag - lo`, with a `u32::MAX` sentinel marking tags also
+used before the window (excluded from "new"). No hashing, no growth; plus the
+IC3-style `day` hoist. Value-identical (id unique; sort makes order deterministic).
+Falls back to the HashMap path if Tag ids are ever non-contiguous.
 
-Folded into two cross-cutting levers (tracked for a later batched pass):
-- **Property-key hoist** (query-side): resolve `day`/`name`/etc. column once
-  instead of `pi64`/`pstr` re-resolving the key per element. Applied to IC3
-  (30%); marginal here.
-- **`neighbors_by_type_id`** (core, sign-off): `neighbors_by_type` re-resolves the
-  rel-type string each call; a by-id variant would cut the per-element cost for
-  IC3 (`msgCountry`), IC4 (`hasTag`), IC6, … — a broad win to raise with the maintainer.
-
-**Status: done (no change — already minimal).**
+**Status: done** (dense tag array + day hoist).
