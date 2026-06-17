@@ -10,10 +10,14 @@ primitives. Avoid `src/interactive.rs` while the other (IC) session owns it.
 - `neighbors_in_set` for the "iterate hasCreator, keep only Posts" filter (IC ~5).
 
 ## #2 — finish the top-k migration
-`top_k_by_key` is in `props.rs` and used by q4 (done). Migrate the remaining
-date/score sort-then-truncate sites (SPB q1/q3/a1/a14/a18/a20…). Add a streaming
-`TopK<T>` accumulator for the `BinaryHeap<Reverse<…>>` sites (IC ~9, when IC is free)
-and a stored-property (plid) tiebreak variant once column readers (tasks/140) land.
+SPB done: `top_k_by_key` (generalized to any `Ord` id) + `top_k_by_count` now back
+every limit-bearing ranked query — q3/q4/a5/a14/a20 (node id) and a4/a6/a23 (String
+id from label/uri grouping). No `sort_by(...)+truncate` boilerplate remains in SPB.
+Deliberate non-fits left as-is: a3/q5 rank *all* rows (no limit), a19 is a 3-key
+sort with a carried date payload.
+Still open: a streaming `TopK<T>` accumulator for the `BinaryHeap<Reverse<…>>` sites
+(IC ~9, when IC is free) and a stored-property (plid) tiebreak variant once column
+readers (tasks/140) land. BI ranked sites still to sweep.
 
 ## #7 — date helpers (props.rs)
 `parse_ymd(s) -> Option<(i32,u32,u32)>` (retires a24::ymd) and
