@@ -185,12 +185,11 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
 /// IC13 — unweighted shortest-path length between two persons in the `knows`
 /// graph (`-1` if unreachable). Built on the core `bfs_distances` primitive.
 pub fn ic13_shortest_path(g: &GraphSnapshot, p1: u32, p2: u32) -> i64 {
-    if p1 == p2 {
-        return 0;
-    }
-    g.bfs_distances(p1, Direction::Outgoing, "knows", None)
-        .get(&p2)
-        .map(|&d| d as i64)
+    // Bidirectional search (meet-in-the-middle) for just the p1->p2 distance,
+    // instead of a full unidirectional BFS over p1's whole component. Unit edge
+    // weights make the path cost equal to the hop count.
+    g.weighted_shortest_path(p1, p2, Direction::Outgoing, "knows", |_, _| 1.0)
+        .map(|cost| cost as i64)
         .unwrap_or(-1)
 }
 
