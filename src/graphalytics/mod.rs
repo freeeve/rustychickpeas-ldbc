@@ -7,8 +7,6 @@
 //! Edges are a single `e` type with a `weight` f64 property; algorithms take a
 //! `directed` flag (forward edges = outgoing for directed, both for undirected).
 
-use std::collections::{HashMap, HashSet};
-
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 pub mod load;
@@ -125,32 +123,46 @@ pub fn cdlp(g: &GraphSnapshot, directed: bool, iterations: u32) -> Vec<u32> {
 /// result is faithful regardless of how dense node ids map to vertex ids.
 pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u32]) -> Vec<u32> {
     let n = g.node_count();
-    let mut labels: Vec<u32> = init.to_vec();
-    let mut counts: HashMap<u32, u32> = HashMap::new();
+    let mut cur: Vec<u32> = init.to_vec();
+    let mut nxt: Vec<u32> = vec![0; n as usize];
+    let mut buf: Vec<u32> = Vec::new();
     for _ in 0..iterations {
-        let mut next = labels.clone();
         for v in 0..n {
-            counts.clear();
+            // Gather neighbour labels (in+out for directed, so a mutual edge counts
+            // the label twice; each neighbour once for undirected), then pick the
+            // winner by sorting and scanning equal-label runs -- no per-vertex
+            // hashing, and the buffer is reused across vertices.
+            buf.clear();
             if directed {
-                for u in g.neighbors(v, Direction::Outgoing) {
-                    *counts.entry(labels[u as usize]).or_insert(0) += 1;
-                }
-                for u in g.neighbors(v, Direction::Incoming) {
-                    *counts.entry(labels[u as usize]).or_insert(0) += 1;
-                }
+                buf.extend(g.neighbors(v, Direction::Outgoing).map(|u| cur[u as usize]));
+                buf.extend(g.neighbors(v, Direction::Incoming).map(|u| cur[u as usize]));
             } else {
-                for u in g.neighbors(v, Direction::Both) {
-                    *counts.entry(labels[u as usize]).or_insert(0) += 1;
+                buf.extend(g.neighbors(v, Direction::Both).map(|u| cur[u as usize]));
+            }
+            buf.sort_unstable();
+            // Default to the current label (a vertex with no neighbours keeps it).
+            // The runs are visited in ascending label order and we replace only on a
+            // strictly higher count, so the smallest label wins ties.
+            let mut best_label = cur[v as usize];
+            let mut best_count = 0usize;
+            let mut i = 0;
+            while i < buf.len() {
+                let lab = buf[i];
+                let mut j = i + 1;
+                while j < buf.len() && buf[j] == lab {
+                    j += 1;
                 }
+                if j - i > best_count {
+                    best_count = j - i;
+                    best_label = lab;
+                }
+                i = j;
             }
-            // Highest frequency, smallest label on a tie.
-            if let Some((&label, _)) = counts.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))) {
-                next[v as usize] = label;
-            }
+            nxt[v as usize] = best_label;
         }
-        labels = next;
+        std::mem::swap(&mut cur, &mut nxt);
     }
-    labels
+    cur
 }
 
 /// Local clustering coefficient: for each vertex `v` with undirected neighbour set
@@ -161,19 +173,34 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
     let n = g.node_count();
     let out = fwd(directed);
     let mut result = vec![0.0_f64; n as usize];
+    // Dense membership marker for N(v): mark[node] == gen means "in N(v)". The gen
+    // stamp is bumped per vertex so the array never needs clearing, and it doubles
+    // as the dedup for N(v). Reused across all vertices (no per-vertex allocation).
+    let mut mark: Vec<u32> = vec![0; n as usize];
+    let mut gen = 0u32;
+    let mut nbrs: Vec<u32> = Vec::new();
     for v in 0..n {
-        let mut nbrs: Vec<u32> = g.neighbors(v, Direction::Both).filter(|&u| u != v).collect();
-        nbrs.sort_unstable();
-        nbrs.dedup();
+        gen += 1;
+        if gen == 0 {
+            // Stamp counter wrapped; clear so a stale 0 can't read as current.
+            mark.iter_mut().for_each(|m| *m = 0);
+            gen = 1;
+        }
+        nbrs.clear();
+        for u in g.neighbors(v, Direction::Both) {
+            if u != v && mark[u as usize] != gen {
+                mark[u as usize] = gen;
+                nbrs.push(u);
+            }
+        }
         let k = nbrs.len();
         if k <= 1 {
             continue;
         }
-        let nset: HashSet<u32> = nbrs.iter().copied().collect();
         let mut edges = 0u64;
         for &u in &nbrs {
             for w in g.neighbors(u, out) {
-                if w != u && nset.contains(&w) {
+                if w != u && mark[w as usize] == gen {
                     edges += 1;
                 }
             }
