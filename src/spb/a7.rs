@@ -35,7 +35,7 @@ pub fn run(g: &GraphSnapshot, min_primary_content: usize, limit: usize) -> Vec<(
     let qualifying = works.iter().filter(|&w| {
         g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf").count() > min_primary_content
     });
-    let counts = g.target_counts(qualifying, Direction::Outgoing, "mentions");
+    let counts = g.neighbor_counts(qualifying, Direction::Outgoing, "mentions");
     top_k_by_count(counts, limit)
         .into_iter()
         .map(|(m, n)| (pstr(g, m, "uri").unwrap_or("?").to_string(), n))

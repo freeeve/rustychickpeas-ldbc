@@ -37,9 +37,12 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str) -> Vec<u32> {
         return Vec::new();
     };
 
+    let Some(cworks) = g.nodes_with_label("CreativeWork") else {
+        return Vec::new();
+    };
     let mut works: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
-        works.extend(g.neighbors_with_label(topic, Direction::Incoming, pred, "CreativeWork"));
+        works.extend(g.neighbors_in(topic, Direction::Incoming, pred, cworks));
     }
 
     // The sub-SELECT's `cwork:dateModified ?modified` is required, so works with no

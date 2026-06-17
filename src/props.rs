@@ -3,7 +3,7 @@
 
 use rustychickpeas_core::{GraphSnapshot, ValueId};
 
-/// Sort a `node -> count` histogram (e.g. from `GraphSnapshot::target_counts`) by
+/// Sort a `node -> count` histogram (e.g. from `GraphSnapshot::neighbor_counts`) by
 /// count descending, node id ascending on ties, and keep the top `limit` — the
 /// selector behind the group-by-count queries. Takes any `(node, count)` iterable
 /// so it accepts either hashbrown's or std's `HashMap`.
