@@ -96,16 +96,32 @@ pub fn ic1_friends_by_name(g: &GraphSnapshot, person: u32, first_name: &str) -> 
 /// IC2 — the 20 most recent messages by the seed's friends, created on/before
 /// `max_day`, ordered by (creationDate desc, id). Returns (message, ms).
 pub fn ic2_recent_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u32, i64)> {
-    let mut rows: Vec<(u32, i64)> = Vec::new();
+    // Keep only the top 20 by (ms desc, id asc) rather than collecting every
+    // friend-message and sorting the lot. The heap stores the result-ordering
+    // key reversed, so it is a min-heap whose root is the worst kept message and
+    // is evicted as soon as a better one arrives.
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(21);
     for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
         for msg in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
-            if pi64(g, msg, "day") <= max_day {
-                rows.push((msg, pi64(g, msg, "ms")));
+            if pi64(g, msg, "day") > max_day {
+                continue;
+            }
+            let key = (pi64(g, msg, "ms"), Reverse(msg));
+            if top.len() < 20 {
+                top.push(Reverse(key));
+            } else if key > top.peek().unwrap().0 {
+                top.pop();
+                top.push(Reverse(key));
             }
         }
     }
+    let mut rows: Vec<(u32, i64)> = top
+        .into_iter()
+        .map(|Reverse((ms, Reverse(id)))| (id, ms))
+        .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows.truncate(20);
     rows
 }
 
