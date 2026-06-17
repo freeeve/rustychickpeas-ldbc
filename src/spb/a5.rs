@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_count};
 
 /// About-targets of the given entity-type `label` ranked by how many works
 /// `category`-linked to `cat1` or `cat2` are about them. Returned as
@@ -50,11 +50,11 @@ pub fn run(g: &GraphSnapshot, entity_label: &str, cat1: &str, cat2: &str, limit:
             }
         }
     }
-    // Sort / truncate on node ids, then resolve uris only for the kept rows.
-    let mut rows: Vec<(u32, usize)> = counts.into_iter().collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows.truncate(limit);
-    rows.into_iter().map(|(a, n)| (pstr(g, a, "uri").unwrap_or("?").to_string(), n)).collect()
+    // Rank by count (node id breaks ties), then resolve uris for the kept rows only.
+    top_k_by_count(counts, limit)
+        .into_iter()
+        .map(|(a, n)| (pstr(g, a, "uri").unwrap_or("?").to_string(), n))
+        .collect()
 }
 
 #[cfg(test)]
