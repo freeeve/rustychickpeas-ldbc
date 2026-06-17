@@ -153,44 +153,75 @@ pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u
     let n = g.node_count();
     let mut cur: Vec<u32> = init.to_vec();
     let mut nxt: Vec<u32> = vec![0; n as usize];
-    let mut buf: Vec<u32> = Vec::new();
+    // Each iteration is a synchronous map over independent vertices (read `cur`,
+    // write `nxt`), so parallelize it: workers steal vertex batches via an atomic
+    // cursor and write disjoint `nxt` slots, with the scope as the barrier before
+    // the swap. Per-worker label buffers are reused across batches and iterations.
+    let workers = std::env::var("GA_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get()));
+    let mut bufs: Vec<Vec<u32>> = (0..workers).map(|_| Vec::new()).collect();
+    const BATCH: u32 = 2048;
     for _ in 0..iterations {
-        for v in 0..n {
-            // Gather neighbour labels (in+out for directed, so a mutual edge counts
-            // the label twice; each neighbour once for undirected), then pick the
-            // winner by sorting and scanning equal-label runs -- no per-vertex
-            // hashing, and the buffer is reused across vertices.
-            buf.clear();
-            if directed {
-                buf.extend(g.neighbors(v, Direction::Outgoing).map(|u| cur[u as usize]));
-                buf.extend(g.neighbors(v, Direction::Incoming).map(|u| cur[u as usize]));
-            } else {
-                buf.extend(g.neighbors(v, Direction::Both).map(|u| cur[u as usize]));
+        let cursor = std::sync::atomic::AtomicU32::new(0);
+        let nxt_ptr = nxt.as_mut_ptr() as usize;
+        let cur_ref: &[u32] = &cur;
+        let cursor = &cursor;
+        std::thread::scope(|scope| {
+            for buf in bufs.iter_mut() {
+                scope.spawn(move || loop {
+                    let start = cursor.fetch_add(BATCH, std::sync::atomic::Ordering::Relaxed);
+                    if start >= n {
+                        break;
+                    }
+                    let end = (start + BATCH).min(n);
+                    for v in start..end {
+                        let label = cdlp_label(g, directed, cur_ref, v, buf);
+                        // SAFETY: the atomic cursor hands out disjoint vertex batches,
+                        // so the `nxt` slots never alias; `nxt` outlives the scope.
+                        unsafe {
+                            *(nxt_ptr as *mut u32).add(v as usize) = label;
+                        }
+                    }
+                });
             }
-            buf.sort_unstable();
-            // Default to the current label (a vertex with no neighbours keeps it).
-            // The runs are visited in ascending label order and we replace only on a
-            // strictly higher count, so the smallest label wins ties.
-            let mut best_label = cur[v as usize];
-            let mut best_count = 0usize;
-            let mut i = 0;
-            while i < buf.len() {
-                let lab = buf[i];
-                let mut j = i + 1;
-                while j < buf.len() && buf[j] == lab {
-                    j += 1;
-                }
-                if j - i > best_count {
-                    best_count = j - i;
-                    best_label = lab;
-                }
-                i = j;
-            }
-            nxt[v as usize] = best_label;
-        }
+        });
         std::mem::swap(&mut cur, &mut nxt);
     }
     cur
+}
+
+/// One synchronous CDLP update for vertex `v`: gather neighbour labels from `cur`
+/// (in+out for directed, so a mutual edge counts the label twice; each neighbour
+/// once for undirected) into the reused `buf`, then return the most frequent label
+/// -- smallest on a tie, via a sort + run scan -- defaulting to `cur[v]` when `v`
+/// has no neighbours.
+fn cdlp_label(g: &GraphSnapshot, directed: bool, cur: &[u32], v: u32, buf: &mut Vec<u32>) -> u32 {
+    buf.clear();
+    if directed {
+        buf.extend(g.neighbors(v, Direction::Outgoing).map(|u| cur[u as usize]));
+        buf.extend(g.neighbors(v, Direction::Incoming).map(|u| cur[u as usize]));
+    } else {
+        buf.extend(g.neighbors(v, Direction::Both).map(|u| cur[u as usize]));
+    }
+    buf.sort_unstable();
+    let mut best_label = cur[v as usize];
+    let mut best_count = 0usize;
+    let mut i = 0;
+    while i < buf.len() {
+        let lab = buf[i];
+        let mut j = i + 1;
+        while j < buf.len() && buf[j] == lab {
+            j += 1;
+        }
+        if j - i > best_count {
+            best_count = j - i;
+            best_label = lab;
+        }
+        i = j;
+    }
+    best_label
 }
 
 /// Local clustering coefficient: for each vertex `v` with undirected neighbour set
