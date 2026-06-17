@@ -117,11 +117,11 @@ pub(crate) fn build_interaction_map(g: &GraphSnapshot) -> HashMap<(u32, u32), u3
     let mut interaction: HashMap<(u32, u32), u32> = HashMap::new();
     if let Some(comments) = g.nodes_with_label("Comment") {
         for c in comments.iter() {
-            let Some(a) = g.neighbors_by_type(c, Direction::Incoming, &["hasCreator"]).next() else {
+            let Some(a) = g.first_neighbor(c, Direction::Incoming, &["hasCreator"]) else {
                 continue;
             };
             for parent in g.neighbors_by_type(c, Direction::Outgoing, &["replyOf"]) {
-                if let Some(b) = g.neighbors_by_type(parent, Direction::Incoming, &["hasCreator"]).next() {
+                if let Some(b) = g.first_neighbor(parent, Direction::Incoming, &["hasCreator"]) {
                     if a != b {
                         *interaction.entry((a.min(b), a.max(b))).or_insert(0) += 1;
                     }

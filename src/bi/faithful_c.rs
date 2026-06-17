@@ -207,8 +207,8 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
         return (Vec::new(), Vec::new());
     };
     let person_country = |p: u32| -> Option<u32> {
-        let city = g.neighbors_by_type(p, Direction::Outgoing, t_loc).next()?;
-        g.neighbors_by_type(city, Direction::Outgoing, t_part).next()
+        let city = g.first_neighbor(p, Direction::Outgoing, t_loc)?;
+        g.first_neighbor(city, Direction::Outgoing, t_part)
     };
     // Step 1: top-100 forums by (country, forum) member count.
     let mut cf: FastMap<(u32, u32), i64> = FastMap::new();
@@ -257,7 +257,7 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
             stack.push(post);
         }
         while let Some(n) = stack.pop() {
-            if let Some(creator) = g.neighbors_by_type(n, Direction::Incoming, t_creator).next() {
+            if let Some(creator) = g.first_neighbor(n, Direction::Incoming, t_creator) {
                 if members.contains(&creator) {
                     *msg_count.entry(creator).or_insert(0) += 1;
                 }
@@ -306,7 +306,7 @@ pub(crate) fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: 
         g.nodes_with_label("Comment"),
     ) {
         (Some(t_reply), Some(t_creator), Some(t_container), Some(comments)) => {
-            let creator = |m: u32| g.neighbors_by_type(m, Direction::Incoming, t_creator).next();
+            let creator = |m: u32| g.first_neighbor(m, Direction::Incoming, t_creator);
             let is_post = |n: u32| posts.is_some_and(|p| p.contains(n));
             // Forest-root array for replyOf, built once; indexed lock-free in the
             // parallel fold below, so it replaces the per-worker root cache with no
@@ -315,7 +315,7 @@ pub(crate) fn q15_weighted_path(g: &GraphSnapshot, p1: i64, p2: i64, start_day: 
             comments.par_fold(
                 FastMap::<(u32, u32), f64>::new,
                 |mut acc, c| {
-                    let Some(parent) = g.neighbors_by_type(c, Direction::Outgoing, t_reply).next()
+                    let Some(parent) = g.first_neighbor(c, Direction::Outgoing, t_reply)
                     else {
                         return acc;
                     };
@@ -390,7 +390,7 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
         if let (Some(p1), Some(f1)) = (creator(m), forum_of(g, m)) {
             m1_list.push((p1, f1, pi64(g, m, "ms")));
         }
-        if let Some(msg2) = g.neighbors_by_type(m, Direction::Outgoing, &["replyOf"]).next() {
+        if let Some(msg2) = g.first_neighbor(m, Direction::Outgoing, &["replyOf"]) {
             if tagged_set.contains(&msg2) {
                 if let (Some(p2), Some(p3), Some(f2)) =
                     (creator(m), creator(msg2), forum_of(g, msg2))

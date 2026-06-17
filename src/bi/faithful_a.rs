@@ -516,7 +516,7 @@ pub(crate) fn q9_thread_initiators(g: &GraphSnapshot, start_day: i64, end_day: i
             if pd < start_day || pd > end_day {
                 continue;
             }
-            let Some(creator) = g.neighbors_by_type(post, Direction::Incoming, &["hasCreator"]).next() else {
+            let Some(creator) = g.first_neighbor(post, Direction::Incoming, &["hasCreator"]) else {
                 continue;
             };
             // Walk the post's reply tree; replies are created after their parent,
