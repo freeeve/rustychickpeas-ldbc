@@ -30,7 +30,7 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::pstr;
 
-use super::queries::{has_label, node_by_uri};
+use super::queries::node_by_uri;
 
 /// All creative works that tag (`about` or `mentions`) the topic at `topic_uri`
 /// and carry a `dateCreated`, ordered newest-first by `dateCreated` (string,
@@ -41,23 +41,29 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
         return Vec::new();
     };
 
-    // Union of the two concrete tag links pointing INTO the topic; the HashSet
-    // dedups a work that both `about`s and `mentions` the same topic.
-    let mut works: HashSet<u32> = HashSet::new();
+    // Union of the two concrete tag links pointing INTO the topic, carrying each
+    // work's `dateCreated` so the sort compares the strings directly (no
+    // per-comparison `pstr`); `seen` dedups a work reached via both links.
+    let Some(cworks) = g.nodes_with_label("CreativeWork") else {
+        return Vec::new();
+    };
+    let mut out: Vec<(u32, &str)> = Vec::new();
+    let mut seen: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
         for w in g.neighbors_by_type(topic, Direction::Incoming, pred) {
-            if has_label(g, w, "CreativeWork") && pstr(g, w, "dateCreated").is_some() {
-                works.insert(w);
+            if cworks.contains(w) {
+                if let Some(d) = pstr(g, w, "dateCreated") {
+                    if seen.insert(w) {
+                        out.push((w, d));
+                    }
+                }
             }
         }
     }
 
-    let mut out: Vec<u32> = works.into_iter().collect();
-    out.sort_by(|&a, &b| {
-        pstr(g, b, "dateCreated").cmp(&pstr(g, a, "dateCreated")).then(a.cmp(&b))
-    });
+    out.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(&b.0)));
     out.truncate(limit);
-    out
+    out.into_iter().map(|(w, _)| w).collect()
 }
 
 #[cfg(test)]
