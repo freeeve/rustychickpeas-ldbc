@@ -5,6 +5,7 @@
 //! BI Q1–Q20 plus the simplified BI1–6 patterns. New families (Interactive,
 //! Graphalytics, FinBench, SPB) add a sibling module here plus a thin bin.
 
+pub mod alloc_count;
 pub mod harness;
 pub mod loader;
 pub mod props;

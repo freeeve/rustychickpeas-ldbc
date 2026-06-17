@@ -206,31 +206,59 @@ pub fn run() -> Result<()> {
     emit_json("results", "spb.parity.rust.json", format!("{{\"params\":{params},\"queries\":{queries}}}"));
     println!("Wrote results/spb.parity.rust.json");
 
-    // Rust-side timings (median of 3), plus a row-count summary.
-    println!("\n{:<6}{:>10}  {:>8}", "query", "rust ms", "rows");
-    time("q1", 3, &mut || q1::run(&g, TOPIC).len());
-    time("q3", 3, &mut || q3::run(&g, TOPIC, ALL).len());
-    time("q4", 3, &mut || q4::run(&g, TOPIC, ALL).len());
-    time("q5", 3, &mut || q5::run(&g, Some(CW_TYPE), Some(AUDIENCE), DATE_FROM, DATE_TO).len());
-    time("q7", 3, &mut || q7::run(&g, CW_TYPE, DATE_FROM, DATE_TO, Some(CATEGORY), Some(AUDIENCE)).len());
-    time("a17", 3, &mut || a17::run(&g, LAT, LON, DEVIATION).len());
-    time("a18", 3, &mut || a18::run(&g, CW_TYPE, DATE_FROM, DATE_TO, ALL).len());
-    time("a20", 3, &mut || a20::run(&g, WORD, ALL).len());
-    time("a24", 3, &mut || a24::run(&g, TOPIC, ENT_B, None, None).len());
-    time("a25", 3, &mut || a25::run(&g, TOPIC, ALL).len());
+    // Rust-side timings (median of 5) over the full result set, all 30 queries,
+    // with per-query allocation count and bytes (the bin installs a counting
+    // allocator; see src/alloc_count.rs).
+    let n = 5;
+    println!("\n{:<6}{:>10}{:>10}{:>11}{:>9}", "query", "rust ms", "allocs", "bytes", "rows");
+    time("q1", n, &mut || q1::run(&g, TOPIC).len());
+    time("q2", n, &mut || q2::run(&g, q2_in).into_iter().count());
+    time("q3", n, &mut || q3::run(&g, TOPIC, ALL).len());
+    time("q4", n, &mut || q4::run(&g, TOPIC, ALL).len());
+    time("q5", n, &mut || q5::run(&g, Some(CW_TYPE), Some(AUDIENCE), DATE_FROM, DATE_TO).len());
+    time("q7", n, &mut || q7::run(&g, CW_TYPE, DATE_FROM, DATE_TO, Some(CATEGORY), Some(AUDIENCE)).len());
+    time("q9", n, &mut || q9::run(&g, q2_in, ALL).len());
+    time("a1", n, &mut || a1::run(&g, "about", TOPIC).len());
+    time("a2", n, &mut || a2::run(&g, q2_in).len());
+    time("a3", n, &mut || a3::run(&g, DATE_FROM, DATE_TO).len());
+    time("a4", n, &mut || a4::run(&g, DATE_FROM, DATE_TO, ALL).len());
+    time("a5", n, &mut || a5::run(&g, ENTITY_LABEL, CAT_COMPANY, CATEGORY, ALL).len());
+    time("a6", n, &mut || a6::run(&g, true, AUDIENCE, ALL).len());
+    time("a7", n, &mut || a7::run(&g, 1, ALL).len());
+    time("a8", n, &mut || a8::run(&g, CW_TYPE, AUDIENCE, DATE_FROM, DATE_TO).len());
+    time("a9", n, &mut || a9::run(&g));
+    time("a10", n, &mut || a10::run(&g, ALL).len());
+    time("a13", n, &mut || a13::run(&g, CAT_COMPANY, CATEGORY, ALL).len());
+    time("a14", n, &mut || a14::run(&g, PRIMARY_FORMAT, WEB_DOC_TYPE, ALL).len());
+    time("a15", n, &mut || a15::run(&g, WORD2, ALL).len());
+    time("a16", n, &mut || a16::run(&g, WORD2, ALL).len());
+    time("a17", n, &mut || a17::run(&g, LAT, LON, DEVIATION).len());
+    time("a18", n, &mut || a18::run(&g, CW_TYPE, DATE_FROM, DATE_TO, ALL).len());
+    time("a19", n, &mut || a19::run(&g, Some(CW_TYPE), Some(AUDIENCE), DATE_FROM, DATE_TO, ALL).len());
+    time("a20", n, &mut || a20::run(&g, WORD, ALL).len());
+    time("a21", n, &mut || a21::run(&g, WORD, Some(CATEGORY), Some(AUDIENCE), None, None, None, None, ALL).len());
+    time("a22", n, &mut || a22::run(&g, WORD, Some(CATEGORY), Some(AUDIENCE), None, Some(DATE_FROM), Some(DATE_TO), None, ALL).len());
+    time("a23", n, &mut || a23::run(&g, WORD, CATEGORY, ALL).len());
+    time("a24", n, &mut || a24::run(&g, TOPIC, ENT_B, None, None).len());
+    time("a25", n, &mut || a25::run(&g, TOPIC, ALL).len());
 
     Ok(())
 }
 
-/// Time `q` over `runs` repetitions and print `name  median-ms  last-row-count`.
+/// Time `q` over `runs` repetitions (median) and measure its allocations on one
+/// isolated run, printing `name  median-ms  allocs  bytes  rows`.
 fn time(name: &str, runs: usize, q: &mut impl FnMut() -> usize) {
+    // One bracketed run for the (deterministic) allocation tally.
+    crate::alloc_count::reset();
+    let rows = q();
+    let (allocs, bytes) = crate::alloc_count::read();
+
     let mut ms: Vec<f64> = Vec::with_capacity(runs);
-    let mut rows = 0;
     for _ in 0..runs {
         let t = Instant::now();
-        rows = q();
+        q();
         ms.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    println!("{:<6}{:>10.3}  {:>8}", name, ms[runs / 2], rows);
+    println!("{:<6}{:>10.3}{:>10}{:>11}{:>9}", name, ms[runs / 2], allocs, bytes, rows);
 }
