@@ -544,10 +544,7 @@ pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)
 /// Returns (person, x_count, y_count), (x+y desc, plid asc), top 20.
 pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str, country_y: &str, start_day: i64, duration_days: i64) -> Vec<(u32, u32, u32)> {
     let end_day = start_day + duration_days;
-    let by_name = |name: &str| {
-        g.nodes_with_label("Country")
-            .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(name)))
-    };
+    let by_name = |name: &str| g.node_by_label_property("Country", "name", name);
     let (Some(cx), Some(cy)) = (by_name(country_x), by_name(country_y)) else {
         return Vec::new();
     };
@@ -742,10 +739,7 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
 /// at a company in `country_name`. Ordered (workFrom asc, person plid asc,
 /// company name desc), top 10. Returns (person, company, work_from).
 pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, year: i64) -> Vec<(u32, u32, i64)> {
-    let Some(country) = g
-        .nodes_with_label("Country")
-        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(country_name)))
-    else {
+    let Some(country) = g.node_by_label_property("Country", "name", country_name) else {
         return Vec::new();
     };
     // Companies located in the country (orgPlace -> the country, or a city in it).
@@ -818,10 +812,7 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
 /// Posts tagged under `class_name` or a transitive subclass. Returns
 /// (friend, reply_count, tag_names), (count desc, plid asc), top 20.
 pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> Vec<(u32, usize, Vec<String>)> {
-    let Some(root_class) = g
-        .nodes_with_label("TagClass")
-        .and_then(|cs| cs.iter().find(|&c| pstr(g, c, "name") == Some(class_name)))
-    else {
+    let Some(root_class) = g.node_by_label_property("TagClass", "name", class_name) else {
         return Vec::new();
     };
     // The class plus all descendants (children point at the parent via isSubclassOf).
