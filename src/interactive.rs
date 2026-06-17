@@ -132,26 +132,20 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
     // Hoist day/ms columns (no pi64 key re-resolution per message), and keep only
     // the top 20 by (ms desc, id asc) in a heap instead of collecting every FoF
     // message (millions) and sorting the lot.
-    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
-    let day_s = day_col.and_then(|c| c.as_i64_slice());
-    let ms_col = g.property_key_from_str("ms").and_then(|id| g.columns.get(&id));
-    let ms_s = ms_col.and_then(|c| c.as_i64_slice());
+    let day_col = g.i64_col("day");
+    let day_s = day_col.and_then(|c| c.as_slice());
+    let ms_col = g.i64_col("ms");
+    let ms_s = ms_col.and_then(|c| c.as_slice());
     let day_of = |n: u32| -> i64 {
         match day_s {
             Some(s) => s[n as usize],
-            None => match day_col.and_then(|c| c.get(n)) {
-                Some(ValueId::I64(d)) => d,
-                _ => 0,
-            },
+            None => day_col.and_then(|c| c.get(n)).unwrap_or(0),
         }
     };
     let ms_of = |n: u32| -> i64 {
         match ms_s {
             Some(s) => s[n as usize],
-            None => match ms_col.and_then(|c| c.get(n)) {
-                Some(ValueId::I64(d)) => d,
-                _ => 0,
-            },
+            None => ms_col.and_then(|c| c.get(n)).unwrap_or(0),
         }
     };
     use std::cmp::Reverse;
@@ -292,15 +286,12 @@ pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_d
     let end_day = start_day + duration_days;
     let posts = g.nodes_with_label("Post");
     // Hoist the day column (avoid pi64 re-resolving "day" per post).
-    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
-    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let day_col = g.i64_col("day");
+    let day_s = day_col.and_then(|c| c.as_slice());
     let day_of = |post: u32| -> i64 {
         match day_s {
             Some(s) => s[post as usize],
-            None => match day_col.and_then(|c| c.get(post)) {
-                Some(ValueId::I64(d)) => d,
-                _ => 0,
-            },
+            None => day_col.and_then(|c| c.get(post)).unwrap_or(0),
         }
     };
 
@@ -553,15 +544,12 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
     // Hoist the day column once instead of pi64() re-resolving the "day" key
     // (an interner lookup) for every friend-of-friend message.
-    let day_col = g.property_key_from_str("day").and_then(|id| g.columns.get(&id));
-    let day_s = day_col.and_then(|c| c.as_i64_slice());
+    let day_col = g.i64_col("day");
+    let day_s = day_col.and_then(|c| c.as_slice());
     let day_of = |msg: u32| -> i64 {
         match day_s {
             Some(s) => s[msg as usize],
-            None => match day_col.and_then(|c| c.get(msg)) {
-                Some(ValueId::I64(d)) => d,
-                _ => 0,
-            },
+            None => day_col.and_then(|c| c.get(msg)).unwrap_or(0),
         }
     };
     let mut rows: Vec<(u32, u32, u32)> = Vec::new();
@@ -595,7 +583,7 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
 /// members. Returns (forum, post_count), (count desc, flid asc), top 20.
 pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32, u32)> {
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
-    let hd_col = g.property_key_from_str("hd").and_then(|id| g.rel_columns.get(&id));
+    let hd_col = g.i64_edge_col("hd");
     // Member-centric: for each qualifying member, count only THEIR posts whose
     // container forum is one they joined after min_day. This touches only members'
     // posts, not every post of every forum (a post has one container Post-forum;
@@ -610,7 +598,7 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
         }
         qforums.clear();
         for e in g.relationships(p, Direction::Incoming, &["hasMember"]) {
-            if let Some(ValueId::I64(day)) = hd_col.and_then(|c| c.get(e.pos)) {
+            if let Some(day) = hd_col.and_then(|c| c.get(e.pos)) {
                 if day > min_day {
                     qforums.insert(e.neighbor);
                 }
@@ -638,14 +626,11 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
 /// (liker, like_ms, message, is_new) where is_new = liker is not a `knows` friend.
 pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, bool)> {
     let friends: HashSet<u32> = g.neighbors_by_type(person, Direction::Outgoing, "knows").collect();
-    let ld_col = g.property_key_from_str("ld").and_then(|id| g.rel_columns.get(&id));
+    let ld_col = g.i64_edge_col("ld");
     let mut best: HashMap<u32, (i64, u32)> = HashMap::new();
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         for e in g.relationships(msg, Direction::Incoming, &["likes"]) {
-            let lms = match ld_col.and_then(|c| c.get(e.pos)) {
-                Some(ValueId::I64(v)) => v,
-                _ => 0,
-            };
+            let lms = ld_col.and_then(|c| c.get(e.pos)).unwrap_or(0);
             best.entry(e.neighbor)
                 .and_modify(|cur| {
                     if lms > cur.0 || (lms == cur.0 && msg < cur.1) {
@@ -756,7 +741,7 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
             }
         }
     }
-    let wf_col = g.property_key_from_str("wf").and_then(|id| g.rel_columns.get(&id));
+    let wf_col = g.i64_edge_col("wf");
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
     // Top 10 by (workFrom asc, plid asc, company name desc) in a heap; plid/name
     // resolved once per matching row, not per sort comparison. (The workAt scan
@@ -774,8 +759,8 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
                 continue;
             }
             let wf = match wf_col.and_then(|c| c.get(e.pos)) {
-                Some(ValueId::I64(y)) => y,
-                _ => continue,
+                Some(y) => y,
+                None => continue,
             };
             if wf >= year {
                 continue;
