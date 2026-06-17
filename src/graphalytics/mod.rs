@@ -1,11 +1,11 @@
 //! LDBC Graphalytics — the six benchmark algorithms (BFS, PR, WCC, CDLP, LCC,
-//! SSSP) over a loaded `.v`/`.e` dataset, plus (to come) the dataset loader and
-//! the reference-output validator. Implemented to the spec v1.0.x §2.3.
+//! SSSP) over a loaded `.v`/`.e` dataset, plus the dataset loader ([`load`]) and
+//! the reference-output validator ([`validate`]). Implemented to the spec v1.0.x §2.3.
 //!
-//! BFS/SSSP are thin wrappers over core (`bfs_distances` / `dijkstra`);
-//! WCC/PageRank/CDLP/LCC are implemented directly over the snapshot adjacency.
-//! Edges are a single `e` type with a `weight` f64 property; algorithms take a
-//! `directed` flag (forward edges = outgoing for directed, both for undirected).
+//! SSSP wraps core's `dijkstra`; the other five are implemented directly over the
+//! snapshot adjacency. Edges are a single `e` type with a `weight` f64 property;
+//! algorithms take a `directed` flag (forward edges = outgoing for directed, both
+//! for undirected).
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
@@ -25,10 +25,35 @@ pub(crate) fn fwd(directed: bool) -> Direction {
 }
 
 /// Breadth-first depth from `source` over forward edges; unreachable vertices get
-/// `i64::MAX` (9223372036854775807), per the spec.
+/// `i64::MAX` (9223372036854775807), per the spec. Level-synchronous BFS over a
+/// dense distance array with two reused frontier buffers -- avoids the per-call
+/// `HashMap` that `bfs_distances` materialises for a graph reaching millions of
+/// vertices.
 pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
-    let dist = g.bfs_distances(source, fwd(directed), &[] as &[&str], None);
-    (0..g.node_count()).map(|v| dist.get(&v).map_or(i64::MAX, |&d| d as i64)).collect()
+    let n = g.node_count();
+    let dir = fwd(directed);
+    let mut dist = vec![i64::MAX; n as usize];
+    if source >= n {
+        return dist;
+    }
+    dist[source as usize] = 0;
+    let mut frontier = vec![source];
+    let mut next: Vec<u32> = Vec::new();
+    let mut depth = 0i64;
+    while !frontier.is_empty() {
+        depth += 1;
+        next.clear();
+        for &u in &frontier {
+            for w in g.neighbors(u, dir) {
+                if dist[w as usize] == i64::MAX {
+                    dist[w as usize] = depth;
+                    next.push(w);
+                }
+            }
+        }
+        std::mem::swap(&mut frontier, &mut next);
+    }
+    dist
 }
 
 /// Single-source shortest paths over forward edges (`weight` edge property when
@@ -83,11 +108,13 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
     let out = fwd(directed);
     let outdeg: Vec<u32> = (0..n as u32).map(|v| g.neighbors(v, out).count() as u32).collect();
     let mut pr = vec![1.0 / nf; n];
+    let mut next = vec![0.0_f64; n];
     for _ in 0..iterations {
         let dangling: f64 = (0..n).filter(|&v| outdeg[v] == 0).map(|v| pr[v]).sum();
         // Push each non-sink's share along its forward edges, accumulating the
-        // pull into each in-neighbour.
-        let mut next = vec![0.0_f64; n];
+        // pull into each in-neighbour. `next` is reused (zeroed in place) rather
+        // than reallocated per iteration.
+        next.iter_mut().for_each(|x| *x = 0.0);
         for u in 0..n as u32 {
             let d = outdeg[u as usize];
             if d == 0 {
@@ -102,7 +129,7 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
         for v in next.iter_mut() {
             *v = base + damping * *v;
         }
-        pr = next;
+        std::mem::swap(&mut pr, &mut next);
     }
     pr
 }
