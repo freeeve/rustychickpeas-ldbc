@@ -752,7 +752,13 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
     }
     let wf_col = g.property_key_from_str("wf").and_then(|id| g.rel_columns.get(&id));
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
-    let mut rows: Vec<(u32, u32, i64)> = Vec::new();
+    // Top 10 by (workFrom asc, plid asc, company name desc) in a heap; plid/name
+    // resolved once per matching row, not per sort comparison. (The workAt scan
+    // is the inherent CSR cost.)
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(Reverse<i64>, Reverse<i64>, &str, u32, u32)>> =
+        BinaryHeap::with_capacity(11);
     for (&p, &d) in &reach {
         if d < 1 {
             continue;
@@ -765,17 +771,34 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
                 Some(ValueId::I64(y)) => y,
                 _ => continue,
             };
-            if wf < year {
-                rows.push((p, e.neighbor, wf));
+            if wf >= year {
+                continue;
+            }
+            // larger key ranks earlier: smaller wf, smaller plid, larger name.
+            let item = (
+                Reverse(wf),
+                Reverse(pi64(g, p, "plid")),
+                pstr(g, e.neighbor, "name").unwrap_or(""),
+                p,
+                e.neighbor,
+            );
+            if top.len() < 10 {
+                top.push(Reverse(item));
+            } else if item > top.peek().unwrap().0 {
+                top.pop();
+                top.push(Reverse(item));
             }
         }
     }
+    let mut rows: Vec<(u32, u32, i64)> = top
+        .into_iter()
+        .map(|Reverse((Reverse(wf), _, _, p, company))| (p, company, wf))
+        .collect();
     rows.sort_by(|a, b| {
         a.2.cmp(&b.2)
             .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
             .then(pstr(g, b.1, "name").cmp(&pstr(g, a.1, "name")))
     });
-    rows.truncate(10);
     rows
 }
 
