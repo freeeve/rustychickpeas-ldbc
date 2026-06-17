@@ -79,30 +79,36 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str, limit: usize) -> Vec<(String, f64)> 
     }
 
     // (uri, dateModified, score) per qualifying candidate.
-    let mut rows: Vec<(String, String, f64)> = Vec::new();
+    // (node, dateModified, score): tally the shared-entity counts by testing each
+    // candidate's about/mentions neighbours against the focal sets, rather than
+    // materializing a HashSet per candidate; uris are resolved only for kept rows.
+    let mut rows: Vec<(u32, &str, f64)> = Vec::new();
     for o in candidates {
         let Some(dt) = pstr(g, o, "dateModified").filter(|s| !s.is_empty()) else {
             continue;
         };
-        let other_about = targets(g, o, "about");
-        let other_mentions = targets(g, o, "mentions");
-        let a2a = focal_about.intersection(&other_about).count();
-        let a2m = focal_about.intersection(&other_mentions).count();
-        let m2a = focal_mentions.intersection(&other_about).count();
-        let m2m = focal_mentions.intersection(&other_mentions).count();
+        let (mut a2a, mut m2a, mut a2m, mut m2m) = (0usize, 0usize, 0usize, 0usize);
+        for e in g.neighbors_by_type(o, Direction::Outgoing, "about") {
+            a2a += focal_about.contains(&e) as usize;
+            m2a += focal_mentions.contains(&e) as usize;
+        }
+        for e in g.neighbors_by_type(o, Direction::Outgoing, "mentions") {
+            a2m += focal_about.contains(&e) as usize;
+            m2m += focal_mentions.contains(&e) as usize;
+        }
         let score = 2.0 * a2a as f64 + 1.5 * a2m as f64 + 1.0 * m2a as f64 + 0.5 * m2m as f64;
         if score <= 0.0 {
             continue;
         }
-        rows.push((pstr(g, o, "uri").unwrap_or("?").to_string(), dt.to_string(), score));
+        rows.push((o, dt, score));
     }
 
     // ORDER BY score DESC, then dateModified DESC (ISO-8601, hence lexicographic).
     rows.sort_by(|a, b| {
-        b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal).then_with(|| b.1.cmp(&a.1))
+        b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal).then_with(|| b.1.cmp(a.1))
     });
     rows.truncate(limit);
-    rows.into_iter().map(|(uri, _dt, score)| (uri, score)).collect()
+    rows.into_iter().map(|(o, _dt, score)| (pstr(g, o, "uri").unwrap_or("?").to_string(), score)).collect()
 }
 
 #[cfg(test)]
