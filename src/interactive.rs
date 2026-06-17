@@ -432,14 +432,27 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
 /// IC8 — the 20 most recent replies to the start person's messages, ordered by
 /// (replyCreationDate desc, reply id). Returns (reply, ms).
 pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
-    let mut rows: Vec<(u32, i64)> = Vec::new();
+    // Keep the top 20 by (ms desc, id asc) in a size-20 heap rather than collecting
+    // every reply (a high-degree seed has thousands) and sorting the lot.
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(21);
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         for reply in g.neighbors_by_type(msg, Direction::Incoming, "replyOf") {
-            rows.push((reply, pi64(g, reply, "ms")));
+            let key = (pi64(g, reply, "ms"), Reverse(reply));
+            if top.len() < 20 {
+                top.push(Reverse(key));
+            } else if key > top.peek().unwrap().0 {
+                top.pop();
+                top.push(Reverse(key));
+            }
         }
     }
+    let mut rows: Vec<(u32, i64)> = top
+        .into_iter()
+        .map(|Reverse((ms, Reverse(id)))| (id, ms))
+        .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows.truncate(20);
     rows
 }
 
