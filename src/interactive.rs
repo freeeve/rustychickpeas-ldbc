@@ -821,10 +821,12 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
         g.neighbors_by_type(t, Direction::Outgoing, "hasType").any(|c| class_set.contains(&c))
     };
     let posts = g.nodes_with_label("Post");
-    let mut rows: Vec<(u32, usize, Vec<String>)> = Vec::new();
+    // Collect qualifying tag *ids* per friend (dedup, no String allocation in the
+    // hot loop); resolve the names only for the top-20 friends returned.
+    let mut rows: Vec<(u32, usize, HashSet<u32>)> = Vec::new();
     for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
         let mut count = 0usize;
-        let mut tags: std::collections::BTreeSet<String> = Default::default();
+        let mut tag_ids: HashSet<u32> = HashSet::new();
         for c in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
             for parent in g.neighbors_by_type(c, Direction::Outgoing, "replyOf") {
                 if !posts.is_some_and(|p| p.contains(parent)) {
@@ -834,9 +836,7 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
                 for t in g.neighbors_by_type(parent, Direction::Outgoing, "hasTag") {
                     if qual_tag(t) {
                         matched = true;
-                        if let Some(n) = pstr(g, t, "name") {
-                            tags.insert(n.to_string());
-                        }
+                        tag_ids.insert(t);
                     }
                 }
                 if matched {
@@ -845,12 +845,21 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
             }
         }
         if count > 0 {
-            rows.push((friend, count, tags.into_iter().collect()));
+            rows.push((friend, count, tag_ids));
         }
     }
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
     rows.truncate(20);
-    rows
+    rows.into_iter()
+        .map(|(friend, count, tag_ids)| {
+            let mut names: Vec<String> = tag_ids
+                .iter()
+                .filter_map(|&t| pstr(g, t, "name").map(str::to_string))
+                .collect();
+            names.sort();
+            (friend, count, names)
+        })
+        .collect()
 }
 
 /// IS4 — a message's (creationMs, content). Needs the loader's `load_content`
