@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
+use rustychickpeas_core::{Column, Direction, GraphSnapshot, ValueId};
 
 use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::loader::load_graph_opts;
@@ -677,12 +677,25 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
     let interests: HashSet<u32> = g.neighbors_by_type(person, Direction::Outgoing, "hasInterest").collect();
     let posts = g.nodes_with_label("Post");
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
-    let mut rows: Vec<(u32, i64)> = Vec::new();
+    // Hoist the bmon/bdom (birthday filter, read per FoF) and plid (sort key)
+    // columns so each read is a direct column lookup, not pi64 re-resolving the key.
+    let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
+    let (bmon_c, bdom_c, plid_c) = (col("bmon"), col("bdom"), col("plid"));
+    let rd = |c: Option<&Column>, n: u32| -> i64 {
+        match c.and_then(|col| col.get(n)) {
+            Some(ValueId::I64(v)) => v,
+            _ => 0,
+        }
+    };
+    // Top 10 by (score desc, plid asc) in a heap; plid resolved once per FoF.
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(i64, Reverse<i64>, u32)>> = BinaryHeap::with_capacity(11);
     for (&foaf, &d) in &reach {
         if d != 2 {
             continue;
         }
-        let (bmon, bdom) = (pi64(g, foaf, "bmon"), pi64(g, foaf, "bdom"));
+        let (bmon, bdom) = (rd(bmon_c, foaf), rd(bdom_c, foaf));
         if !((bmon == month && bdom >= 21) || (bmon == next && bdom < 22)) {
             continue;
         }
@@ -697,10 +710,19 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
                 uncommon += 1;
             }
         }
-        rows.push((foaf, common - uncommon));
+        let item = (common - uncommon, Reverse(rd(plid_c, foaf)), foaf);
+        if top.len() < 10 {
+            top.push(Reverse(item));
+        } else if item > top.peek().unwrap().0 {
+            top.pop();
+            top.push(Reverse(item));
+        }
     }
+    let mut rows: Vec<(u32, i64)> = top
+        .into_iter()
+        .map(|Reverse((score, _, foaf))| (foaf, score))
+        .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
-    rows.truncate(10);
     rows
 }
 
