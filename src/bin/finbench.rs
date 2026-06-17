@@ -128,4 +128,17 @@ fn run_queries(g: &GraphSnapshot) {
     harness::time_query("FB4 guarantee_exposure", runs, || {
         finbench::guarantee_exposure(g, seed_person) as usize
     });
+
+    // Faithful TCRn (tasks 079-090), full window + generous truncation.
+    println!(
+        "  CR1 blocked-medium(acct {seed}): {} rows; CR2 loan-gather(person {seed_person}): {} rows",
+        finbench::cr1(g, seed, i64::MIN, i64::MAX, 10_000, false).len(),
+        finbench::cr2(g, seed_person, i64::MIN, i64::MAX, 10_000, false).len(),
+    );
+    harness::time_query("CR1 blocked-medium", runs, || {
+        finbench::cr1(g, seed, i64::MIN, i64::MAX, 10_000, false).len()
+    });
+    harness::time_query("CR2 loan-gather", runs, || {
+        finbench::cr2(g, seed_person, i64::MIN, i64::MAX, 10_000, false).len()
+    });
 }

@@ -164,11 +164,12 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         comp.insert(v[0].parse().unwrap_or(0), nid);
         b.add_node(Some(nid), &["Company"]).unwrap();
     })?;
-    for_each_csv(&raw.join("medium"), &["id"], |v| {
+    for_each_csv(&raw.join("medium"), &["id", "isBlocked"], |v| {
         let nid = next;
         next += 1;
         med.insert(v[0].parse().unwrap_or(0), nid);
         b.add_node(Some(nid), &["Medium"]).unwrap();
+        b.set_prop_bool(nid, "blocked", v[1] == "true").unwrap();
     })?;
     for_each_csv(&raw.join("loan"), &["id", "loanAmount", "balance"], |v| {
         let nid = next;
@@ -350,6 +351,21 @@ fn rel_amt(g: &GraphSnapshot, pos: u32) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Read a node property (loan `amount`/`balance`, account/medium `blocked`).
+fn node_prop(g: &GraphSnapshot, node: u32, key: &str) -> Option<rustychickpeas_core::ValueId> {
+    g.property_key_from_str(key)
+        .and_then(|id| g.columns.get(&id))
+        .and_then(|c| c.get(node))
+}
+
+/// True if `medium`/`account` carries `blocked = true`.
+fn is_blocked(g: &GraphSnapshot, node: u32) -> bool {
+    matches!(
+        node_prop(g, node, "blocked"),
+        Some(rustychickpeas_core::ValueId::Bool(true))
+    )
+}
+
 /// TCR1-style — trace `transfer` paths (≤`max_hops`) feeding into `account`
 /// within `[start_ms, end_ms]`, returning the upstream accounts. The window
 /// filter reads each edge's timestamp during the reverse BFS.
@@ -509,4 +525,139 @@ pub fn guarantee_exposure(g: &GraphSnapshot, person: u32) -> f64 {
         }
     }
     total
+}
+
+// === TCR1-TCR12 (faithful spec implementations; tasks 079-090) ============
+
+/// TCR1 "Blocked medium related accounts" — accounts reachable from `account` by
+/// a ≤3-hop, time-ascending, in-window reverse `transfer` trace that are signed
+/// in by a **blocked** Medium. Returns (otherId, distance, mediumId, mediumType).
+pub fn cr1(
+    g: &GraphSnapshot,
+    account: u32,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    truncation_order_asc: bool,
+) -> Vec<(u32, u32, u32, String)> {
+    let mut results = Vec::new();
+    let mut visited = HashSet::new();
+    visited.insert(account);
+    let mut queue: VecDeque<(u32, u32, i64)> = VecDeque::new(); // (node, depth, last_ts)
+    queue.push_back((account, 0, i64::MAX));
+
+    while let Some((node, depth, last_ts)) = queue.pop_front() {
+        if depth >= 3 {
+            continue;
+        }
+        // In-window, strictly-ascending (forward) = strictly-decreasing backward.
+        let mut edges: Vec<_> = g
+            .relationships(node, Direction::Incoming, "transfer")
+            .filter(|r| {
+                let ts = rel_ts(g, r.pos);
+                ts >= start_ms && ts <= end_ms && ts < last_ts
+            })
+            .collect();
+        // Truncation on hub vertices: keep the top `truncation_limit` by time.
+        if truncation_order_asc {
+            edges.sort_by_key(|r| rel_ts(g, r.pos));
+        } else {
+            edges.sort_by_key(|r| std::cmp::Reverse(rel_ts(g, r.pos)));
+        }
+        edges.truncate(truncation_limit as usize);
+
+        for r in edges {
+            let ts = rel_ts(g, r.pos);
+            if visited.insert(r.neighbor) {
+                let dist = depth + 1;
+                for sig in g.relationships(r.neighbor, Direction::Incoming, "signIn") {
+                    if is_blocked(g, sig.neighbor) {
+                        results.push((r.neighbor, dist, sig.neighbor, "Medium".to_string()));
+                    }
+                }
+                queue.push_back((r.neighbor, dist, ts));
+            }
+        }
+    }
+    results.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)).then(a.2.cmp(&b.2)));
+    results
+}
+
+/// TCR2 "Fund gathered from the accounts applying loans" — from a Person's owned
+/// accounts, reverse-trace in-window `transfer` (≤3 hops), and for each upstream
+/// account sum the loan amount/balance deposited into it. Returns (otherId,
+/// sumLoanAmount, sumLoanBalance).
+pub fn cr2(
+    g: &GraphSnapshot,
+    person: u32,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    truncation_order_asc: bool,
+) -> Vec<(u32, f64, f64)> {
+    let mut by_acct: HashMap<u32, (f64, f64)> = HashMap::new();
+
+    for own in g.relationships(person, Direction::Outgoing, "own") {
+        let owned = own.neighbor;
+        let mut visited = HashSet::new();
+        visited.insert(owned);
+        let mut queue: VecDeque<(u32, u32, i64)> = VecDeque::new();
+        queue.push_back((owned, 0, i64::MAX));
+
+        while let Some((node, depth, last_ts)) = queue.pop_front() {
+            if depth >= 3 {
+                continue;
+            }
+            let mut rels: Vec<_> = g
+                .relationships(node, Direction::Incoming, "transfer")
+                .collect();
+            if truncation_order_asc {
+                rels.sort_by_key(|r| rel_ts(g, r.pos));
+            } else {
+                rels.sort_by_key(|r| std::cmp::Reverse(rel_ts(g, r.pos)));
+            }
+            rels.truncate(truncation_limit as usize);
+            for r in rels {
+                let ts = rel_ts(g, r.pos);
+                if ts < start_ms || ts > end_ms || ts >= last_ts {
+                    continue;
+                }
+                if visited.insert(r.neighbor) {
+                    queue.push_back((r.neighbor, depth + 1, ts));
+                }
+            }
+        }
+
+        for &acct in visited.iter().filter(|&&a| a != owned) {
+            let mut loans = HashSet::new();
+            let (mut amt, mut bal) = (0.0, 0.0);
+            for dep in g.relationships(acct, Direction::Incoming, "deposit") {
+                let ts = rel_ts(g, dep.pos);
+                if ts < start_ms || ts > end_ms {
+                    continue;
+                }
+                if loans.insert(dep.neighbor) {
+                    amt += node_prop(g, dep.neighbor, "amount")
+                        .and_then(|v| v.to_f64())
+                        .unwrap_or(0.0);
+                    bal += node_prop(g, dep.neighbor, "balance")
+                        .and_then(|v| v.to_f64())
+                        .unwrap_or(0.0);
+                }
+            }
+            if !loans.is_empty() {
+                let e = by_acct.entry(acct).or_insert((0.0, 0.0));
+                e.0 += amt;
+                e.1 += bal;
+            }
+        }
+    }
+
+    let mut out: Vec<(u32, f64, f64)> = by_acct.into_iter().map(|(a, (x, y))| (a, x, y)).collect();
+    out.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    out
 }
