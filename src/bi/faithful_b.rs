@@ -102,12 +102,11 @@ pub(crate) fn knows_reachability(g: &GraphSnapshot) -> (usize, u32) {
     (reachable, ecc)
 }
 
-/// Find a place node (City/Country/...) by its LDBC id.
+/// Find a place node (City/Country/...) by its globally-unique LDBC id (`lid`),
+/// via the cached label-free `node_by_property` index (one index serves City and
+/// Country, replacing the per-label scan).
 pub(crate) fn place_by_lid(g: &GraphSnapshot, lid: i64) -> Option<u32> {
-    ["City", "Country"].iter().find_map(|label| {
-        g.nodes_with_label(label)
-            .and_then(|ns| ns.iter().find(|&n| pi64(g, n, "lid") == lid))
-    })
+    g.node_by_property("lid", lid)
 }
 
 /// Precompute the per-pair person interaction counts for Q19: the number of
@@ -199,10 +198,10 @@ pub(crate) fn org_by_name(g: &GraphSnapshot, label: &str, name: &str) -> Option<
         .and_then(|ns| ns.iter().find(|&n| pstr(g, n, "name") == Some(name)))
 }
 
-/// Find a Person node by its LDBC id.
+/// Find a Person node by its globally-unique LDBC id (`plid`), via the cached
+/// label-free `node_by_property` index.
 pub(crate) fn person_by_plid(g: &GraphSnapshot, plid: i64) -> Option<u32> {
-    g.nodes_with_label("Person")
-        .and_then(|ns| ns.iter().find(|&n| pi64(g, n, "plid") == plid))
+    g.node_by_property("plid", plid)
 }
 
 /// Per-person study records (university, classYear), read from studyAt edges and
