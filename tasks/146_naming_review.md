@@ -11,10 +11,16 @@ convention), and rename where a clearer/standard term exists.
   `khop_nodes` / `nodes_within_hops` / `subgraph_nodes` (igraph precedent;
   set-valued name honest about the NodeSet return).
 - `has_edge` → `has_rel` (already renamed; node/rel convention).
+- `relationship_property` → `rel_prop` (rel analogue of node `prop`; the verbose
+  name kept as a thin alias so the in-progress FinBench client keeps compiling).
+- `i64_col` / `bool_col` / `i64_rel_col` → `col(key)` / `rel_col(key)` returning a
+  resolved `Col`, narrowed by `Col::i64()` / `Col::bool()`. Type-prefixed accessor
+  names are un-rusty (Rust leads with the operation, type as a suffixed getter:
+  `as_i64`, `get_i64`); the type-free accessor + typed getter is the polars
+  `column(name).i64()` shape. `I64Col`/`BoolCol` (+ `get`/`as_slice`) unchanged.
 
 ## To scrutinise (core `GraphSnapshot`)
 - `first_neighbor`, `follow` (chained single-step walk)
-- `i64_col` / `bool_col` / `i64_edge_col` + `I64Col`/`BoolCol::get`/`as_slice`
 - `node_by_property` / `node_by_label_property`
 - `has_rel`, `has_neighbor_with_property`
 - `str_prop` (None on absent OR empty)
