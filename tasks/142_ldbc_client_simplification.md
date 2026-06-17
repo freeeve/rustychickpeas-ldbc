@@ -7,6 +7,13 @@ primitives. Avoid `src/interactive.rs` while the other (IC) session owns it.
 - `node_by_property` for the `nodes_with_label(L).iter().find(pstr/pi64==x)` scans
   (BI 11+, IC). Verify label-uniqueness; where label-scoped, use
   `node_by_label_property` (tasks/141) instead.
+  - DONE (BI): `place_by_lid` (also drops its 2-label City/Country scan) and
+    `person_by_plid` now call `node_by_property` — `lid`/`plid` are globally unique
+    and type-exclusive. Q19/Q20 unchanged on SF1.
+  - BLOCKED (BI): the `name`-keyed finds — `org_by_name`, and the Country / Tag /
+    TagClass `.find(name == x)` sites in faithful_a/b/c. `name` is shared across
+    labels (a Tag and a Country can collide), so a global `node_by_property` is
+    unsafe; these need `node_by_label_property` (tasks/141). ~9 sites.
 - `neighbors_in_set` for the "iterate hasCreator, keep only Posts" filter (IC ~5).
 
 ## #2 — finish the top-k migration
