@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pbool, pstr};
+use crate::props::{pbool, pstr, top_k_by_key};
 
 /// The entity types an about-target can carry: the two leaf classes plus the
 /// materialized `coreconcepts:Thing` super-class (`rdfs:subClassOf` closure).
@@ -61,10 +61,7 @@ pub fn run(g: &GraphSnapshot, live_coverage: bool, audience_uri: &str, limit: us
             }
         }
     }
-    let mut rows: Vec<(String, usize)> = counts.into_iter().map(|(t, n)| (t.to_string(), n)).collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows.truncate(limit);
-    rows
+    top_k_by_key(counts.into_iter().map(|(t, n)| (t.to_string(), n)), limit)
 }
 
 #[cfg(test)]

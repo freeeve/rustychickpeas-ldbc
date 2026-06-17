@@ -21,7 +21,7 @@
 
 use rustychickpeas_core::GraphSnapshot;
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_key};
 
 /// The concrete `CreativeWork` subclasses the SPB data instantiates; `?type !=
 /// cwork:CreativeWork` in the template ranges over exactly these (the loader
@@ -44,14 +44,11 @@ pub fn run(g: &GraphSnapshot, after: &str, before: &str, limit: usize) -> Vec<(S
                 .count()
         })
     };
-    let mut rows: Vec<(String, usize)> = SUBTYPES
+    let rows = SUBTYPES
         .iter()
         .map(|&label| (label.to_string(), count_in_window(label)))
-        .filter(|&(_, n)| n > 0)
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows.truncate(limit);
-    rows
+        .filter(|&(_, n)| n > 0);
+    top_k_by_key(rows, limit)
 }
 
 #[cfg(test)]

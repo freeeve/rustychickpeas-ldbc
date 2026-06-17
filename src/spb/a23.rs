@@ -43,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{parse_date, pstr};
+use crate::props::{parse_date, pstr, top_k_by_key};
 
 /// Read a required dense string property, treating the empty-string sentinel a
 /// dense column returns for an absent value as "not present".
@@ -101,13 +101,9 @@ pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> V
         }
     }
 
-    let mut rows: Vec<(String, usize)> = by_tag
-        .into_iter()
-        .map(|(t, days)| (pstr(g, t, "uri").unwrap_or("?").to_string(), days.len()))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows.truncate(limit);
-    rows
+    let rows =
+        by_tag.into_iter().map(|(t, days)| (pstr(g, t, "uri").unwrap_or("?").to_string(), days.len()));
+    top_k_by_key(rows, limit)
 }
 
 #[cfg(test)]
