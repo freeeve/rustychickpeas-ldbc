@@ -280,12 +280,32 @@ pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_d
                 }
             }
         }
-        let mut rows: Vec<(u32, u32)> = (0..count.len())
-            .filter(|&i| count[i] != 0 && count[i] != BEFORE)
-            .map(|i| (lo + i as u32, count[i]))
+        // Keep the top 10 by (count desc, name asc) in a size-10 min-heap instead
+        // of collecting every qualifying tag and sorting — the heap key is the
+        // result ordering reversed (root = worst kept), and names are borrowed
+        // (no allocation). Tag names are unique, so the top-10 is unambiguous.
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let mut top: BinaryHeap<Reverse<(u32, Reverse<&str>, u32)>> = BinaryHeap::with_capacity(11);
+        for i in 0..count.len() {
+            let c = count[i];
+            if c == 0 || c == BEFORE {
+                continue;
+            }
+            let tag = lo + i as u32;
+            let item = (c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag);
+            if top.len() < 10 {
+                top.push(Reverse(item));
+            } else if item > top.peek().unwrap().0 {
+                top.pop();
+                top.push(Reverse(item));
+            }
+        }
+        let mut rows: Vec<(u32, u32)> = top
+            .into_iter()
+            .map(|Reverse((c, _, tag))| (tag, c))
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
-        rows.truncate(10);
         return rows;
     }
 

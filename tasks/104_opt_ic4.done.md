@@ -14,12 +14,12 @@ Per-query optimization loop. Methodology + commands:
 - [x] 6. Value-identity: IC emit byte-identical
 
 ## Measurements
-| metric                  | baseline | after |
-|-------------------------|----------|-------|
-| allocs                  | 36       | 13    |
-| bytes                   | 321,832  | 156,640 |
-| wall-clock median (ms)  | ~7.2     | ~5.3 (~27%) |
-| hot fn (CPU %)          | balanced (HashMap growth) | CSR walk |
+| metric                  | original | dense tags | + top-10 heap |
+|-------------------------|----------|------------|---------------|
+| allocs                  | 36       | 13         | **3** |
+| bytes                   | 321,832  | 156,640    | **64,664** |
+| wall-clock median (ms)  | ~7.2     | ~5.3       | **~2.6** (~2.8× vs orig) |
+| hot fn (CPU %)          | HashMap growth | CSR walk + sort | CSR walk |
 
 ## Notes
 
@@ -32,4 +32,12 @@ used before the window (excluded from "new"). No hashing, no growth; plus the
 IC3-style `day` hoist. Value-identical (id unique; sort makes order deterministic).
 Falls back to the HashMap path if Tag ids are ever non-contiguous.
 
-**Status: done** (dense tag array + day hoist).
+Then (step 2 of the alloc work) the result selection: it collected *every*
+qualifying tag into a growing Vec and sorted the lot (a `pstr` name compare per
+comparison) to take 10. Replaced with a size-10 min-heap keyed on (count desc,
+name asc) with **borrowed** names — drops the ~10 `rows` reallocs (13→3 allocs)
+*and* ~halves wall-clock again (one `pstr` per qualifying tag instead of per
+comparison). The remaining 3 allocs / 65 KB are the dense `count` array, the
+heap, and the 10-row result — the `count` array is the `scratch_u32` target.
+
+**Status: done** (dense tag array + day hoist + top-10 heap).
