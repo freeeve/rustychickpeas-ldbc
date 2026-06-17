@@ -11,6 +11,11 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
+pub mod load;
+pub mod validate;
+
+pub use load::{load, Dataset, Params};
+
 /// Forward edge direction (BFS/SSSP/out-neighbours): outgoing for a directed
 /// graph, both for an undirected one (whose edges are stored once).
 pub(crate) fn fwd(directed: bool) -> Direction {
