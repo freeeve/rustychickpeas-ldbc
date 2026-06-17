@@ -661,3 +661,687 @@ pub fn cr2(
     });
     out
 }
+
+// ===== TCR5-TCR12 (drafted; tasks 083-090) =====
+// ===== CR5 =====
+/// TCR5-style — exact account transfer trace from a person's account through at
+/// most 3 transfer hops, with strictly increasing timestamps in [start_ms, end_ms]
+/// and no cycles. Returns all discovered paths sorted by length descending.
+pub fn cr5(
+    g: &GraphSnapshot,
+    person: u32,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    _truncation_order: &str,
+) -> Vec<Vec<u32>> {
+    let mut all_paths = Vec::new();
+
+    // Find accounts owned by this person via "own" edges (person -> account)
+    for r in g.relationships(person, Direction::Outgoing, "own") {
+        let start_account = r.neighbor;
+        let mut path = vec![start_account];
+        let mut visited = HashSet::new();
+        visited.insert(start_account);
+
+        cr5_dfs(
+            g,
+            start_account,
+            start_ms,
+            end_ms,
+            i64::MIN,
+            &mut path,
+            &mut visited,
+            &mut all_paths,
+            0,
+            truncation_limit,
+        );
+    }
+
+    // Sort by path length descending
+    all_paths.sort_by(|a, b| b.len().cmp(&a.len()));
+    all_paths
+}
+
+/// DFS helper for cr5: explores transfer paths from a node with time-window,
+/// strictly increasing timestamp, and cycle constraints.
+#[allow(clippy::too_many_arguments)]
+fn cr5_dfs(
+    g: &GraphSnapshot,
+    node: u32,
+    start_ms: i64,
+    end_ms: i64,
+    last_ts: i64,
+    path: &mut Vec<u32>,
+    visited: &mut HashSet<u32>,
+    out: &mut Vec<Vec<u32>>,
+    depth: u32,
+    truncation_limit: u32,
+) {
+    // Stop at max 3 hops (edges)
+    if depth >= 3 {
+        return;
+    }
+
+    // Collect valid outgoing transfer edges: in time window, strictly after
+    // last_ts, and target not yet visited in this path
+    let mut candidates: Vec<(u32, i64)> = Vec::new();
+    for r in g.relationships(node, Direction::Outgoing, "transfer") {
+        let ts = rel_ts(g, r.pos);
+        if ts >= start_ms && ts <= end_ms && ts > last_ts && !visited.contains(&r.neighbor) {
+            candidates.push((r.neighbor, ts));
+        }
+    }
+
+    // Apply truncation: sort by timestamp ascending, then keep top N edges
+    if truncation_limit > 0 && candidates.len() > truncation_limit as usize {
+        candidates.sort_by_key(|(_, ts)| *ts);
+        candidates.truncate(truncation_limit as usize);
+    }
+
+    // Explore each candidate neighbor
+    for (neighbor, ts) in candidates {
+        path.push(neighbor);
+        visited.insert(neighbor);
+        out.push(path.clone()); // Record this path
+
+        // Recurse deeper
+        cr5_dfs(
+            g,
+            neighbor,
+            start_ms,
+            end_ms,
+            ts,
+            path,
+            visited,
+            out,
+            depth + 1,
+            truncation_limit,
+        );
+
+        path.pop();
+        visited.remove(&neighbor);
+    }
+}
+
+// ===== CR6 =====
+/// TCR6-style — Withdrawal after Many-to-One transfer.
+///
+/// Given a card account (dstCard), find all accounts (mid) that:
+/// 1. Withdraw to dstCard with amount > threshold2 within [startTime, endTime]
+/// 2. Have > 3 distinct incoming transfers from sources with amount > threshold1
+///
+/// Returns Vec<(midId, sumEdge1Amount, sumEdge2Amount)> sorted by
+/// sumEdge2Amount descending, then midId ascending.
+pub fn cr6(
+    g: &GraphSnapshot,
+    dst_card: u32,
+    threshold1: f64,
+    threshold2: f64,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    truncation_order: &str,
+) -> Vec<(u32, f64, f64)> {
+    let mut results = Vec::new();
+
+    // Determine sort order for truncation: descending by default, ascending if specified
+    let descending = !truncation_order.to_lowercase().contains("asc");
+
+    let sort_by_amt = |a: &(u32, f64), b: &(u32, f64)| {
+        if descending {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        } else {
+            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+        }
+    };
+
+    // Step 1: Find all withdrawals to dstCard within time window and amount > threshold2
+    let mut mid_withdrawals: HashMap<u32, Vec<f64>> = HashMap::new();
+    let mut withdraw_edges: Vec<(u32, f64)> = g
+        .relationships(dst_card, Direction::Incoming, "withdraw")
+        .filter_map(|r| {
+            let ts = rel_ts(g, r.pos);
+            let amt = rel_amt(g, r.pos);
+            if (start_ms..=end_ms).contains(&ts) && amt > threshold2 {
+                Some((r.neighbor, amt))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Sort by amount and truncate
+    withdraw_edges.sort_by(sort_by_amt);
+    if (withdraw_edges.len() as u32) > truncation_limit {
+        withdraw_edges.truncate(truncation_limit as usize);
+    }
+
+    // Group by mid account
+    for (mid, amt) in withdraw_edges {
+        mid_withdrawals
+            .entry(mid)
+            .or_insert_with(Vec::new)
+            .push(amt);
+    }
+
+    // Step 2: For each mid, find incoming transfers within time window and amount > threshold1
+    for (mid, withdrawal_amts) in mid_withdrawals {
+        let mut transfer_sources: HashMap<u32, Vec<f64>> = HashMap::new();
+        let mut transfer_edges: Vec<(u32, f64)> = g
+            .relationships(mid, Direction::Incoming, "transfer")
+            .filter_map(|r| {
+                let ts = rel_ts(g, r.pos);
+                let amt = rel_amt(g, r.pos);
+                if (start_ms..=end_ms).contains(&ts) && amt > threshold1 {
+                    Some((r.neighbor, amt))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by amount and truncate
+        transfer_edges.sort_by(sort_by_amt);
+        if (transfer_edges.len() as u32) > truncation_limit {
+            transfer_edges.truncate(truncation_limit as usize);
+        }
+
+        // Collect by source account
+        for (src, amt) in transfer_edges {
+            transfer_sources
+                .entry(src)
+                .or_insert_with(Vec::new)
+                .push(amt);
+        }
+
+        // Filter: need > 3 distinct transfer sources
+        if transfer_sources.len() > 3 {
+            let sum_edge1 = transfer_sources
+                .values()
+                .flat_map(|amts| amts.iter())
+                .sum::<f64>();
+            let sum_edge2 = withdrawal_amts.iter().sum::<f64>();
+
+            // Round to 3 decimal places as per spec
+            let sum_edge1 = (sum_edge1 * 1000.0).round() / 1000.0;
+            let sum_edge2 = (sum_edge2 * 1000.0).round() / 1000.0;
+
+            results.push((mid, sum_edge1, sum_edge2));
+        }
+    }
+
+    // Sort results: by sumEdge2Amount descending, then midId ascending
+    results.sort_by(|a, b| {
+        b.2.partial_cmp(&a.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
+    results
+}
+
+// ===== CR7 =====
+#[derive(Clone, Copy, Debug)]
+pub enum TruncationOrder {
+    Ascending,
+    Descending,
+}
+
+/// TCR7-style — transfer in/out ratio. Given an account and time window,
+/// find all transfer-in and transfer-out edges where amount exceeds a threshold.
+/// Return the count of distinct source/destination accounts and the ratio of
+/// total transfer-in amount to transfer-out amount (or -1.0 if no outgoing transfers).
+pub fn cr7(
+    g: &GraphSnapshot,
+    account: u32,
+    threshold: f64,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    truncation_order: TruncationOrder,
+) -> (u32, u32, f64) {
+    // Collect and filter transfer-in edges (incoming)
+    let mut in_edges: Vec<(i64, f64, u32)> = Vec::new();
+    for r in g.relationships(account, Direction::Incoming, "transfer") {
+        let ts = rel_ts(g, r.pos);
+        let amt = rel_amt(g, r.pos);
+        if ts >= start_ms && ts <= end_ms && amt > threshold {
+            in_edges.push((ts, amt, r.neighbor));
+        }
+    }
+
+    // Sort by truncation order and apply limit
+    match truncation_order {
+        TruncationOrder::Ascending => in_edges.sort_by_key(|e| e.0),
+        TruncationOrder::Descending => in_edges.sort_by(|a, b| b.0.cmp(&a.0)),
+    }
+    in_edges.truncate(truncation_limit as usize);
+
+    // Aggregate transfer-in: count distinct sources, sum amounts
+    let mut in_src_set = HashSet::new();
+    let mut in_amount = 0.0;
+    for (_, amt, neighbor) in &in_edges {
+        in_src_set.insert(*neighbor);
+        in_amount += amt;
+    }
+    let num_src = in_src_set.len() as u32;
+
+    // Collect and filter transfer-out edges (outgoing)
+    let mut out_edges: Vec<(i64, f64, u32)> = Vec::new();
+    for r in g.relationships(account, Direction::Outgoing, "transfer") {
+        let ts = rel_ts(g, r.pos);
+        let amt = rel_amt(g, r.pos);
+        if ts >= start_ms && ts <= end_ms && amt > threshold {
+            out_edges.push((ts, amt, r.neighbor));
+        }
+    }
+
+    // Sort by truncation order and apply limit
+    match truncation_order {
+        TruncationOrder::Ascending => out_edges.sort_by_key(|e| e.0),
+        TruncationOrder::Descending => out_edges.sort_by(|a, b| b.0.cmp(&a.0)),
+    }
+    out_edges.truncate(truncation_limit as usize);
+
+    // Aggregate transfer-out: count distinct destinations, sum amounts
+    let mut out_dst_set = HashSet::new();
+    let mut out_amount = 0.0;
+    for (_, amt, neighbor) in &out_edges {
+        out_dst_set.insert(*neighbor);
+        out_amount += amt;
+    }
+    let num_dst = out_dst_set.len() as u32;
+
+    // Calculate ratio (return -1.0 if no outgoing transfers)
+    let in_out_ratio = if out_amount > 0.0 {
+        ((in_amount / out_amount * 1000.0).round() / 1000.0)
+    } else {
+        -1.0
+    };
+
+    (num_src, num_dst, in_out_ratio)
+}
+
+// ===== CR8 =====
+/// TCR8-style — transfer trace after loan applied. Given a loan and a time window,
+/// trace transfer/withdraw paths from the account(s) the loan deposits to (up to distance 3 from loan).
+/// For each transfer, check if the amount exceeds threshold * (source account's total incoming transfer amount).
+/// Return all reached accounts (dstId, ratio, minDistanceFromLoan), sorted by distance DESC, ratio DESC, id ASC.
+pub fn cr8(
+    g: &GraphSnapshot,
+    loan_id: u32,
+    threshold: f64,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    truncation_order: &str,
+) -> Vec<(u32, f64, u32)> {
+    // Get loan amount (for ratio calculation: inflow / loan_amount)
+    let loan_amount = node_prop(g, loan_id, "amount")
+        .and_then(|v| v.to_f64())
+        .unwrap_or(1.0);
+
+    // Find all deposit edges from the loan within the time window [start_ms, end_ms]
+    let deposit_edges: Vec<(u32, f64)> = g
+        .relationships(loan_id, Direction::Outgoing, "deposit")
+        .filter(|r| {
+            let ts = rel_ts(g, r.pos);
+            (start_ms..=end_ms).contains(&ts)
+        })
+        .map(|r| (r.neighbor, rel_amt(g, r.pos)))
+        .collect();
+
+    // Results: dstId -> (total_inflow, min_distance_from_loan)
+    let mut results: HashMap<u32, (f64, u32)> = HashMap::new();
+
+    // For each deposited account, trace transfers/withdraws up to distance 3
+    for (start_account, deposit_amt) in deposit_edges {
+        let mut visited: HashSet<u32> = HashSet::new();
+        visited.insert(start_account);
+
+        let mut queue: VecDeque<(u32, u32, f64)> = VecDeque::new();
+        queue.push_back((start_account, 1, deposit_amt)); // distance 1 (via deposit edge)
+
+        while let Some((node, dist, inflow)) = queue.pop_front() {
+            // Add/update results with this account
+            results
+                .entry(node)
+                .and_modify(|(inf, d)| {
+                    *inf += inflow; // Sum inflows from all paths
+                    *d = (*d).min(dist); // Track minimum distance
+                })
+                .or_insert((inflow, dist));
+
+            // Stop BFS at distance 3 from loan (1 deposit + 2 transfers)
+            if dist >= 3 {
+                continue;
+            }
+
+            // Calculate upstream transfer-in total for this account
+            let upstream_total: f64 = g
+                .relationships(node, Direction::Incoming, "transfer")
+                .filter(|r| {
+                    let ts = rel_ts(g, r.pos);
+                    (start_ms..=end_ms).contains(&ts)
+                })
+                .map(|r| rel_amt(g, r.pos))
+                .sum();
+
+            // Collect outgoing transfer and withdraw edges within time window
+            let mut edges: Vec<_> = g
+                .relationships(node, Direction::Outgoing, "transfer")
+                .chain(g.relationships(node, Direction::Outgoing, "withdraw"))
+                .filter(|r| {
+                    let ts = rel_ts(g, r.pos);
+                    (start_ms..=end_ms).contains(&ts)
+                })
+                .collect();
+
+            // Sort edges by amount according to truncation_order
+            if truncation_order == "DESC" {
+                edges.sort_by(|a, b| {
+                    rel_amt(g, b.pos)
+                        .partial_cmp(&rel_amt(g, a.pos))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            } else {
+                edges.sort_by(|a, b| {
+                    rel_amt(g, a.pos)
+                        .partial_cmp(&rel_amt(g, b.pos))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+
+            // Apply truncation limit (max edges per step)
+            edges.truncate(truncation_limit as usize);
+
+            // Process edges: only follow if amount > threshold * upstream_total
+            for edge in edges {
+                let edge_amt = rel_amt(g, edge.pos);
+
+                if edge_amt > threshold * upstream_total {
+                    if visited.insert(edge.neighbor) {
+                        queue.push_back((edge.neighbor, dist + 1, edge_amt));
+                    }
+                }
+            }
+        }
+    }
+
+    // Convert to result format: (dstId, ratio, minDistanceFromLoan)
+    let mut result: Vec<(u32, f64, u32)> = results
+        .into_iter()
+        .map(|(did, (total_in, dist))| {
+            // Ratio = total_inflow / loan_amount, rounded to 3 decimal places
+            let ratio = (total_in / loan_amount * 1000.0).round() / 1000.0;
+            (did, ratio, dist)
+        })
+        .collect();
+
+    // Sort: distanceFromLoan DESC, ratio DESC, dstId ASC
+    result.sort_by(|a, b| {
+        b.2.cmp(&a.2) // distance descending (farthest first)
+            .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)) // ratio descending (highest first)
+            .then_with(|| a.0.cmp(&b.0)) // dstId ascending
+    });
+
+    result
+}
+
+// ===== CR9 =====
+/// TCR9: Money laundering with loan involved
+///
+/// Given an account, a transfer amount threshold, and a time window,
+/// find deposit and repay edges between the account and loans, and
+/// transfers-in and transfers-out. Returns three ratios:
+/// - ratioRepay = sum(edge1) / sum(edge2), or -1 if no edge2 found
+/// - ratioDeposit = sum(edge1) / sum(edge4), or -1 if no edge4 found
+/// - ratioTransfer = sum(edge3) / sum(edge4), or -1 if no edge4 found
+///
+/// Edge mapping (per loader schema):
+/// - edge1: repay edges (account -> loan)
+/// - edge2: deposit edges (loan -> account)
+/// - edge3: transfer edges out (account -> other_account)
+/// - edge4: transfer edges in (other_account -> account)
+///
+/// All edges filtered by time window [start_ms, end_ms].
+/// Transfer edges (edge3, edge4) additionally filtered by amount >= threshold.
+/// At most truncation_limit edges of each type are kept (after sorting by truncation_order).
+pub fn cr9(
+    g: &GraphSnapshot,
+    account: u32,
+    threshold: f64,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: usize,
+    truncation_asc: bool, // true = ascending by timestamp, false = descending
+) -> (f32, f32, f32) {
+    // Collect edge1 (repay: account -> loan)
+    let mut edge1_edges: Vec<(i64, f64)> = Vec::new();
+    for r in g.relationships(account, Direction::Outgoing, "repay") {
+        let ts = rel_ts(g, r.pos);
+        if ts >= start_ms && ts <= end_ms {
+            edge1_edges.push((ts, rel_amt(g, r.pos)));
+        }
+    }
+
+    // Collect edge2 (deposit: loan -> account)
+    let mut edge2_edges: Vec<(i64, f64)> = Vec::new();
+    for r in g.relationships(account, Direction::Incoming, "deposit") {
+        let ts = rel_ts(g, r.pos);
+        if ts >= start_ms && ts <= end_ms {
+            edge2_edges.push((ts, rel_amt(g, r.pos)));
+        }
+    }
+
+    // Collect edge3 (transfer-out: account -> other_account, amt >= threshold)
+    let mut edge3_edges: Vec<(i64, f64)> = Vec::new();
+    for r in g.relationships(account, Direction::Outgoing, "transfer") {
+        let ts = rel_ts(g, r.pos);
+        let amt = rel_amt(g, r.pos);
+        if ts >= start_ms && ts <= end_ms && amt >= threshold {
+            edge3_edges.push((ts, amt));
+        }
+    }
+
+    // Collect edge4 (transfer-in: other_account -> account, amt >= threshold)
+    let mut edge4_edges: Vec<(i64, f64)> = Vec::new();
+    for r in g.relationships(account, Direction::Incoming, "transfer") {
+        let ts = rel_ts(g, r.pos);
+        let amt = rel_amt(g, r.pos);
+        if ts >= start_ms && ts <= end_ms && amt >= threshold {
+            edge4_edges.push((ts, amt));
+        }
+    }
+
+    // Helper: apply truncation (sort by timestamp, then limit)
+    fn apply_truncation(edges: &mut Vec<(i64, f64)>, limit: usize, asc: bool) {
+        if asc {
+            edges.sort_by_key(|e| e.0);
+        } else {
+            edges.sort_by(|a, b| b.0.cmp(&a.0));
+        }
+        edges.truncate(limit);
+    }
+
+    apply_truncation(&mut edge1_edges, truncation_limit, truncation_asc);
+    apply_truncation(&mut edge2_edges, truncation_limit, truncation_asc);
+    apply_truncation(&mut edge3_edges, truncation_limit, truncation_asc);
+    apply_truncation(&mut edge4_edges, truncation_limit, truncation_asc);
+
+    // Sum amounts
+    let edge1_sum: f64 = edge1_edges.iter().map(|(_, amt)| amt).sum();
+    let edge2_sum: f64 = edge2_edges.iter().map(|(_, amt)| amt).sum();
+    let edge3_sum: f64 = edge3_edges.iter().map(|(_, amt)| amt).sum();
+    let edge4_sum: f64 = edge4_edges.iter().map(|(_, amt)| amt).sum();
+
+    // Helper: round to 3 decimal places
+    fn round_3dp(x: f64) -> f32 {
+        ((x * 1000.0).round() / 1000.0) as f32
+    }
+
+    // Calculate ratios with -1 for division by zero
+    let ratio_repay = if edge2_sum == 0.0 {
+        -1.0f32
+    } else {
+        round_3dp(edge1_sum / edge2_sum)
+    };
+
+    let ratio_deposit = if edge4_sum == 0.0 {
+        -1.0f32
+    } else {
+        round_3dp(edge1_sum / edge4_sum)
+    };
+
+    let ratio_transfer = if edge4_sum == 0.0 {
+        -1.0f32
+    } else {
+        round_3dp(edge3_sum / edge4_sum)
+    };
+
+    (ratio_repay, ratio_deposit, ratio_transfer)
+}
+
+fn apply_truncation(edges: &mut Vec<(i64, f64)>, limit: usize, asc: bool) {
+    if asc {
+        edges.sort_by_key(|e| e.0);
+    } else {
+        edges.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+    edges.truncate(limit);
+}
+
+fn round_3dp(x: f64) -> f32 {
+    ((x * 1000.0).round() / 1000.0) as f32
+}
+
+// ===== CR10 =====
+/// TCR10-style — Similarity of investor relationship: Given two Persons and a
+/// time window, find all Companies each invests in and return the Jaccard
+/// similarity of the two company sets. Returns 0 if either person has no
+/// investments in the window.
+pub fn cr10(g: &GraphSnapshot, pid1: u32, pid2: u32, start_ms: i64, end_ms: i64) -> f32 {
+    // Collect companies that person1 invests in within the time window
+    let mut companies1 = HashSet::new();
+    for r in g.relationships(pid1, Direction::Outgoing, "invest") {
+        let ts = rel_ts(g, r.pos);
+        if ts >= start_ms && ts <= end_ms {
+            companies1.insert(r.neighbor);
+        }
+    }
+
+    // Collect companies that person2 invests in within the time window
+    let mut companies2 = HashSet::new();
+    for r in g.relationships(pid2, Direction::Outgoing, "invest") {
+        let ts = rel_ts(g, r.pos);
+        if ts >= start_ms && ts <= end_ms {
+            companies2.insert(r.neighbor);
+        }
+    }
+
+    // If either set is empty, return 0
+    if companies1.is_empty() || companies2.is_empty() {
+        return 0.0;
+    }
+
+    // Calculate Jaccard similarity: |A ∩ B| / |A ∪ B|
+    let intersection = companies1.intersection(&companies2).count();
+    let union = companies1.union(&companies2).count();
+
+    let similarity = if union == 0 {
+        0.0
+    } else {
+        (intersection as f32) / (union as f32)
+    };
+
+    // Round to 3 decimal places
+    ((similarity * 1000.0).round() / 1000.0)
+}
+
+// ===== CR12 =====
+/// TCR12 — transfer-to-company amount statistics. Given a person and a time window,
+/// find all company-owned accounts that the person has transferred to (via accounts
+/// they own), returning the sum of transfer amounts per company account.
+///
+/// Traversal pattern:
+/// 1. Person -[own]→ Account (person's accounts) → truncate per limit
+/// 2. Account -[transfer]→ Account (within [start_ms, end_ms]) → truncate per limit and order
+/// 3. Verify target Account ←[own]- Company → aggregate
+/// 4. Sort result by summedAmount desc, then compAccountId asc
+pub fn cr12(
+    g: &GraphSnapshot,
+    person_id: u32,
+    start_ms: i64,
+    end_ms: i64,
+    truncation_limit: u32,
+    truncation_order: TruncationOrder,
+) -> Vec<(u32, f64)> {
+    let mut company_account_amounts: HashMap<u32, f64> = HashMap::new();
+
+    // Pre-compute set of company nodes for O(1) ownership checks.
+    let companies: HashSet<u32> = g
+        .nodes_with_label("Company")
+        .map(|ns| ns.iter().collect())
+        .unwrap_or_default();
+
+    // Step 1: Find all accounts owned by the person.
+    let mut person_accounts: Vec<u32> = g
+        .relationships(person_id, Direction::Outgoing, "own")
+        .map(|r| r.neighbor)
+        .collect();
+
+    // Apply truncation limit at step 1 (use account ID order as default).
+    if person_accounts.len() > truncation_limit as usize {
+        person_accounts.sort();
+        person_accounts.truncate(truncation_limit as usize);
+    }
+
+    // Step 2: From each person account, find transfers to company-owned accounts.
+    for &person_account in &person_accounts {
+        // Collect outgoing transfer edges within the time window [start_ms, end_ms].
+        let mut transfers: Vec<(u32, f64)> = Vec::new();
+        for rel in g.relationships(person_account, Direction::Outgoing, "transfer") {
+            let ts = rel_ts(g, rel.pos);
+            if ts >= start_ms && ts <= end_ms {
+                let amt = rel_amt(g, rel.pos);
+                transfers.push((rel.neighbor, amt));
+            }
+        }
+
+        // Sort by amount per truncation_order, then apply truncation limit.
+        match truncation_order {
+            TruncationOrder::Descending => {
+                transfers.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            }
+            TruncationOrder::Ascending => {
+                transfers.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            }
+        }
+        if transfers.len() > truncation_limit as usize {
+            transfers.truncate(truncation_limit as usize);
+        }
+
+        // Step 3: Verify each transfer target is company-owned and aggregate amounts.
+        for (target_account, amt) in transfers {
+            let is_company_owned = g
+                .relationships(target_account, Direction::Incoming, "own")
+                .any(|rel| companies.contains(&rel.neighbor));
+
+            if is_company_owned {
+                *company_account_amounts.entry(target_account).or_insert(0.0) += amt;
+            }
+        }
+    }
+
+    // Step 4: Sort result by summed amount (descending), then by account ID (ascending).
+    let mut result: Vec<(u32, f64)> = company_account_amounts.into_iter().collect();
+    result.sort_by(
+        |a, b| match b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal) {
+            std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+            other => other,
+        },
+    );
+
+    result
+}

@@ -141,4 +141,18 @@ fn run_queries(g: &GraphSnapshot) {
     harness::time_query("CR2 loan-gather", runs, || {
         finbench::cr2(g, seed_person, i64::MIN, i64::MAX, 10_000, false).len()
     });
+
+    // CR5-CR12 smoke (best-effort seeds; verify no panic — bench + faithfulness later).
+    let to = finbench::TruncationOrder::Descending;
+    let (ws, we) = (i64::MIN, i64::MAX);
+    println!(
+        "  CR5:{} CR6:{} CR7:{:?} CR8:{} CR9:{:?} CR10:{:.0} CR12:{}",
+        finbench::cr5(g, seed_person, ws, we, 10_000, "desc").len(),
+        finbench::cr6(g, seed, 0.0, 0.0, ws, we, 10_000, "desc").len(),
+        finbench::cr7(g, seed, 0.0, ws, we, 10_000, to),
+        finbench::cr8(g, seed, 0.0, ws, we, 10_000, "desc").len(),
+        finbench::cr9(g, seed, 0.0, ws, we, 10_000, false),
+        finbench::cr10(g, seed_person, seed_person.wrapping_add(1), ws, we),
+        finbench::cr12(g, seed_person, ws, we, 10_000, to).len(),
+    );
 }
