@@ -30,12 +30,6 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::{pbool, pstr};
 
-/// Whether `work` has an outgoing `edge`-typed link to a node whose `uri`
-/// property equals `uri`.
-fn has_edge_to_uri(g: &GraphSnapshot, work: u32, edge: &str, uri: &str) -> bool {
-    g.neighbors_by_type(work, Direction::Outgoing, edge).any(|t| pstr(g, t, "uri") == Some(uri))
-}
-
 /// Whether `work` satisfies every bound facet (an unbound `None` facet matches
 /// anything). Mirrors the SPARQL's conjunction of `{{{filter1..3}}}`.
 #[allow(clippy::too_many_arguments)]
@@ -58,17 +52,19 @@ fn matches_facets(
         return false;
     }
     if let Some(uri) = category_uri {
-        if !has_edge_to_uri(g, work, "category", uri) {
+        if !g.has_neighbor_with_property(work, Direction::Outgoing, "category", "uri", uri) {
             return false;
         }
     }
     if let Some(uri) = audience_uri {
-        if !has_edge_to_uri(g, work, "audience", uri) {
+        if !g.has_neighbor_with_property(work, Direction::Outgoing, "audience", "uri", uri) {
             return false;
         }
     }
     if let Some(uri) = tag_uri {
-        if !(has_edge_to_uri(g, work, "about", uri) || has_edge_to_uri(g, work, "mentions", uri)) {
+        if !(g.has_neighbor_with_property(work, Direction::Outgoing, "about", "uri", uri)
+            || g.has_neighbor_with_property(work, Direction::Outgoing, "mentions", "uri", uri))
+        {
             return false;
         }
     }

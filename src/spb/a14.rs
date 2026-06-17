@@ -43,19 +43,13 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use super::queries::node_by_uri;
 use crate::props::top_k_by_key;
 
-/// Whether `work` has an outgoing `edge`-typed link at all (the required `?thing
-/// cwork:<edge> ?x` star pattern: ≥1 edge of that type must be bound).
-fn has_edge(g: &GraphSnapshot, work: u32, edge: &str) -> bool {
-    g.neighbors_by_type(work, Direction::Outgoing, edge).next().is_some()
-}
-
 /// Whether `work` binds every required edge of the q14 star: ≥1 `tag`
 /// (about∪mentions), `category`, `thumbnail` and `audience` edge.
 fn has_required_star(g: &GraphSnapshot, work: u32) -> bool {
-    has_edge(g, work, "tag")
-        && has_edge(g, work, "category")
-        && has_edge(g, work, "thumbnail")
-        && has_edge(g, work, "audience")
+    g.has_edge(work, Direction::Outgoing, "tag")
+        && g.has_edge(work, Direction::Outgoing, "category")
+        && g.has_edge(work, Direction::Outgoing, "thumbnail")
+        && g.has_edge(work, Direction::Outgoing, "audience")
 }
 
 /// q14: creative works satisfying the full required star (≥1 `tag`/`category`/

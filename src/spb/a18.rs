@@ -33,12 +33,6 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::pstr;
 
-/// Whether `node` has at least one outgoing `edge` (the SPARQL "bound" check for
-/// the `category` / `audience` edges, which q18 projects but does not filter).
-fn has_edge(g: &GraphSnapshot, node: u32, edge: &str) -> bool {
-    g.neighbors_by_type(node, Direction::Outgoing, edge).next().is_some()
-}
-
 /// SPB advanced **q18**: the `limit` most-recently-modified creative works
 /// labelled `cw_type` whose `dateModified` lies in `[after, before]`
 /// (lexicographic on the ISO-8601 string) and that carry a `title`,
@@ -57,8 +51,8 @@ pub fn run(g: &GraphSnapshot, cw_type: &str, after: &str, before: &str, limit: u
                 && modified <= before
                 && pstr(g, w, "title").is_some()
                 && g.prop(w, "liveCoverage").is_some()
-                && has_edge(g, w, "category")
-                && has_edge(g, w, "audience");
+                && g.has_edge(w, Direction::Outgoing, "category")
+                && g.has_edge(w, Direction::Outgoing, "audience");
             keep.then_some((w, modified))
         })
         .collect();

@@ -34,10 +34,9 @@ use crate::props::pstr;
 /// * `Some(uri)` — at least one edge target carries that `uri`;
 /// * `None` — at least one such edge exists at all (the SPARQL "bound" check).
 fn facet_matches(g: &GraphSnapshot, node: u32, edge: &str, want_uri: Option<&str>) -> bool {
-    let mut targets = g.neighbors_by_type(node, Direction::Outgoing, edge);
     match want_uri {
-        None => targets.next().is_some(),
-        Some(uri) => targets.any(|t| pstr(g, t, "uri") == Some(uri)),
+        None => g.has_edge(node, Direction::Outgoing, edge),
+        Some(uri) => g.has_neighbor_with_property(node, Direction::Outgoing, edge, "uri", uri),
     }
 }
 

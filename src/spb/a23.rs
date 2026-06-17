@@ -45,16 +45,6 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::{parse_date, pstr, top_k_by_key};
 
-/// Whether `work` has an outgoing `edge` to a node whose `uri` equals `uri`.
-fn has_edge_to_uri(g: &GraphSnapshot, work: u32, edge: &str, uri: &str) -> bool {
-    g.neighbors_by_type(work, Direction::Outgoing, edge).any(|t| pstr(g, t, "uri") == Some(uri))
-}
-
-/// Whether `work` has at least one outgoing `edge`.
-fn has_any_edge(g: &GraphSnapshot, work: u32, edge: &str) -> bool {
-    g.neighbors_by_type(work, Direction::Outgoing, edge).next().is_some()
-}
-
 /// SPB advanced **q23** final drill-down: over creative works whose `title`
 /// matches the full-text `word`, that are `category`-linked to `category_uri`, and
 /// that carry the rest of the required BGP (`description`, `audience`,
@@ -68,7 +58,7 @@ pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> V
     let mut by_tag: HashMap<u32, HashSet<i64>> = HashMap::new();
     for w in g.fts("CreativeWork", "title", word).iter() {
         // {{{filter2}}}: the pinned category facet (an outgoing edge to the uri).
-        if !has_edge_to_uri(g, w, "category", category_uri) {
+        if !g.has_neighbor_with_property(w, Direction::Outgoing, "category", "uri", category_uri) {
             continue;
         }
         // The rest of the fixed BGP must be bound for a solution to exist.
@@ -76,8 +66,8 @@ pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> V
             continue;
         };
         if g.str_prop(w, "description").is_none()
-            || !has_any_edge(g, w, "audience")
-            || !has_any_edge(g, w, "primaryFormat")
+            || !g.has_edge(w, Direction::Outgoing, "audience")
+            || !g.has_edge(w, Direction::Outgoing, "primaryFormat")
             || g.prop(w, "liveCoverage").is_none()
         {
             continue;
