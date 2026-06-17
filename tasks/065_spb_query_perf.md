@@ -42,3 +42,24 @@ already fast; no action unless a shared helper change touches them.
 
 Per-query tasks: 066 a13 · 067 a25 · 068 a5 · 069 q3 · 070 a7 · 071 a14 ·
 072 q5 · 073 q9 · 074 a19 · 075 a6 · 076 a8.
+
+## Results so far (parity 30/30 throughout)
+
+| query | before | after | win | fix |
+|---|--:|--:|--:|---|
+| q3 | 12.2 ms | 1.2 ms | ~10x | carry dateCreated &str; no pstr-in-sort |
+| a25 | 37.4 ms | 8.4 ms | ~4.4x | tie-break on node id, not per-comparison pstr(uri) |
+| q9 | 51.8k allocs | 9.5k | ~5.5x | test neighbours vs focal sets; no HashSet per candidate |
+| a13 | 82.3 ms | 44 ms | ~1.9x | (u32,u32) node pairs; resolve uris once per work |
+| a5 | 37.1 ms | 20.7 ms | ~1.8x | hoist entity NodeSet; sort/truncate on ids |
+| a6 | 6.0 ms | 3.8 ms | ~1.6x | hoist the three entity NodeSets |
+| a7, a19 | — | — | LIMIT-only | defer uri/name resolution to kept rows |
+
+Recurring fixes: (1) never call `pstr`/`has_label` inside a `sort_by` comparator —
+carry the key or tie-break on node id; (2) hoist `nodes_with_label` out of loops
+(bitmap `contains`); (3) collect node ids and resolve `uri` strings only for the
+sorted/truncated rows; (4) iterate `nodes_with_label(cw_type)` directly instead of
+scanning all CreativeWorks and filtering by `has_label`.
+
+Remaining (smaller / CPU-bound, need samply under low load): q5 (iterate the
+typed subset directly), a8 (output-bound to_string), a14 (per-work BGP traversal).
