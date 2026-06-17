@@ -8,7 +8,14 @@ use rustychickpeas_core::{GraphSnapshot, ValueId};
 /// selector behind the group-by-count queries. Takes any `(node, count)` iterable
 /// so it accepts either hashbrown's or std's `HashMap`.
 pub fn top_k_by_count(counts: impl IntoIterator<Item = (u32, usize)>, limit: usize) -> Vec<(u32, usize)> {
-    let mut rows: Vec<(u32, usize)> = counts.into_iter().collect();
+    top_k_by_key(counts, limit)
+}
+
+/// Rank `(node, key)` rows by key descending, node id ascending on ties, and keep
+/// the top `limit` — the date/score analog of [`top_k_by_count`], where `key` is
+/// any `Ord` carried alongside the node (a `dateModified` string, a score, …).
+pub fn top_k_by_key<K: Ord>(rows: impl IntoIterator<Item = (u32, K)>, limit: usize) -> Vec<(u32, K)> {
+    let mut rows: Vec<(u32, K)> = rows.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     rows.truncate(limit);
     rows

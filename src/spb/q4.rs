@@ -26,7 +26,7 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_key};
 use super::queries::node_by_uri;
 
 /// Blog posts (`BlogPost`-labelled creative works) `about` OR `mentions` the topic
@@ -49,11 +49,9 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
     }
 
     // `cwork:dateCreated ?created` is required, so a post with no `dateCreated`
-    // never reaches the ORDER BY; carry the value to sort without re-lookup.
-    let mut rows: Vec<(u32, &str)> =
-        posts.into_iter().filter_map(|w| pstr(g, w, "dateCreated").map(|d| (w, d))).collect();
-    rows.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(&b.0)));
-    rows.into_iter().take(limit).map(|(w, _)| w).collect()
+    // never reaches the ORDER BY; carry the value so the rank sorts without re-lookup.
+    let rows = posts.into_iter().filter_map(|w| pstr(g, w, "dateCreated").map(|d| (w, d)));
+    top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
 }
 
 #[cfg(test)]
