@@ -11,6 +11,7 @@ pub mod loader;
 pub mod props;
 
 pub mod bi;
+pub mod graphalytics;
 pub mod interactive;
 pub mod spb;
 
