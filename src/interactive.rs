@@ -600,7 +600,26 @@ pub fn run() -> Result<()> {
     let default = PathBuf::from(
         "data/bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot",
     );
-    let snapshot = std::env::args().nth(1).map(PathBuf::from).unwrap_or(default);
+    // Optional flags: --only <id> (e.g. ic5), --repeat <n>, --alloc. The first
+    // non-flag arg stays the snapshot path. See harness::BenchCfg.
+    let (mut only, mut runs_override, mut alloc, mut positional) =
+        (None, 0usize, false, None::<String>);
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--only" => only = it.next().map(|s| s.to_lowercase()),
+            "--repeat" => runs_override = it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
+            "--alloc" => alloc = true,
+            s if !s.starts_with("--") && positional.is_none() => positional = Some(s.to_string()),
+            _ => {}
+        }
+    }
+    crate::harness::set_bench_cfg(crate::harness::BenchCfg {
+        only,
+        runs: runs_override,
+        alloc,
+    });
+    let snapshot = positional.map(PathBuf::from).unwrap_or(default);
     if !snapshot.join("dynamic").is_dir() {
         return Err(format!(
             "no 'dynamic' dir under {}; pass the initial_snapshot path as arg 1",

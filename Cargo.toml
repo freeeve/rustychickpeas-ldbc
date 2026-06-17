@@ -11,6 +11,12 @@ csv = "1.3"
 flate2 = "1.0"
 hashbrown = "0.16"
 
+[features]
+# Install the counting global allocator (src/alloc_count.rs) in the bins so the
+# harness can report per-query allocation counts/bytes (`--alloc`). Off by
+# default so normal timing runs use the pristine system allocator.
+alloc-count = []
+
 [lib]
 name = "rustychickpeas_ldbc"
 path = "src/lib.rs"
