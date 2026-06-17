@@ -1,6 +1,9 @@
 //! Date arithmetic and typed property/graph accessors shared by all query
 //! families.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
 use rustychickpeas_core::{GraphSnapshot, ValueId};
 
 /// Sort a `node -> count` histogram (e.g. from `GraphSnapshot::neighbor_counts`) by
@@ -21,6 +24,45 @@ pub fn top_k_by_key<T: Ord, K: Ord>(rows: impl IntoIterator<Item = (T, K)>, limi
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     rows.truncate(limit);
     rows
+}
+
+/// A streaming top-`k` accumulator: [`push`](Self::push) any number of items and
+/// keep only the `k` largest by `Ord`, without materialising the rest — the
+/// `BinaryHeap<Reverse<…>>` idiom the IC queries repeat (e.g. "top 20 messages by
+/// date desc, id asc"). The streaming complement to [`top_k_by_key`], for when the
+/// candidates are produced in a scan rather than collected up front. Embed a
+/// [`Reverse`] in the key to flip a tie-break field: `(ms, Reverse(id))` keeps the
+/// highest `ms`, and the lowest `id` among equal `ms`.
+pub struct TopK<T: Ord> {
+    k: usize,
+    heap: BinaryHeap<Reverse<T>>,
+}
+
+impl<T: Ord> TopK<T> {
+    /// A top-`k` accumulator (keeps the `k` largest items offered).
+    pub fn new(k: usize) -> Self {
+        TopK { k, heap: BinaryHeap::with_capacity(k + 1) }
+    }
+
+    /// Offer `item`; kept iff it ranks among the `k` largest seen so far (when
+    /// full, it displaces the current smallest kept item if larger).
+    pub fn push(&mut self, item: T) {
+        if self.heap.len() < self.k {
+            self.heap.push(Reverse(item));
+        } else if let Some(Reverse(smallest)) = self.heap.peek() {
+            if item > *smallest {
+                self.heap.pop();
+                self.heap.push(Reverse(item));
+            }
+        }
+    }
+
+    /// The kept items, largest first.
+    pub fn into_sorted_desc(self) -> Vec<T> {
+        let mut v: Vec<T> = self.heap.into_iter().map(|Reverse(t)| t).collect();
+        v.sort_unstable_by(|a, b| b.cmp(a));
+        v
+    }
 }
 
 /// Days since 1970-01-01 for a proleptic-Gregorian date (Howard Hinnant's
@@ -101,4 +143,42 @@ pub fn pstr<'a>(g: &'a GraphSnapshot, n: u32, k: &str) -> Option<&'a str> {
 pub fn tag_by_name(g: &GraphSnapshot, name: &str) -> Option<u32> {
     g.nodes_with_label("Tag")
         .and_then(|tags| tags.iter().find(|&t| pstr(g, t, "name") == Some(name)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn topk_keeps_largest_in_desc_order() {
+        let mut top = TopK::new(3);
+        for x in [5, 1, 9, 3, 7, 2, 8] {
+            top.push(x);
+        }
+        assert_eq!(top.into_sorted_desc(), vec![9, 8, 7]);
+    }
+
+    #[test]
+    fn topk_reverse_tiebreak_keeps_highest_then_lowest_id() {
+        // (score, Reverse(id)): top by score desc, id asc on ties.
+        let mut top = TopK::new(2);
+        for (s, id) in [(5, 10u32), (5, 3), (5, 7), (1, 1)] {
+            top.push((s, Reverse(id)));
+        }
+        let got: Vec<(i32, u32)> =
+            top.into_sorted_desc().into_iter().map(|(s, Reverse(id))| (s, id)).collect();
+        assert_eq!(got, vec![(5, 3), (5, 7)]);
+    }
+
+    #[test]
+    fn topk_k_zero_and_underfull() {
+        let mut z: TopK<i32> = TopK::new(0);
+        z.push(1);
+        assert!(z.into_sorted_desc().is_empty());
+        let mut u = TopK::new(5);
+        for x in [3, 1, 2] {
+            u.push(x);
+        }
+        assert_eq!(u.into_sorted_desc(), vec![3, 2, 1]);
+    }
 }
