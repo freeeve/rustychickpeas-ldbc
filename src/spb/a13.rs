@@ -40,7 +40,7 @@ pub fn run(g: &GraphSnapshot, cat1: &str, cat2: &str, limit: usize) -> Vec<(Stri
         if !in_category {
             continue;
         }
-        if pstr(g, w, "dateModified").filter(|s| !s.is_empty()).is_none() {
+        if g.str_prop(w, "dateModified").is_none() {
             continue;
         }
         // cwork:tag — the materialized super-property of about/mentions.

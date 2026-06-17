@@ -45,12 +45,6 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::{parse_date, pstr, top_k_by_key};
 
-/// Read a required dense string property, treating the empty-string sentinel a
-/// dense column returns for an absent value as "not present".
-fn req_str<'a>(g: &'a GraphSnapshot, node: u32, prop: &str) -> Option<&'a str> {
-    pstr(g, node, prop).filter(|s| !s.is_empty())
-}
-
 /// Whether `work` has an outgoing `edge` to a node whose `uri` equals `uri`.
 fn has_edge_to_uri(g: &GraphSnapshot, work: u32, edge: &str, uri: &str) -> bool {
     g.neighbors_by_type(work, Direction::Outgoing, edge).any(|t| pstr(g, t, "uri") == Some(uri))
@@ -78,10 +72,10 @@ pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> V
             continue;
         }
         // The rest of the fixed BGP must be bound for a solution to exist.
-        let Some(created) = req_str(g, w, "dateCreated") else {
+        let Some(created) = g.str_prop(w, "dateCreated") else {
             continue;
         };
-        if req_str(g, w, "description").is_none()
+        if g.str_prop(w, "description").is_none()
             || !has_any_edge(g, w, "audience")
             || !has_any_edge(g, w, "primaryFormat")
             || g.prop(w, "liveCoverage").is_none()

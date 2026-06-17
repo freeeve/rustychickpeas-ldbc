@@ -20,7 +20,6 @@
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::node_by_uri;
-use crate::props::pstr;
 
 /// Creative works with a `pred` edge ("about" or "mentions") to the node with uri
 /// `thing_uri` and a non-empty `dateModified`, ordered by `dateModified`
@@ -32,7 +31,7 @@ pub fn run(g: &GraphSnapshot, pred: &str, thing_uri: &str) -> Vec<u32> {
     };
     let mut works: Vec<(String, u32)> = Vec::new();
     for w in g.neighbors_in_set(thing, Direction::Incoming, pred, cworks) {
-        let Some(modified) = pstr(g, w, "dateModified").filter(|s| !s.is_empty()) else {
+        let Some(modified) = g.str_prop(w, "dateModified") else {
             continue;
         };
         works.push((modified.to_string(), w));
@@ -45,6 +44,7 @@ pub fn run(g: &GraphSnapshot, pred: &str, thing_uri: &str) -> Vec<u32> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
+    use crate::props::pstr;
 
     // TBox (BlogPost/NewsItem subClassOf CreativeWork) + a Company thing with two
     // dated about-works, one undated about-work (excluded), and one mentions-work.

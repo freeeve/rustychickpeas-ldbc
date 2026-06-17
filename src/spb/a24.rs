@@ -45,7 +45,7 @@ use std::collections::{BTreeMap, HashSet};
 use rustychickpeas_core::{bitmap::NodeSet, Direction, GraphSnapshot};
 
 use super::queries::node_by_uri;
-use crate::props::{parse_ymd, pstr};
+use crate::props::parse_ymd;
 
 /// SPB advanced q24: the per-day count of creative works tagging BOTH `uri_a`
 /// and `uri_b` (via `cwork:about`), as `((year, month, day), count)` rows sorted
@@ -82,7 +82,7 @@ pub fn run(
     let mut per_day: BTreeMap<(i32, u32, u32), usize> = BTreeMap::new();
     for w in both {
         // `cwork:dateCreated` is required; treat the dense-column "" as absent.
-        let Some(created) = pstr(g, w, "dateCreated").filter(|s| !s.is_empty()) else {
+        let Some(created) = g.str_prop(w, "dateCreated") else {
             continue;
         };
         let Some(key) = parse_ymd(created) else {

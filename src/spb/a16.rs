@@ -47,7 +47,7 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<(String, String)>
     for w in g.fts("CreativeWork", "title", word).iter() {
         // A dense string property missing on a node reads back as Some(""); the
         // required `cwork:title ?title` pattern excludes such works.
-        if pstr(g, w, "title").filter(|t| !t.is_empty()).is_none() {
+        if g.str_prop(w, "title").is_none() {
             continue;
         }
         if g.neighbors_by_type(w, Direction::Outgoing, "category").next().is_none() {

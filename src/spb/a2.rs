@@ -21,7 +21,6 @@
 use rustychickpeas_core::GraphSnapshot;
 
 use super::queries::{has_label, node_by_uri};
-use crate::props::pstr;
 
 /// The `CreativeWork` subtype local names carried by the work at `cw_uri`, sorted.
 /// Empty when the uri resolves to no titled `CreativeWork` — the subtypes are the
@@ -33,7 +32,7 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str) -> Vec<String> {
     if !has_label(g, work, "CreativeWork") {
         return Vec::new();
     }
-    if pstr(g, work, "title").filter(|s| !s.is_empty()).is_none() {
+    if g.str_prop(work, "title").is_none() {
         return Vec::new();
     }
     let mut subtypes: Vec<String> = ["BlogPost", "NewsItem", "Programme"]

@@ -49,7 +49,6 @@ use std::collections::{HashMap, HashSet};
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::{has_label, node_by_uri};
-use crate::props::pstr;
 
 /// SPB advanced **q25**: entities co-occurring with the entity identified by
 /// `uri_a` in creative works, paired with `interactionDays` (the count of
@@ -73,7 +72,7 @@ pub fn run(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(u32, usize)> {
         }
         // Required `dateCreated`; empty (absent dense column) or a malformed
         // sub-10-char value drops the work, as the bound pattern demands.
-        let Some(day) = pstr(g, cw, "dateCreated").filter(|s| !s.is_empty()).and_then(|s| s.get(..10))
+        let Some(day) = g.str_prop(cw, "dateCreated").and_then(|s| s.get(..10))
         else {
             continue;
         };
@@ -97,6 +96,7 @@ pub fn run(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(u32, usize)> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
+    use crate::props::pstr;
 
     const ENT_A: &str = "http://dbpedia.org/resource/EntA";
     const ENT_B: &str = "http://dbpedia.org/resource/EntB";

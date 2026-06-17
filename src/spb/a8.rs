@@ -30,7 +30,7 @@ pub fn run(g: &GraphSnapshot, cw_type: &str, audience_uri: &str, after: &str, be
     // Works in the dateModified window with the pinned audience; count their
     // `tag` targets (materialized about/mentions) via the core histogram.
     let qualifying = works.iter().filter(|&w| {
-        pstr(g, w, "dateModified").filter(|s| !s.is_empty()).is_some_and(|dt| dt > after && dt < before)
+        g.str_prop(w, "dateModified").is_some_and(|dt| dt > after && dt < before)
             && g
                 .neighbors_by_type(w, Direction::Outgoing, "audience")
                 .any(|a| pstr(g, a, "uri") == Some(audience_uri))

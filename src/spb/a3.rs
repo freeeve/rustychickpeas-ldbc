@@ -22,8 +22,6 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::GraphSnapshot;
 
-use crate::props::pstr;
-
 /// Creative works whose `dateModified` is strictly within `(after, before)`,
 /// counted by the minute-of-hour component (the SPARQL `MINUTES`). Returned as
 /// `(minute, count)` with `minute` a plain decimal string (no leading zero),
@@ -34,7 +32,7 @@ pub fn run(g: &GraphSnapshot, after: &str, before: &str) -> Vec<(String, usize)>
     };
     let mut counts: HashMap<u32, usize> = HashMap::new();
     for w in works.iter() {
-        let Some(dt) = pstr(g, w, "dateModified").filter(|s| !s.is_empty()) else {
+        let Some(dt) = g.str_prop(w, "dateModified") else {
             continue;
         };
         if !(dt > after && dt < before) {

@@ -41,7 +41,7 @@ pub fn run(g: &GraphSnapshot, limit: usize) -> Vec<(String, usize)> {
     }
     let mut rows: Vec<(String, usize)> = counts
         .into_iter()
-        .filter(|&(w, n)| n == max && pstr(g, w, "dateCreated").filter(|s| !s.is_empty()).is_some())
+        .filter(|&(w, n)| n == max && g.str_prop(w, "dateCreated").is_some())
         .map(|(w, n)| (pstr(g, w, "uri").unwrap_or("?").to_string(), n))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0));

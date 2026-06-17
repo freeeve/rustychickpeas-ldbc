@@ -34,7 +34,7 @@
 
 use rustychickpeas_core::GraphSnapshot;
 
-use crate::props::{pstr, top_k_by_key};
+use crate::props::top_k_by_key;
 
 /// Creative works whose `title` OR `description` contains `word` (core inverted
 /// index, whole-word), ranked by `dateModified` descending (tie-broken by node id
@@ -48,7 +48,7 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
     // empty as absent for the required `dateModified` sort key.
     let rows: Vec<(u32, &str)> = hits
         .iter()
-        .filter_map(|w| pstr(g, w, "dateModified").filter(|d| !d.is_empty()).map(|d| (w, d)))
+        .filter_map(|w| g.str_prop(w, "dateModified").map(|d| (w, d)))
         .collect();
     top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
 }
@@ -57,6 +57,7 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
+    use crate::props::pstr;
 
     // Creative works matching "football" in title or description with assorted
     // `dateModified`, one "tennis"-only work, and one "football" work with no

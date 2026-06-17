@@ -41,7 +41,7 @@
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::node_by_uri;
-use crate::props::{pstr, top_k_by_key};
+use crate::props::top_k_by_key;
 
 /// Whether `work` has an outgoing `edge`-typed link at all (the required `?thing
 /// cwork:<edge> ?x` star pattern: ≥1 edge of that type must be bound).
@@ -85,7 +85,7 @@ pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limi
         // `cwork:dateModified ?dateModified` is required and is the ORDER BY key;
         // a dense string property missing on a node reads back as Some(""), so
         // treat empty as absent. Carry the value to sort without re-lookup.
-        .filter_map(|w| pstr(g, w, "dateModified").filter(|d| !d.is_empty()).map(|d| (w, d)))
+        .filter_map(|w| g.str_prop(w, "dateModified").map(|d| (w, d)))
         .collect();
     top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
 }
@@ -94,6 +94,7 @@ pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limi
 mod tests {
     use super::super::loader::load_str;
     use super::*;
+    use crate::props::pstr;
 
     const VIDEO: &str = "http://www.bbc.co.uk/ontologies/creativework/VideoFormat";
     const MOBILE: &str = "http://www.bbc.co.uk/ontologies/bbc/Mobile";

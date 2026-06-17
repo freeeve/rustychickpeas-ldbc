@@ -84,7 +84,7 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str, limit: usize) -> Vec<(String, f64)> 
     // materializing a HashSet per candidate; uris are resolved only for kept rows.
     let mut rows: Vec<(u32, &str, f64)> = Vec::new();
     for o in candidates {
-        let Some(dt) = pstr(g, o, "dateModified").filter(|s| !s.is_empty()) else {
+        let Some(dt) = g.str_prop(o, "dateModified") else {
             continue;
         };
         let (mut a2a, mut m2a, mut a2m, mut m2m) = (0usize, 0usize, 0usize, 0usize);
