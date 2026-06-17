@@ -571,7 +571,7 @@ pub fn ic3_friends_two_countries(
 /// members. Returns (forum, post_count), (count desc, flid asc), top 20.
 pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32, u32)> {
     let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
-    let hd_col = g.i64_edge_col("hd");
+    let hd_col = g.i64_rel_col("hd");
     // Member-centric: for each qualifying member, count only THEIR posts whose
     // container forum is one they joined after min_day. This touches only members'
     // posts, not every post of every forum (a post has one container Post-forum;
@@ -616,7 +616,7 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
     let friends: HashSet<u32> = g
         .neighbors_by_type(person, Direction::Outgoing, "knows")
         .collect();
-    let ld_col = g.i64_edge_col("ld");
+    let ld_col = g.i64_rel_col("ld");
     let mut best: HashMap<u32, (i64, u32)> = HashMap::new();
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         for e in g.relationships(msg, Direction::Incoming, &["likes"]) {
@@ -733,7 +733,7 @@ pub fn ic11_job_referral(
             }
         }
     }
-    let wf_col = g.i64_edge_col("wf");
+    let wf_col = g.i64_rel_col("wf");
     let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     // Top 10 by (workFrom asc, plid asc, company name desc) in a heap; plid/name
     // resolved once per matching row, not per sort comparison. (The workAt scan
