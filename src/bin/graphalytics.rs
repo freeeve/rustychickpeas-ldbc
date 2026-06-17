@@ -63,9 +63,9 @@ fn main() -> Result<()> {
     let chk = reference(dir, name, "WCC").map(|rf| ga::validate::check_relabel(&ds, &r, &rf));
     show("WCC", dur, r.len(), chk);
 
-    // CDLP — exact labels.
+    // CDLP — exact labels; seed with vertex ids so labels match the reference.
     let t = Instant::now();
-    let r = ga::cdlp(g, d, ds.params.cdlp_iterations);
+    let r = ga::cdlp_seeded(g, d, ds.params.cdlp_iterations, &ds.vertex_of_node);
     let dur = t.elapsed();
     let r_i64: Vec<i64> = r.iter().map(|&x| x as i64).collect();
     let chk = reference(dir, name, "CDLP").map(|rf| ga::validate::check_exact_i64(&ds, &r_i64, &rf));

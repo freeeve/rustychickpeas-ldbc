@@ -115,8 +115,17 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
 /// label twice; each neighbour once for undirected), smallest label breaking
 /// ties. A vertex with no neighbours keeps its label. Runs `iterations` rounds.
 pub fn cdlp(g: &GraphSnapshot, directed: bool, iterations: u32) -> Vec<u32> {
+    let init: Vec<u32> = (0..g.node_count()).collect();
+    cdlp_seeded(g, directed, iterations, &init)
+}
+
+/// [`cdlp`] seeded with explicit initial labels (`init[node]` is `L0(node)`). Seed
+/// with original vertex ids when the output must match a vertex-id-keyed reference:
+/// the "smallest label" tie-break then operates in vertex-id space too, so the
+/// result is faithful regardless of how dense node ids map to vertex ids.
+pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u32]) -> Vec<u32> {
     let n = g.node_count();
-    let mut labels: Vec<u32> = (0..n).collect();
+    let mut labels: Vec<u32> = init.to_vec();
     let mut counts: HashMap<u32, u32> = HashMap::new();
     for _ in 0..iterations {
         let mut next = labels.clone();
@@ -255,6 +264,14 @@ mod tests {
         // Undirected triangle: every vertex collapses to the smallest label (0).
         let g = build(3, &[(0, 1), (1, 2), (2, 0)]);
         assert_eq!(cdlp(&g, false, 2), vec![0, 0, 0]);
+    }
+
+    #[test]
+    fn cdlp_seeded_runs_in_seed_label_space() {
+        // Seeded with vertex-id-like labels, the triangle collapses to the
+        // smallest seed (10) — the tie-break operates in the seed's value space.
+        let g = build(3, &[(0, 1), (1, 2), (2, 0)]);
+        assert_eq!(cdlp_seeded(&g, false, 2, &[10, 20, 30]), vec![10, 10, 10]);
     }
 
     #[test]
