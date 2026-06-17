@@ -77,7 +77,11 @@ pub fn pick_seeds(g: &GraphSnapshot) -> Option<IcSeeds> {
 
 /// IC1 — friends within 3 `knows` hops whose first name matches, ordered by
 /// (distance, lastName, id). Returns (friend, distance, lastName), top 20.
-pub fn ic1_friends_by_name(g: &GraphSnapshot, person: u32, first_name: &str) -> Vec<(u32, u32, String)> {
+pub fn ic1_friends_by_name(
+    g: &GraphSnapshot,
+    person: u32,
+    first_name: &str,
+) -> Vec<(u32, u32, String)> {
     let dist = g.bfs_distances(person, Direction::Outgoing, "knows", Some(3));
     let mut rows: Vec<(u32, u32, String)> = dist
         .iter()
@@ -110,13 +114,16 @@ pub fn ic2_recent_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<
             top.push((pi64(g, msg, "ms"), Reverse(msg)));
         }
     }
-    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
+    top.into_sorted_desc()
+        .into_iter()
+        .map(|(ms, Reverse(id))| (id, ms))
+        .collect()
 }
 
 /// IC9 — the 20 most recent messages by the seed's friends and friends-of-friends
 /// (<=2 `knows` hops, excluding self), created on/before `max_day`.
 pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u32, i64)> {
-    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     // Hoist day/ms columns (no pi64 key re-resolution per message), and keep only
     // the top 20 by (ms desc, id asc) in a heap instead of collecting every FoF
     // message (millions) and sorting the lot.
@@ -138,10 +145,7 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
     };
     use std::cmp::Reverse;
     let mut top = TopK::new(20);
-    for (&p, &d) in &reach {
-        if d == 0 {
-            continue;
-        }
+    for p in reach.iter() {
         for msg in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
             if day_of(msg) > max_day {
                 continue;
@@ -149,7 +153,10 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
             top.push((ms_of(msg), Reverse(msg)));
         }
     }
-    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
+    top.into_sorted_desc()
+        .into_iter()
+        .map(|(ms, Reverse(id))| (id, ms))
+        .collect()
 }
 
 /// IC13 — unweighted shortest-path length between two persons in the `knows`
@@ -225,7 +232,10 @@ pub fn is2_recent_of_person(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec
         }
         top.push((pi64(g, m, "ms"), Reverse(m)));
     }
-    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
+    top.into_sorted_desc()
+        .into_iter()
+        .map(|(ms, Reverse(id))| (id, ms))
+        .collect()
 }
 
 /// IS3 — a person's direct `knows` friends (sorted by id).
@@ -246,7 +256,12 @@ pub fn is5_message_creator(g: &GraphSnapshot, message: u32) -> Option<u32> {
 /// IC4 — "new topics": Tags on the seed's friends' Posts created within
 /// `[start_day, start_day + duration_days)` that were never on those friends'
 /// Posts before `start_day`. Returns (tag, post_count), (count desc, name asc), top 10.
-pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_days: i64) -> Vec<(u32, u32)> {
+pub fn ic4_new_topics(
+    g: &GraphSnapshot,
+    person: u32,
+    start_day: i64,
+    duration_days: i64,
+) -> Vec<(u32, u32)> {
     let end_day = start_day + duration_days;
     let posts = g.nodes_with_label("Post");
     // Hoist the day column (avoid pi64 re-resolving "day" per post).
@@ -305,7 +320,10 @@ pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_d
             .into_iter()
             .map(|(c, _, tag)| (tag, c))
             .collect();
-        rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+        rows.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+        });
         return rows;
     }
 
@@ -333,7 +351,10 @@ pub fn ic4_new_topics(g: &GraphSnapshot, person: u32, start_day: i64, duration_d
         .into_iter()
         .filter(|(t, _)| !before.contains(t))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+    });
     rows.truncate(10);
     rows
 }
@@ -346,7 +367,7 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
         return Vec::new();
     };
     let posts = g.nodes_with_label("Post");
-    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
 
     // Dense co-occurrence counts over the contiguous Tag id range (like IC4), a
     // reusable per-post tag buffer (no Vec allocation per post), and a size-10
@@ -355,10 +376,7 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
         let lo = range.start;
         let mut count = vec![0u32; (range.end - lo) as usize];
         let mut tags: Vec<u32> = Vec::new();
-        for (&p, &d) in &reach {
-            if d == 0 {
-                continue;
-            }
+        for p in reach.iter() {
             for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
                 if !posts.is_some_and(|s| s.contains(post)) {
                     continue; // Posts only
@@ -390,17 +408,17 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
             .into_iter()
             .map(|(c, _, tag)| (tag, c))
             .collect();
-        rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+        rows.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+        });
         return rows;
     }
 
     // Fallback for non-contiguous Tag ids: HashMap (still reuses the tag buffer).
     let mut counts: HashMap<u32, u32> = HashMap::new();
     let mut tags: Vec<u32> = Vec::new();
-    for (&p, &d) in &reach {
-        if d == 0 {
-            continue;
-        }
+    for p in reach.iter() {
         for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
             if !posts.is_some_and(|s| s.contains(post)) {
                 continue;
@@ -418,7 +436,10 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
         }
     }
     let mut rows: Vec<(u32, u32)> = counts.into_iter().collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+    });
     rows.truncate(10);
     rows
 }
@@ -435,7 +456,10 @@ pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
             top.push((pi64(g, reply, "ms"), Reverse(reply)));
         }
     }
-    top.into_sorted_desc().into_iter().map(|(ms, Reverse(id))| (id, ms)).collect()
+    top.into_sorted_desc()
+        .into_iter()
+        .map(|(ms, Reverse(id))| (id, ms))
+        .collect()
 }
 
 /// IS6 — (forum, moderator) for a message. `roots` is the `chain_roots` array
@@ -454,7 +478,10 @@ pub fn is6_forum_of_message(g: &GraphSnapshot, message: u32, roots: &[u32]) -> O
 pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)> {
     let author = g.first_neighbor(message, Direction::Incoming, "hasCreator");
     let author_friends: HashSet<u32> = author
-        .map(|a| g.neighbors_by_type(a, Direction::Outgoing, "knows").collect())
+        .map(|a| {
+            g.neighbors_by_type(a, Direction::Outgoing, "knows")
+                .collect()
+        })
         .unwrap_or_default();
     let mut rows: Vec<(u32, i64, u32, bool)> = Vec::new();
     for reply in g.neighbors_by_type(message, Direction::Incoming, "replyOf") {
@@ -465,7 +492,10 @@ pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)
         let knows = author.is_some_and(|a| a != ra && author_friends.contains(&ra));
         rows.push((reply, pi64(g, reply, "ms"), ra, knows));
     }
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.2, "plid").cmp(&pi64(g, b.2, "plid"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pi64(g, a.2, "plid").cmp(&pi64(g, b.2, "plid")))
+    });
     rows
 }
 
@@ -473,15 +503,29 @@ pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)
 /// anyone whose home Country is X or Y) who created messages located in BOTH
 /// Country X and Country Y within `[start_day, start_day + duration_days)`.
 /// Returns (person, x_count, y_count), (x+y desc, plid asc), top 20.
-pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str, country_y: &str, start_day: i64, duration_days: i64) -> Vec<(u32, u32, u32)> {
+pub fn ic3_friends_two_countries(
+    g: &GraphSnapshot,
+    person: u32,
+    country_x: &str,
+    country_y: &str,
+    start_day: i64,
+    duration_days: i64,
+) -> Vec<(u32, u32, u32)> {
     let end_day = start_day + duration_days;
     let by_name = |name: &str| g.node_by_label_property("Country", "name", name);
     let (Some(cx), Some(cy)) = (by_name(country_x), by_name(country_y)) else {
         return Vec::new();
     };
-    let home_country =
-        |p: u32| g.follow(p, &[(Direction::Outgoing, "isLocatedIn"), (Direction::Outgoing, "isPartOf")]);
-    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let home_country = |p: u32| {
+        g.follow(
+            p,
+            &[
+                (Direction::Outgoing, "isLocatedIn"),
+                (Direction::Outgoing, "isPartOf"),
+            ],
+        )
+    };
+    let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     // Hoist the day column once instead of pi64() re-resolving the "day" key
     // (an interner lookup) for every friend-of-friend message.
     let day_col = g.i64_col("day");
@@ -493,8 +537,8 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
         }
     };
     let mut rows: Vec<(u32, u32, u32)> = Vec::new();
-    for (&p, &d) in &reach {
-        if d == 0 || matches!(home_country(p), Some(c) if c == cx || c == cy) {
+    for p in reach.iter() {
+        if matches!(home_country(p), Some(c) if c == cx || c == cy) {
             continue;
         }
         let (mut xc, mut yc) = (0u32, 0u32);
@@ -513,7 +557,11 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
             rows.push((p, xc, yc));
         }
     }
-    rows.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.sort_by(|a, b| {
+        (b.1 + b.2)
+            .cmp(&(a.1 + a.2))
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
     rows.truncate(20);
     rows
 }
@@ -522,7 +570,7 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
 /// after `min_day`, ranked by Posts in each Forum created by those post-`min_day`
 /// members. Returns (forum, post_count), (count desc, flid asc), top 20.
 pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32, u32)> {
-    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     let hd_col = g.i64_edge_col("hd");
     // Member-centric: for each qualifying member, count only THEIR posts whose
     // container forum is one they joined after min_day. This touches only members'
@@ -532,10 +580,7 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
     // Reuse one set across FoFs (clear keeps capacity) rather than allocating a
     // fresh HashSet per member — that fresh-per-FoF alloc dominated IC5's bytes.
     let mut qforums: HashSet<u32> = HashSet::new();
-    for (&p, &d) in &reach {
-        if d == 0 {
-            continue;
-        }
+    for p in reach.iter() {
         qforums.clear();
         for e in g.relationships(p, Direction::Incoming, &["hasMember"]) {
             if let Some(day) = hd_col.and_then(|c| c.get(e.pos)) {
@@ -556,7 +601,10 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
         }
     }
     let mut rows: Vec<(u32, u32)> = forum_counts.into_iter().collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "flid").cmp(&pi64(g, b.0, "flid"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pi64(g, a.0, "flid").cmp(&pi64(g, b.0, "flid")))
+    });
     rows.truncate(20);
     rows
 }
@@ -565,7 +613,9 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
 /// per liker, ordered (likeTime desc, liker plid asc). Returns
 /// (liker, like_ms, message, is_new) where is_new = liker is not a `knows` friend.
 pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, bool)> {
-    let friends: HashSet<u32> = g.neighbors_by_type(person, Direction::Outgoing, "knows").collect();
+    let friends: HashSet<u32> = g
+        .neighbors_by_type(person, Direction::Outgoing, "knows")
+        .collect();
     let ld_col = g.i64_edge_col("ld");
     let mut best: HashMap<u32, (i64, u32)> = HashMap::new();
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
@@ -593,7 +643,10 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
         .into_iter()
         .map(|(lms, _, liker, msg)| (liker, lms, msg, !friends.contains(&liker)))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
     rows
 }
 
@@ -602,9 +655,11 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
 /// Ordered (score desc, plid asc), top 10. Returns (foaf, score).
 pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<(u32, i64)> {
     let next = month % 12 + 1;
-    let interests: HashSet<u32> = g.neighbors_by_type(person, Direction::Outgoing, "hasInterest").collect();
+    let interests: HashSet<u32> = g
+        .neighbors_by_type(person, Direction::Outgoing, "hasInterest")
+        .collect();
     let posts = g.nodes_with_label("Post");
-    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let reach = g.neighborhood(person, Direction::Outgoing, "knows", 2..=2);
     // Hoist the bmon/bdom (birthday filter, read per FoF) and plid (sort key)
     // columns so each read is a direct column lookup, not pi64 re-resolving the key.
     let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
@@ -618,10 +673,7 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
     // Top 10 by (score desc, plid asc) in a heap; plid resolved once per FoF.
     use std::cmp::Reverse;
     let mut top = TopK::new(10);
-    for (&foaf, &d) in &reach {
-        if d != 2 {
-            continue;
-        }
+    for foaf in reach.iter() {
         let (bmon, bdom) = (rd(bmon_c, foaf), rd(bdom_c, foaf));
         if !((bmon == month && bdom >= 21) || (bmon == next && bdom < 22)) {
             continue;
@@ -631,7 +683,9 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
             if !posts.is_some_and(|p| p.contains(msg)) {
                 continue;
             }
-            if g.neighbors_by_type(msg, Direction::Outgoing, "hasTag").any(|t| interests.contains(&t)) {
+            if g.neighbors_by_type(msg, Direction::Outgoing, "hasTag")
+                .any(|t| interests.contains(&t))
+            {
                 common += 1;
             } else {
                 uncommon += 1;
@@ -644,14 +698,22 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
         .into_iter()
         .map(|(score, _, foaf)| (foaf, score))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
     rows
 }
 
 /// IC11 — the seed's <=2-hop `knows` neighbourhood who worked (workFrom < `year`)
 /// at a company in `country_name`. Ordered (workFrom asc, person plid asc,
 /// company name desc), top 10. Returns (person, company, work_from).
-pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, year: i64) -> Vec<(u32, u32, i64)> {
+pub fn ic11_job_referral(
+    g: &GraphSnapshot,
+    person: u32,
+    country_name: &str,
+    year: i64,
+) -> Vec<(u32, u32, i64)> {
     let Some(country) = g.node_by_label_property("Country", "name", country_name) else {
         return Vec::new();
     };
@@ -664,22 +726,21 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
     let mut in_country: HashSet<u32> = HashSet::new();
     if let Some(comps) = g.nodes_with_label("Company") {
         for org in comps.iter() {
-            if g.neighbors_by_type(org, Direction::Outgoing, "orgPlace").any(|pl| places_in_country.contains(&pl)) {
+            if g.neighbors_by_type(org, Direction::Outgoing, "orgPlace")
+                .any(|pl| places_in_country.contains(&pl))
+            {
                 in_country.insert(org);
             }
         }
     }
     let wf_col = g.i64_edge_col("wf");
-    let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
+    let reach = g.neighborhood(person, Direction::Outgoing, "knows", 1..=2);
     // Top 10 by (workFrom asc, plid asc, company name desc) in a heap; plid/name
     // resolved once per matching row, not per sort comparison. (The workAt scan
     // is the inherent CSR cost.)
     use std::cmp::Reverse;
     let mut top = TopK::new(10);
-    for (&p, &d) in &reach {
-        if d < 1 {
-            continue;
-        }
+    for p in reach.iter() {
         for e in g.relationships(p, Direction::Outgoing, &["workAt"]) {
             if !in_country.contains(&e.neighbor) {
                 continue;
@@ -718,7 +779,11 @@ pub fn ic11_job_referral(g: &GraphSnapshot, person: u32, country_name: &str, yea
 /// IC12 — the seed's direct friends who replied (Comment -> replyOf -> Post) to
 /// Posts tagged under `class_name` or a transitive subclass. Returns
 /// (friend, reply_count, tag_names), (count desc, plid asc), top 20.
-pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> Vec<(u32, usize, Vec<String>)> {
+pub fn ic12_expert_search(
+    g: &GraphSnapshot,
+    person: u32,
+    class_name: &str,
+) -> Vec<(u32, usize, Vec<String>)> {
     let Some(root_class) = g.node_by_label_property("TagClass", "name", class_name) else {
         return Vec::new();
     };
@@ -728,7 +793,8 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
         .into_keys()
         .collect();
     let qual_tag = |t: u32| {
-        g.neighbors_by_type(t, Direction::Outgoing, "hasType").any(|c| class_set.contains(&c))
+        g.neighbors_by_type(t, Direction::Outgoing, "hasType")
+            .any(|c| class_set.contains(&c))
     };
     let posts = g.nodes_with_label("Post");
     // Collect qualifying tag *ids* per friend (dedup, no String allocation in the
@@ -759,7 +825,10 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
             rows.push((friend, count, tag_ids.iter().copied().collect()));
         }
     }
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid"))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+    });
     rows.truncate(20);
     rows.into_iter()
         .map(|(friend, count, tag_ids)| {
@@ -776,7 +845,10 @@ pub fn ic12_expert_search(g: &GraphSnapshot, person: u32, class_name: &str) -> V
 /// IS4 — a message's (creationMs, content). Needs the loader's `load_content`
 /// option (the `ctext` property); image-only Posts fall back to their imageFile.
 pub fn is4_message_content(g: &GraphSnapshot, message: u32) -> Option<(i64, String)> {
-    Some((pi64(g, message, "ms"), pstr(g, message, "ctext")?.to_string()))
+    Some((
+        pi64(g, message, "ms"),
+        pstr(g, message, "ctext")?.to_string(),
+    ))
 }
 
 /// Load the snapshot, pick seeds, smoke-check each feasible IC query, then time
@@ -892,7 +964,9 @@ pub fn run() -> Result<()> {
             )
         };
         let is2 = is2_recent_of_person(&graph, seeds.person, seeds.max_day);
-        let is5 = is2.first().and_then(|&(m, _)| is5_message_creator(&graph, m));
+        let is5 = is2
+            .first()
+            .and_then(|&(m, _)| is5_message_creator(&graph, m));
         let mut friends: Vec<i64> = is3_friends(&graph, seeds.person)
             .iter()
             .map(|&f| plid(f))
@@ -927,7 +1001,10 @@ pub fn run() -> Result<()> {
         emit_json(
             &dir,
             "ic13.rust.json",
-            format!("[[{}]]", ic13_shortest_path(&graph, seeds.person, seeds.person_b)),
+            format!(
+                "[[{}]]",
+                ic13_shortest_path(&graph, seeds.person, seeds.person_b)
+            ),
         );
         emit_json(&dir, "is2.rust.json", arr_ms(&is2));
         emit_json(
@@ -942,7 +1019,11 @@ pub fn run() -> Result<()> {
                     .join(",")
             ),
         );
-        emit_json(&dir, "is5.rust.json", format!("[[{}]]", is5.map(plid).unwrap_or(-1)));
+        emit_json(
+            &dir,
+            "is5.rust.json",
+            format!("[[{}]]", is5.map(plid).unwrap_or(-1)),
+        );
 
         // Schema-compatible tier (task 052): IC4/IC6 -> [tagName, count],
         // IC8 -> [ms], IS6 -> [forumFlid, moderatorPlid], IS7 -> [ms, authorPlid, knows].
@@ -955,10 +1036,23 @@ pub fn run() -> Result<()> {
                     .join(",")
             )
         };
-        emit_json(&dir, "ic4.rust.json", arr_tag(&ic4_new_topics(&graph, seeds.person, ic4_start, ic4_dur)));
-        emit_json(&dir, "ic6.rust.json", arr_tag(&ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name)));
-        emit_json(&dir, "ic8.rust.json", arr_ms(&ic8_recent_replies(&graph, seeds.person)));
-        let is6 = seed_post.and_then(|m| is6_forum_of_message(&graph, m, reply_roots.as_deref().unwrap_or(&[])));
+        emit_json(
+            &dir,
+            "ic4.rust.json",
+            arr_tag(&ic4_new_topics(&graph, seeds.person, ic4_start, ic4_dur)),
+        );
+        emit_json(
+            &dir,
+            "ic6.rust.json",
+            arr_tag(&ic6_tag_cooccurrence(&graph, seeds.person, &seed_tag_name)),
+        );
+        emit_json(
+            &dir,
+            "ic8.rust.json",
+            arr_ms(&ic8_recent_replies(&graph, seeds.person)),
+        );
+        let is6 = seed_post
+            .and_then(|m| is6_forum_of_message(&graph, m, reply_roots.as_deref().unwrap_or(&[])));
         emit_json(
             &dir,
             "is6.rust.json",
@@ -967,7 +1061,9 @@ pub fn run() -> Result<()> {
                 None => "[]".to_string(),
             },
         );
-        let is7 = seed_post.map(|m| is7_replies(&graph, m)).unwrap_or_default();
+        let is7 = seed_post
+            .map(|m| is7_replies(&graph, m))
+            .unwrap_or_default();
         emit_json(
             &dir,
             "is7.rust.json",
@@ -986,30 +1082,107 @@ pub fn run() -> Result<()> {
         // IC12 -> [plid, count], IS1 -> [firstName, lastName, pday].
         let join = |v: Vec<String>| format!("[{}]", v.join(","));
         let ic1 = ic1_friends_by_name(&graph, seeds.person, &seeds.first_name);
-        emit_json(&dir, "ic1.rust.json", join(ic1.iter().map(|(p, d, ln)| format!("[{d},{},{}]", jstr(ln), plid(*p))).collect()));
-        let ic3 = ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500);
-        emit_json(&dir, "ic3.rust.json", join(ic3.iter().map(|(p, x, y)| format!("[{},{x},{y}]", plid(*p))).collect()));
+        emit_json(
+            &dir,
+            "ic1.rust.json",
+            join(
+                ic1.iter()
+                    .map(|(p, d, ln)| format!("[{d},{},{}]", jstr(ln), plid(*p)))
+                    .collect(),
+            ),
+        );
+        let ic3 = ic3_friends_two_countries(
+            &graph,
+            seeds.person,
+            "China",
+            "Germany",
+            days_from_civil(2010, 1, 1),
+            1500,
+        );
+        emit_json(
+            &dir,
+            "ic3.rust.json",
+            join(
+                ic3.iter()
+                    .map(|(p, x, y)| format!("[{},{x},{y}]", plid(*p)))
+                    .collect(),
+            ),
+        );
         let ic5 = ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1));
-        emit_json(&dir, "ic5.rust.json", join(ic5.iter().map(|(f, c)| format!("[{},{c}]", pi64(&graph, *f, "flid"))).collect()));
+        emit_json(
+            &dir,
+            "ic5.rust.json",
+            join(
+                ic5.iter()
+                    .map(|(f, c)| format!("[{},{c}]", pi64(&graph, *f, "flid")))
+                    .collect(),
+            ),
+        );
         let ic7 = ic7_recent_likers(&graph, seeds.person);
-        emit_json(&dir, "ic7.rust.json", join(ic7.iter().map(|(l, ms, _, new)| format!("[{ms},{},{}]", plid(*l), *new as i32)).collect()));
+        emit_json(
+            &dir,
+            "ic7.rust.json",
+            join(
+                ic7.iter()
+                    .map(|(l, ms, _, new)| format!("[{ms},{},{}]", plid(*l), *new as i32))
+                    .collect(),
+            ),
+        );
         let ic10 = ic10_friend_recommend(&graph, seeds.person, 1);
-        emit_json(&dir, "ic10.rust.json", join(ic10.iter().map(|(p, s)| format!("[{},{s}]", plid(*p))).collect()));
+        emit_json(
+            &dir,
+            "ic10.rust.json",
+            join(
+                ic10.iter()
+                    .map(|(p, s)| format!("[{},{s}]", plid(*p)))
+                    .collect(),
+            ),
+        );
         let ic11 = ic11_job_referral(&graph, seeds.person, &seed_country, 2030);
-        emit_json(&dir, "ic11.rust.json", join(ic11.iter().map(|(p, co, wf)| format!("[{},{},{wf}]", plid(*p), jstr(pstr(&graph, *co, "name").unwrap_or("")))).collect()));
+        emit_json(
+            &dir,
+            "ic11.rust.json",
+            join(
+                ic11.iter()
+                    .map(|(p, co, wf)| {
+                        format!(
+                            "[{},{},{wf}]",
+                            plid(*p),
+                            jstr(pstr(&graph, *co, "name").unwrap_or(""))
+                        )
+                    })
+                    .collect(),
+            ),
+        );
         let ic12 = ic12_expert_search(&graph, seeds.person, &seed_class_name);
-        emit_json(&dir, "ic12.rust.json", join(ic12.iter().map(|(f, c, _)| format!("[{},{c}]", plid(*f))).collect()));
-        emit_json(&dir, "is1.rust.json", match is1_profile(&graph, seeds.person) {
-            Some((fname, lname, _pday)) => format!("[[{},{}]]", jstr(&fname), jstr(&lname)),
-            None => "[]".to_string(),
-        });
+        emit_json(
+            &dir,
+            "ic12.rust.json",
+            join(
+                ic12.iter()
+                    .map(|(f, c, _)| format!("[{},{c}]", plid(*f)))
+                    .collect(),
+            ),
+        );
+        emit_json(
+            &dir,
+            "is1.rust.json",
+            match is1_profile(&graph, seeds.person) {
+                Some((fname, lname, _pday)) => format!("[[{},{}]]", jstr(&fname), jstr(&lname)),
+                None => "[]".to_string(),
+            },
+        );
         // IC14: weighted shortest-path cost (path node ids aren't comparable
         // across engines, so compare the cost rounded to 6 dp). (task 054)
         let interaction = build_knows_interaction(&graph);
-        emit_json(&dir, "ic14.rust.json", match ic14_weighted_path(&graph, seeds.person, seeds.person_b, &interaction) {
-            Some(c) => format!("[[{c:.6}]]"),
-            None => "[]".to_string(),
-        });
+        emit_json(
+            &dir,
+            "ic14.rust.json",
+            match ic14_weighted_path(&graph, seeds.person, seeds.person_b, &interaction) {
+                Some(c) => format!("[[{c:.6}]]"),
+                None => "[]".to_string(),
+            },
+        );
         println!("emitted IC cross-check JSON (ic1-14, is1-7 sans is4) to {dir}");
         return Ok(());
     }
@@ -1024,7 +1197,10 @@ pub fn run() -> Result<()> {
     assert!(!ic1.is_empty(), "IC1 returned no friends for the seed name");
     assert!(!ic2.is_empty(), "IC2 returned no recent messages");
     assert!(!ic9.is_empty(), "IC9 returned no FoF messages");
-    assert!(ic13 >= 1, "IC13 path length should be >= 1 for a reachable pair");
+    assert!(
+        ic13 >= 1,
+        "IC13 path length should be >= 1 for a reachable pair"
+    );
     assert!(ic14.is_some(), "IC14 found no weighted path");
     println!(
         "  IC1 rows: {}; IC2 recent: {}; IC9 FoF: {}; IC13 hops: {}; IC14 cost: {:.4}",
@@ -1060,7 +1236,14 @@ pub fn run() -> Result<()> {
 
     // Loader-backed queries (IC3/IC5/IC7/IC10/IC11/IC12); country/class params
     // (seed_country, seed_class_name) are derived above and shared with the emit.
-    let ic3 = ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500);
+    let ic3 = ic3_friends_two_countries(
+        &graph,
+        seeds.person,
+        "China",
+        "Germany",
+        days_from_civil(2010, 1, 1),
+        1500,
+    );
     let ic5 = ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1));
     let ic7 = ic7_recent_likers(&graph, seeds.person);
     let ic10 = ic10_friend_recommend(&graph, seeds.person, 1);
@@ -1122,14 +1305,23 @@ pub fn run() -> Result<()> {
     });
     if let Some(msg) = seed_post {
         time_query("IS6 forum of message", runs, || {
-            is6_forum_of_message(&graph, msg, reply_roots.as_deref().unwrap_or(&[])).is_some() as usize
+            is6_forum_of_message(&graph, msg, reply_roots.as_deref().unwrap_or(&[])).is_some()
+                as usize
         });
         time_query("IS7 replies of message", runs, || {
             is7_replies(&graph, msg).len()
         });
     }
     time_query("IC3 two countries", runs, || {
-        ic3_friends_two_countries(&graph, seeds.person, "China", "Germany", days_from_civil(2010, 1, 1), 1500).len()
+        ic3_friends_two_countries(
+            &graph,
+            seeds.person,
+            "China",
+            "Germany",
+            days_from_civil(2010, 1, 1),
+            1500,
+        )
+        .len()
     });
     time_query("IC5 new groups", runs, || {
         ic5_new_groups(&graph, seeds.person, days_from_civil(2011, 1, 1)).len()
