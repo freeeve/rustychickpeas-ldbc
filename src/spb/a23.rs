@@ -66,8 +66,8 @@ pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> V
             continue;
         };
         if g.str_prop(w, "description").is_none()
-            || !g.has_edge(w, Direction::Outgoing, "audience")
-            || !g.has_edge(w, Direction::Outgoing, "primaryFormat")
+            || !g.has_rel(w, Direction::Outgoing, "audience")
+            || !g.has_rel(w, Direction::Outgoing, "primaryFormat")
             || g.prop(w, "liveCoverage").is_none()
         {
             continue;

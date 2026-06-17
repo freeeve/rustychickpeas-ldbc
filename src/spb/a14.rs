@@ -31,8 +31,8 @@
 //! web document whose `webDocumentType` targets `web_doc_type`. Both
 //! `primaryFormat` and `webDocumentType` carry IRI objects in the data
 //! (`bbc:webDocumentType <…/Mobile>`), so the loader stores them as edges to a
-//! node bearing that `uri` — we match them with the q21-style `has_edge_to_uri`,
-//! not a literal-property read. The template additionally pins a specific
+//! node bearing that `uri` — we match them by resolving the target `uri` to its
+//! node and traversing to it, not a literal-property read. The template additionally pins a specific
 //! `audience` (in the FILTER and a second OPTIONAL); this batch's signature leaves
 //! the audience unbound, so we require only that an `audience` edge is present.
 //! Results are ordered by `dateModified` (ISO-8601, hence lexicographic)
@@ -46,10 +46,10 @@ use crate::props::top_k_by_key;
 /// Whether `work` binds every required edge of the q14 star: ≥1 `tag`
 /// (about∪mentions), `category`, `thumbnail` and `audience` edge.
 fn has_required_star(g: &GraphSnapshot, work: u32) -> bool {
-    g.has_edge(work, Direction::Outgoing, "tag")
-        && g.has_edge(work, Direction::Outgoing, "category")
-        && g.has_edge(work, Direction::Outgoing, "thumbnail")
-        && g.has_edge(work, Direction::Outgoing, "audience")
+    g.has_rel(work, Direction::Outgoing, "tag")
+        && g.has_rel(work, Direction::Outgoing, "category")
+        && g.has_rel(work, Direction::Outgoing, "thumbnail")
+        && g.has_rel(work, Direction::Outgoing, "audience")
 }
 
 /// q14: creative works satisfying the full required star (≥1 `tag`/`category`/

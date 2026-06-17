@@ -51,8 +51,8 @@ pub fn run(g: &GraphSnapshot, cw_type: &str, after: &str, before: &str, limit: u
                 && modified <= before
                 && pstr(g, w, "title").is_some()
                 && g.prop(w, "liveCoverage").is_some()
-                && g.has_edge(w, Direction::Outgoing, "category")
-                && g.has_edge(w, Direction::Outgoing, "audience");
+                && g.has_rel(w, Direction::Outgoing, "category")
+                && g.has_rel(w, Direction::Outgoing, "audience");
             keep.then_some((w, modified))
         })
         .collect();
