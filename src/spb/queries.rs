@@ -19,19 +19,15 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::pstr;
 
-/// Whether `node` carries the given label.
+/// Whether `node` carries the given label (core `has_label`).
 pub(crate) fn has_label(g: &GraphSnapshot, node: u32, label: &str) -> bool {
-    g.nodes_with_label(label).is_some_and(|ns| ns.contains(node))
+    g.has_label(node, label)
 }
 
-/// Find a node by its `uri` property: creative works, geonames features and
-/// dbpedia `about`-targets (Company / Event), falling back to `Facet` for an
-/// otherwise-untyped resource (category / audience / format / webDocument …).
-/// Each lookup uses the cached `nodes_with_property` index. `None` for unknown.
+/// Find a node by its `uri` property — the label-free core `node_by_property`
+/// lookup (resolves any node, typed or not, via the cached `(key, value)` index).
 pub(crate) fn node_by_uri(g: &GraphSnapshot, uri: &str) -> Option<u32> {
-    ["CreativeWork", "Feature", "Company", "Event", "Facet"]
-        .iter()
-        .find_map(|lbl| g.nodes_with_property(lbl, "uri", uri).and_then(|ns| ns.iter().next()))
+    g.node_by_property("uri", uri)
 }
 
 /// Display name: a creative work's `title`, or a feature's `name`.

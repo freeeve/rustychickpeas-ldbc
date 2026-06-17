@@ -25,7 +25,7 @@ use std::collections::HashSet;
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::pstr;
-use super::queries::{has_label, node_by_uri};
+use super::queries::node_by_uri;
 
 /// Creative works `about` OR `mentions` the topic at `topic_uri`, ranked by
 /// `dateModified` descending (tie-broken by node id ascending for a stable order).
@@ -39,11 +39,7 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str) -> Vec<u32> {
 
     let mut works: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
-        for w in g.neighbors_by_type(topic, Direction::Incoming, pred) {
-            if has_label(g, w, "CreativeWork") {
-                works.insert(w);
-            }
-        }
+        works.extend(g.neighbors_with_label(topic, Direction::Incoming, pred, "CreativeWork"));
     }
 
     // The sub-SELECT's `cwork:dateModified ?modified` is required, so works with no

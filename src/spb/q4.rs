@@ -27,7 +27,7 @@ use std::collections::HashSet;
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::pstr;
-use super::queries::{has_label, node_by_uri};
+use super::queries::node_by_uri;
 
 /// Blog posts (`BlogPost`-labelled creative works) `about` OR `mentions` the topic
 /// at `topic_uri`, ranked by `dateCreated` descending (tie-broken by node id
@@ -42,11 +42,7 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
 
     let mut posts: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
-        for w in g.neighbors_by_type(topic, Direction::Incoming, pred) {
-            if has_label(g, w, "BlogPost") {
-                posts.insert(w);
-            }
-        }
+        posts.extend(g.neighbors_with_label(topic, Direction::Incoming, pred, "BlogPost"));
     }
 
     // `cwork:dateCreated ?created` is required, so a post with no `dateCreated`

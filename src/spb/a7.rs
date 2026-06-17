@@ -18,11 +18,9 @@
 //! `min_primary_content`, then tally their outgoing `mentions` targets, counting
 //! each `(work, mentions)` pair (the outer `COUNT(*)`).
 
-use std::collections::HashMap;
-
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::{pstr, top_k_by_count};
 
 /// Mention targets ranked by how many qualifying works mention them, where a work
 /// qualifies when its outgoing `primaryContentOf` edge count is strictly greater
@@ -32,21 +30,16 @@ pub fn run(g: &GraphSnapshot, min_primary_content: usize, limit: usize) -> Vec<(
     let Some(works) = g.nodes_with_label("CreativeWork") else {
         return Vec::new();
     };
-    let mut counts: HashMap<u32, usize> = HashMap::new();
-    for w in works.iter() {
-        let pc_count = g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf").count();
-        if pc_count <= min_primary_content {
-            continue;
-        }
-        for m in g.neighbors_by_type(w, Direction::Outgoing, "mentions") {
-            *counts.entry(m).or_default() += 1;
-        }
-    }
-    // Sort / truncate on node ids; resolve uris only for the kept rows.
-    let mut rows: Vec<(u32, usize)> = counts.into_iter().collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows.truncate(limit);
-    rows.into_iter().map(|(m, n)| (pstr(g, m, "uri").unwrap_or("?").to_string(), n)).collect()
+    // Works whose `primaryContentOf` out-degree exceeds the threshold; count each
+    // of their `mentions` targets (core target histogram) and keep the top rows.
+    let qualifying = works.iter().filter(|&w| {
+        g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf").count() > min_primary_content
+    });
+    let counts = g.target_counts(qualifying, Direction::Outgoing, "mentions");
+    top_k_by_count(counts, limit)
+        .into_iter()
+        .map(|(m, n)| (pstr(g, m, "uri").unwrap_or("?").to_string(), n))
+        .collect()
 }
 
 #[cfg(test)]

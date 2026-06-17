@@ -137,14 +137,7 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
                 label_iris.extend(supers.iter().map(String::as_str).filter(|s| *s != OWL_THING));
             }
         }
-        let mut node_labels: Vec<&str> = label_iris.iter().map(|iri| ntriples::local_name(iri)).collect();
-        // An untyped resource (e.g. a category / audience / format / webDocument
-        // target) gets a generic `Facet` label so it is reachable by uri through
-        // the `nodes_with_property("Facet", "uri", _)` index; queries never match
-        // `Facet` directly, so results are unchanged.
-        if node_labels.is_empty() {
-            node_labels.push("Facet");
-        }
+        let node_labels: Vec<&str> = label_iris.iter().map(|iri| ntriples::local_name(iri)).collect();
         builder.add_node(Some(id), &node_labels).expect("add_node");
         if let Some(iri) = uri_of.get(&id) {
             builder.set_prop_str(id, "uri", iri).ok();

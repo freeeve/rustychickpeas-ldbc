@@ -3,6 +3,17 @@
 
 use rustychickpeas_core::{GraphSnapshot, ValueId};
 
+/// Sort a `node -> count` histogram (e.g. from `GraphSnapshot::target_counts`) by
+/// count descending, node id ascending on ties, and keep the top `limit` — the
+/// selector behind the group-by-count queries. Takes any `(node, count)` iterable
+/// so it accepts either hashbrown's or std's `HashMap`.
+pub fn top_k_by_count(counts: impl IntoIterator<Item = (u32, usize)>, limit: usize) -> Vec<(u32, usize)> {
+    let mut rows: Vec<(u32, usize)> = counts.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    rows.truncate(limit);
+    rows
+}
+
 /// Days since 1970-01-01 for a proleptic-Gregorian date (Howard Hinnant's
 /// algorithm). Used so date-range filters and N-day window arithmetic are plain
 /// integer comparisons.
