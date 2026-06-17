@@ -28,8 +28,19 @@ shape — now use `top_k_by_key`. The other BI sort+truncate sites are multi-col
 tuples sorted on assorted fields (`b.3`/`b.4`/multi-key blocks) and do NOT fit the
 2-tuple helper; left as-is.
 Still open: a streaming `TopK<T>` accumulator for the `BinaryHeap<Reverse<…>>` sites
-(IC ~9, when IC is free) and a stored-property (plid) tiebreak variant once column
-readers (tasks/140) land.
+(IC ~9, when IC is free) and a stored-property (plid) tiebreak variant — now
+UNBLOCKED, the tasks/140 `i64_col`/`i64_edge_col` readers landed (see Tier 1).
+
+## Tier 1 — adopt the tasks/140 core primitives (NOW UNBLOCKED, core landed)
+`tasks/140` shipped in core (`d34c6f9`): `i64_col`/`bool_col`/`i64_edge_col`
+(resolve-once typed column readers), `str_prop` (None on absent OR empty), and
+`first_neighbor` / `follow`. Client adoption (BI + SPB now; IC when free):
+- `str_prop` → the `pstr(g, n, k).filter(|s| !s.is_empty())` sites (SPB ~9: a20,
+  a24, q3, … and BI date-modified reads).
+- `i64_col` / `i64_edge_col` → retire LDBC `col_i64` (BI ~21, incl. the per-compare
+  re-resolve in the plid/date tiebreak comparators — hoist the reader out of the sort).
+- `first_neighbor` → the `neighbors_by_type(..).next()` idiom (BI ~14, SPB facets).
+- `follow` → BI person→city→country and the re-defined `creator_of` closures (BI ~6).
 
 ## #7 — date helpers (props.rs)
 `parse_ymd(s) -> Option<(i32,u32,u32)>` — DONE: lifted from a24, the calendar-field
