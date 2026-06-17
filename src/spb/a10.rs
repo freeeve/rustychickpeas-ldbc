@@ -33,7 +33,13 @@ pub fn run(g: &GraphSnapshot, limit: usize) -> Vec<(String, usize)> {
     };
     let counts: Vec<(u32, usize)> = works
         .iter()
-        .map(|w| (w, g.neighbors_by_type(w, Direction::Outgoing, "mentions").count()))
+        .map(|w| {
+            (
+                w,
+                g.neighbors_by_type(w, Direction::Outgoing, "mentions")
+                    .count(),
+            )
+        })
         .collect();
     let max = counts.iter().map(|&(_, n)| n).max().unwrap_or(0);
     if max == 0 {
@@ -41,7 +47,7 @@ pub fn run(g: &GraphSnapshot, limit: usize) -> Vec<(String, usize)> {
     }
     let mut rows: Vec<(String, usize)> = counts
         .into_iter()
-        .filter(|&(w, n)| n == max && g.str_prop(w, "dateCreated").is_some())
+        .filter(|&(w, n)| n == max && g.prop_str(w, "dateCreated").is_some())
         .map(|(w, n)| (pstr(g, w, "uri").unwrap_or("?").to_string(), n))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0));
@@ -86,7 +92,10 @@ mod tests {
         // max mentions = 3 (cw2, cw3, cw4); cw1 has only 1, cw4 lacks dateCreated.
         assert_eq!(
             rows,
-            vec![("http://ex/cw2".to_string(), 3), ("http://ex/cw3".to_string(), 3)]
+            vec![
+                ("http://ex/cw2".to_string(), 3),
+                ("http://ex/cw3".to_string(), 3)
+            ]
         );
     }
 }

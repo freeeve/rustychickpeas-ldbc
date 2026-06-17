@@ -57,7 +57,12 @@ fn has_required_star(g: &GraphSnapshot, work: u32) -> bool {
 /// to `primary_format_uri`, and a `primaryContentOf` web document of type
 /// `web_doc_type`), ordered by `dateModified` descending then id, truncated to
 /// `limit`.
-pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limit: usize) -> Vec<u32> {
+pub fn run(
+    g: &GraphSnapshot,
+    primary_format_uri: &str,
+    web_doc_type: &str,
+    limit: usize,
+) -> Vec<u32> {
     // Resolve the two pinned facet targets to node ids once (a `Facet`-labelled
     // uri lookup), so the filters are id comparisons, not per-edge uri reads.
     let (Some(works), Some(pf), Some(wdt)) = (
@@ -70,18 +75,26 @@ pub fn run(g: &GraphSnapshot, primary_format_uri: &str, web_doc_type: &str, limi
     let rows: Vec<(u32, &str)> = works
         .iter()
         .filter(|&w| has_required_star(g, w))
-        .filter(|&w| g.neighbors_by_type(w, Direction::Outgoing, "primaryFormat").any(|t| t == pf))
         .filter(|&w| {
-            g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf").any(|pc| {
-                g.neighbors_by_type(pc, Direction::Outgoing, "webDocumentType").any(|t| t == wdt)
-            })
+            g.neighbors_by_type(w, Direction::Outgoing, "primaryFormat")
+                .any(|t| t == pf)
+        })
+        .filter(|&w| {
+            g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf")
+                .any(|pc| {
+                    g.neighbors_by_type(pc, Direction::Outgoing, "webDocumentType")
+                        .any(|t| t == wdt)
+                })
         })
         // `cwork:dateModified ?dateModified` is required and is the ORDER BY key;
         // a dense string property missing on a node reads back as Some(""), so
         // treat empty as absent. Carry the value to sort without re-lookup.
-        .filter_map(|w| g.str_prop(w, "dateModified").map(|d| (w, d)))
+        .filter_map(|w| g.prop_str(w, "dateModified").map(|d| (w, d)))
         .collect();
-    top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
+    top_k_by_key(rows, limit)
+        .into_iter()
+        .map(|(w, _)| w)
+        .collect()
 }
 
 #[cfg(test)]
@@ -158,7 +171,10 @@ mod tests {
 "#;
 
     fn uris(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "uri").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| pstr(g, w, "uri").unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]
@@ -181,7 +197,12 @@ mod tests {
     fn unmatched_format_yields_empty() {
         let g = load_str(FIXTURE).0;
         // A primaryFormat nobody carries -> no matches.
-        let out = run(&g, "http://www.bbc.co.uk/ontologies/creativework/AudioFormat", MOBILE, 100);
+        let out = run(
+            &g,
+            "http://www.bbc.co.uk/ontologies/creativework/AudioFormat",
+            MOBILE,
+            100,
+        );
         assert!(out.is_empty());
     }
 }

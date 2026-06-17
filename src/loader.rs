@@ -63,7 +63,13 @@ pub struct Stats {
 
 /// Store the message properties the faithful queries read: year, day-number,
 /// length, and whether content is present (image-only posts have empty content).
-pub fn set_message_props(b: &mut GraphBuilder, id: u32, creation: &str, content: &str, length: &str) {
+pub fn set_message_props(
+    b: &mut GraphBuilder,
+    id: u32,
+    creation: &str,
+    content: &str,
+    length: &str,
+) {
     if let Some((year, day)) = parse_date(creation) {
         b.set_prop_i64(id, "year", year).unwrap();
         b.set_prop_i64(id, "day", day).unwrap();
@@ -110,14 +116,18 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
     stats.tag_classes = tagclass.len() as u64;
 
     // TagClass -[isSubclassOf]-> parent TagClass (the class hierarchy), for IC12.
-    for_each_row(&static_.join("TagClass"), &["id", "SubclassOfTagClassId"], |v| {
-        let c = v[0].parse::<i64>().ok().and_then(|i| tagclass.get(&i));
-        let parent = v[1].parse::<i64>().ok().and_then(|i| tagclass.get(&i));
-        if let (Some(&c), Some(&p)) = (c, parent) {
-            builder.add_relationship(c, p, "isSubclassOf").unwrap();
-            stats.edges += 1;
-        }
-    })?;
+    for_each_row(
+        &static_.join("TagClass"),
+        &["id", "SubclassOfTagClassId"],
+        |v| {
+            let c = v[0].parse::<i64>().ok().and_then(|i| tagclass.get(&i));
+            let parent = v[1].parse::<i64>().ok().and_then(|i| tagclass.get(&i));
+            if let (Some(&c), Some(&p)) = (c, parent) {
+                builder.add_relationship(c, p, "isSubclassOf").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
 
     // Static Tag + Tag -[hasType]-> TagClass.
     for_each_row(
@@ -144,7 +154,14 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
     // first/last name (fname/lname) for the Interactive workload's IC1/IS1.
     for_each_row(
         &dynamic.join("Person"),
-        &["creationDate", "id", "firstName", "lastName", "gender", "birthday"],
+        &[
+            "creationDate",
+            "id",
+            "firstName",
+            "lastName",
+            "gender",
+            "birthday",
+        ],
         |v| {
             if let Ok(lid) = v[1].parse::<i64>() {
                 let id = next;
@@ -156,8 +173,12 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 builder.set_prop_str(id, "gender", v[4]).unwrap(); // IC10 output
                 if v[5].len() >= 10 {
                     // birthday MM/DD for IC10's day-window filter.
-                    builder.set_prop_i64(id, "bmon", v[5][5..7].parse().unwrap_or(0)).unwrap();
-                    builder.set_prop_i64(id, "bdom", v[5][8..10].parse().unwrap_or(0)).unwrap();
+                    builder
+                        .set_prop_i64(id, "bmon", v[5][5..7].parse().unwrap_or(0))
+                        .unwrap();
+                    builder
+                        .set_prop_i64(id, "bdom", v[5][8..10].parse().unwrap_or(0))
+                        .unwrap();
                 }
                 if let Some((year, day)) = parse_date(v[0]) {
                     let month = v[0]
@@ -236,7 +257,8 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             if let (Some(&f), Some(&p)) = (f, p) {
                 let day = parse_date(v[0]).map(|(_, d)| d).unwrap_or(0);
                 let idx = builder.add_relationship(f, p, "hasMember").unwrap();
-                builder.set_relationship_props_by_index(idx, &[("hd", PropertyValue::Integer(day))]); // IC5 join date
+                builder
+                    .set_relationship_props_by_index(idx, &[("hd", PropertyValue::Integer(day))]); // IC5 join date
                 stats.edges += 1;
             }
         },
@@ -379,14 +401,18 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             stats.edges += 1;
         }
     })?;
-    for_each_row(&dynamic.join("Comment"), &["id", "LocationCountryId"], |v| {
-        let m = v[0].parse::<i64>().ok().and_then(|i| comment.get(&i));
-        let c = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
-        if let (Some(&m), Some(&c)) = (m, c) {
-            builder.add_relationship(m, c, "msgCountry").unwrap();
-            stats.edges += 1;
-        }
-    })?;
+    for_each_row(
+        &dynamic.join("Comment"),
+        &["id", "LocationCountryId"],
+        |v| {
+            let m = v[0].parse::<i64>().ok().and_then(|i| comment.get(&i));
+            let c = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
+            if let (Some(&m), Some(&c)) = (m, c) {
+                builder.add_relationship(m, c, "msgCountry").unwrap();
+                stats.edges += 1;
+            }
+        },
+    )?;
 
     // Person -[likes]-> Message (Post and Comment), for Q5/Q6.
     for_each_row(
@@ -397,7 +423,10 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let m = v[2].parse::<i64>().ok().and_then(|i| post.get(&i));
             if let (Some(&p), Some(&m)) = (p, m) {
                 let idx = builder.add_relationship(p, m, "likes").unwrap();
-                builder.set_relationship_props_by_index(idx, &[("ld", PropertyValue::Integer(parse_ms(v[0])))]); // IC7
+                builder.set_relationship_props_by_index(
+                    idx,
+                    &[("ld", PropertyValue::Integer(parse_ms(v[0])))],
+                ); // IC7
                 stats.edges += 1;
             }
         },
@@ -410,7 +439,10 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let m = v[2].parse::<i64>().ok().and_then(|i| comment.get(&i));
             if let (Some(&p), Some(&m)) = (p, m) {
                 let idx = builder.add_relationship(p, m, "likes").unwrap();
-                builder.set_relationship_props_by_index(idx, &[("ld", PropertyValue::Integer(parse_ms(v[0])))]); // IC7
+                builder.set_relationship_props_by_index(
+                    idx,
+                    &[("ld", PropertyValue::Integer(parse_ms(v[0])))],
+                ); // IC7
                 stats.edges += 1;
             }
         },
@@ -452,7 +484,9 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 org.insert(lid, id);
                 // Organisation -[orgPlace]-> Place (City/Country), for IC11.
                 if let Some(&place_node) = v[3].parse::<i64>().ok().and_then(|i| place.get(&i)) {
-                    builder.add_relationship(id, place_node, "orgPlace").unwrap();
+                    builder
+                        .add_relationship(id, place_node, "orgPlace")
+                        .unwrap();
                     stats.edges += 1;
                 }
             }
@@ -466,7 +500,10 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let c = v[1].parse::<i64>().ok().and_then(|i| org.get(&i));
             if let (Some(&p), Some(&c)) = (p, c) {
                 let idx = builder.add_relationship(p, c, "workAt").unwrap();
-                builder.set_relationship_props_by_index(idx, &[("wf", PropertyValue::Integer(v[2].parse().unwrap_or(0)))]); // IC11
+                builder.set_relationship_props_by_index(
+                    idx,
+                    &[("wf", PropertyValue::Integer(v[2].parse().unwrap_or(0)))],
+                ); // IC11
                 stats.edges += 1;
             }
         },

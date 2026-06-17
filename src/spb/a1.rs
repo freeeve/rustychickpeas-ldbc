@@ -25,13 +25,15 @@ use super::queries::node_by_uri;
 /// `thing_uri` and a non-empty `dateModified`, ordered by `dateModified`
 /// descending then node id ascending. Empty when the thing is unknown.
 pub fn run(g: &GraphSnapshot, pred: &str, thing_uri: &str) -> Vec<u32> {
-    let (Some(thing), Some(cworks)) = (node_by_uri(g, thing_uri), g.nodes_with_label("CreativeWork"))
-    else {
+    let (Some(thing), Some(cworks)) = (
+        node_by_uri(g, thing_uri),
+        g.nodes_with_label("CreativeWork"),
+    ) else {
         return Vec::new();
     };
     let mut works: Vec<(String, u32)> = Vec::new();
     for w in g.neighbors_in_set(thing, Direction::Incoming, pred, cworks) {
-        let Some(modified) = g.str_prop(w, "dateModified") else {
+        let Some(modified) = g.prop_str(w, "dateModified") else {
             continue;
         };
         works.push((modified.to_string(), w));
@@ -75,7 +77,10 @@ mod tests {
 "#;
 
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| pstr(g, w, "title").unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]
@@ -83,13 +88,19 @@ mod tests {
         let g = load_str(FIXTURE).0;
         // cw1 (2011-05-10) and cw3 (2011-01-01) are dated about-works; cw2 lacks a
         // dateModified so it is dropped; cw4 is a mentions-work, not an about-work.
-        assert_eq!(titles(&g, &run(&g, "about", "http://ex/Acme")), ["Recent about", "Old about"]);
+        assert_eq!(
+            titles(&g, &run(&g, "about", "http://ex/Acme")),
+            ["Recent about", "Old about"]
+        );
     }
 
     #[test]
     fn mentions_predicate_selects_the_mentions_work() {
         let g = load_str(FIXTURE).0;
-        assert_eq!(titles(&g, &run(&g, "mentions", "http://ex/Acme")), ["Mentions"]);
+        assert_eq!(
+            titles(&g, &run(&g, "mentions", "http://ex/Acme")),
+            ["Mentions"]
+        );
     }
 
     #[test]

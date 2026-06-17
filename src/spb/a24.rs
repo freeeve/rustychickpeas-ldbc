@@ -82,7 +82,7 @@ pub fn run(
     let mut per_day: BTreeMap<(i32, u32, u32), usize> = BTreeMap::new();
     for w in both {
         // `cwork:dateCreated` is required; treat the dense-column "" as absent.
-        let Some(created) = g.str_prop(w, "dateCreated") else {
+        let Some(created) = g.prop_str(w, "dateCreated") else {
             continue;
         };
         let Some(key) = parse_ymd(created) else {
@@ -161,7 +161,10 @@ mod tests {
             vec![((2024, 5, 20), 1), ((2024, 6, 1), 2), ((2024, 7, 15), 1)]
         );
         // The intersection is symmetric in the two entities.
-        assert_eq!(run(&g, SUMMIT, ACME, None, None), run(&g, ACME, SUMMIT, None, None));
+        assert_eq!(
+            run(&g, SUMMIT, ACME, None, None),
+            run(&g, ACME, SUMMIT, None, None)
+        );
     }
 
     #[test]

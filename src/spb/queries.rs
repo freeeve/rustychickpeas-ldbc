@@ -6,7 +6,7 @@
 //! materializes this supertype; the data types them as `BlogPost`/`NewsItem`/…
 //! subclasses), carrying `title` / `description` (full-text), `mentions` -> a
 //! geonames `Feature` (wgs84 `lat` / `long`, geo), `about` -> entity,
-//! `category`, `dateModified`. Full-text and geo use the core `fts` /
+//! `category`, `dateModified`. Full-text and geo use the core `full_text_search` /
 //! `geo_within_radius` indexes (tasks 011/012).
 //!
 //! This module implements the two queries the core features were built for —
@@ -24,21 +24,23 @@ pub(crate) fn has_label(g: &GraphSnapshot, node: u32, label: &str) -> bool {
     g.has_label(node, label)
 }
 
-/// Find a node by its `uri` property — the label-free core `node_by_property`
+/// Find a node by its `uri` property — the label-free core `node_with_property`
 /// lookup (resolves any node, typed or not, via the cached `(key, value)` index).
 pub(crate) fn node_by_uri(g: &GraphSnapshot, uri: &str) -> Option<u32> {
-    g.node_by_property("uri", uri)
+    g.node_with_property("uri", uri)
 }
 
 /// Display name: a creative work's `title`, or a feature's `name`.
 pub fn name_of(g: &GraphSnapshot, node: u32) -> &str {
-    pstr(g, node, "title").or_else(|| pstr(g, node, "name")).unwrap_or("?")
+    pstr(g, node, "title")
+        .or_else(|| pstr(g, node, "name"))
+        .unwrap_or("?")
 }
 
 /// SPB basic **q8** (full-text): creative works whose `title` OR `description`
 /// contains `word`. Boolean union of the core inverted index over both fields.
 pub fn q8_fulltext(g: &GraphSnapshot, word: &str) -> Vec<u32> {
-    let hits = &g.fts("CreativeWork", "description", word) | &g.fts("CreativeWork", "title", word);
+    let hits = &g.full_text_search("CreativeWork", "description", word) | &g.full_text_search("CreativeWork", "title", word);
     hits.iter().collect()
 }
 
@@ -47,7 +49,10 @@ pub fn q8_fulltext(g: &GraphSnapshot, word: &str) -> Vec<u32> {
 /// the reverse `mentions` traversal.
 pub fn q6_geo(g: &GraphSnapshot, lat: f64, lon: f64, km: f64) -> Vec<u32> {
     let mut works: HashSet<u32> = HashSet::new();
-    for f in g.geo_within_radius("Feature", "lat", "long", lat, lon, km).iter() {
+    for f in g
+        .geo_within_radius("Feature", "lat", "long", lat, lon, km)
+        .iter()
+    {
         for w in g.neighbors_by_type(f, Direction::Incoming, "mentions") {
             if has_label(g, w, "CreativeWork") {
                 works.insert(w);
@@ -89,17 +94,26 @@ mod tests {
     #[test]
     fn q8_full_text_over_title_and_description() {
         let g = fixture();
-        assert_eq!(titles(&g, &q8_fulltext(&g, "football")), ["London derby", "Paris Saint-Germain"]);
+        assert_eq!(
+            titles(&g, &q8_fulltext(&g, "football")),
+            ["London derby", "Paris Saint-Germain"]
+        );
         assert_eq!(titles(&g, &q8_fulltext(&g, "tennis")), ["Wimbledon final"]);
         // matches title as well as description
-        assert_eq!(titles(&g, &q8_fulltext(&g, "wimbledon")), ["Wimbledon final"]);
+        assert_eq!(
+            titles(&g, &q8_fulltext(&g, "wimbledon")),
+            ["Wimbledon final"]
+        );
     }
 
     #[test]
     fn q6_geo_via_mentions() {
         let g = fixture();
         // within 50km of London -> the two works mentioning London
-        assert_eq!(titles(&g, &q6_geo(&g, 51.5074, -0.1278, 50.0)), ["London derby", "Wimbledon final"]);
+        assert_eq!(
+            titles(&g, &q6_geo(&g, 51.5074, -0.1278, 50.0)),
+            ["London derby", "Wimbledon final"]
+        );
         // widen to cover Paris (~340km) -> all three
         assert_eq!(q6_geo(&g, 51.5074, -0.1278, 500.0).len(), 3);
     }
@@ -108,8 +122,14 @@ mod tests {
     fn q6_q8_composition() {
         let g = fixture();
         // near London AND 'tennis' -> Wimbledon only
-        assert_eq!(titles(&g, &q6_q8(&g, 51.5074, -0.1278, 50.0, "tennis")), ["Wimbledon final"]);
+        assert_eq!(
+            titles(&g, &q6_q8(&g, 51.5074, -0.1278, 50.0, "tennis")),
+            ["Wimbledon final"]
+        );
         // near London AND 'football' -> London derby (the Paris football club is excluded)
-        assert_eq!(titles(&g, &q6_q8(&g, 51.5074, -0.1278, 50.0, "football")), ["London derby"]);
+        assert_eq!(
+            titles(&g, &q6_q8(&g, 51.5074, -0.1278, 50.0, "football")),
+            ["London derby"]
+        );
     }
 }

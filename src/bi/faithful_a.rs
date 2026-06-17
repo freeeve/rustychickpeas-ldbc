@@ -112,7 +112,7 @@ pub(crate) fn q2_tag_evolution(
     class_name: &str,
 ) -> Vec<(String, u64, u64, u64)> {
     // Target TagClass node.
-    let target = g.node_by_label_property("TagClass", "name", class_name);
+    let target = g.node_with_label_property("TagClass", "name", class_name);
     let Some(target) = target else {
         return Vec::new();
     };
@@ -202,7 +202,7 @@ pub(crate) fn q2_tag_evolution(
 /// carrying that tag, and (for comments that do not themselves carry the tag)
 /// count distinct such comments per *other* tag they carry. Cypher: bi-7.cypher.
 pub(crate) fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(String, usize)> {
-    let target = g.node_by_label_property("Tag", "name", tag_name);
+    let target = g.node_with_label_property("Tag", "name", tag_name);
     let Some(target) = target else {
         return Vec::new();
     };
@@ -456,7 +456,7 @@ pub(crate) fn q11_friend_triangles(
     start_day: i64,
     end_day: i64,
 ) -> u64 {
-    let country = g.node_by_label_property("Country", "name", country_name);
+    let country = g.node_with_label_property("Country", "name", country_name);
     let Some(country) = country else {
         return 0;
     };

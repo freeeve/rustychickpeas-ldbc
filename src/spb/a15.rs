@@ -21,7 +21,7 @@
 //!     subclass (BlogPost/NewsItem/…) that the loader forward-chains to
 //!     `CreativeWork`, so this clause holds for every work; we scan the
 //!     `CreativeWork` full-text index for the title FILTER.
-//!   * `FILTER (CONTAINS (?title, word))` — the core whole-word `fts` over `title`.
+//!   * `FILTER (CONTAINS (?title, word))` — the core whole-word `full_text_search` over `title`.
 //!   * `?about a ?entityType . ?mentions a ?entityType` — an about-target and a
 //!     mentions-target must share a type. SPB's about-targets are dbpedia
 //!     `Company`/`Event` and its mentions-targets are geonames `Feature`s; the
@@ -64,10 +64,12 @@ fn about_and_mentions_share_type(g: &GraphSnapshot, work: u32) -> bool {
 /// template's `LIMIT {{{randomLimit}}}`).
 pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
     let mut out: Vec<u32> = g
-        .fts("CreativeWork", "title", word)
+        .full_text_search("CreativeWork", "title", word)
         .iter()
         .filter(|&w| {
-            g.neighbors_by_type(w, Direction::Outgoing, "category").next().is_some()
+            g.neighbors_by_type(w, Direction::Outgoing, "category")
+                .next()
+                .is_some()
                 && about_and_mentions_share_type(g, w)
         })
         .collect();
@@ -133,7 +135,10 @@ mod tests {
 "#;
 
     fn uris(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "uri").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| pstr(g, w, "uri").unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]

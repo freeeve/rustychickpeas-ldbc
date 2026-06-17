@@ -72,8 +72,7 @@ pub fn run(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(u32, usize)> {
         }
         // Required `dateCreated`; empty (absent dense column) or a malformed
         // sub-10-char value drops the work, as the bound pattern demands.
-        let Some(day) = g.str_prop(cw, "dateCreated").and_then(|s| s.get(..10))
-        else {
+        let Some(day) = g.prop_str(cw, "dateCreated").and_then(|s| s.get(..10)) else {
             continue;
         };
         for who in g.neighbors_by_type(cw, Direction::Outgoing, "about") {
@@ -83,7 +82,10 @@ pub fn run(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(u32, usize)> {
         }
     }
 
-    let mut rows: Vec<(u32, usize)> = days.into_iter().map(|(who, set)| (who, set.len())).collect();
+    let mut rows: Vec<(u32, usize)> = days
+        .into_iter()
+        .map(|(who, set)| (who, set.len()))
+        .collect();
     // ORDER BY DESC(?interactionDays); tie-break on node id (a stable proxy for the
     // uri order — avoids a per-comparison `uri` lookup) since the cross-engine
     // comparison is order-insensitive and the official tie-break is unspecified.
@@ -171,7 +173,11 @@ mod tests {
         // to one day); D shares 1. A itself never appears as a result.
         assert_eq!(
             rows(&g, ENT_A, 10),
-            [(ENT_B.to_string(), 2), (ENT_C.to_string(), 2), (ENT_D.to_string(), 1)]
+            [
+                (ENT_B.to_string(), 2),
+                (ENT_C.to_string(), 2),
+                (ENT_D.to_string(), 1)
+            ]
         );
     }
 
@@ -189,7 +195,10 @@ mod tests {
     #[test]
     fn limit_truncates_after_ordering() {
         let g = load_str(FIXTURE).0;
-        assert_eq!(rows(&g, ENT_A, 2), [(ENT_B.to_string(), 2), (ENT_C.to_string(), 2)]);
+        assert_eq!(
+            rows(&g, ENT_A, 2),
+            [(ENT_B.to_string(), 2), (ENT_C.to_string(), 2)]
+        );
         // An unknown entity yields no rows.
         assert!(run(&g, "http://dbpedia.org/resource/Unknown", 10).is_empty());
     }

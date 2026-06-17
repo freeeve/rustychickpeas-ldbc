@@ -33,14 +33,16 @@ pub fn run(g: &GraphSnapshot, cat1: &str, cat2: &str, limit: usize) -> Vec<(Stri
     // / DISTINCT / truncate on the ids and resolve uris only for the kept rows.
     let mut pairs: Vec<(u32, u32)> = Vec::new();
     for w in works.iter() {
-        let in_category = g.neighbors_by_type(w, Direction::Outgoing, "category").any(|c| {
-            let u = pstr(g, c, "uri");
-            u == Some(cat1) || u == Some(cat2)
-        });
+        let in_category = g
+            .neighbors_by_type(w, Direction::Outgoing, "category")
+            .any(|c| {
+                let u = pstr(g, c, "uri");
+                u == Some(cat1) || u == Some(cat2)
+            });
         if !in_category {
             continue;
         }
-        if g.str_prop(w, "dateModified").is_none() {
+        if g.prop_str(w, "dateModified").is_none() {
             continue;
         }
         // cwork:tag — the materialized super-property of about/mentions.

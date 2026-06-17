@@ -78,7 +78,7 @@ pub fn run(
     live_coverage: Option<bool>,
     limit: usize,
 ) -> Vec<u32> {
-    let hits = g.fts("CreativeWork", "title", word);
+    let hits = g.full_text_search("CreativeWork", "title", word);
     let mut out: Vec<u32> = hits
         .iter()
         .filter(|&w| {
@@ -166,7 +166,10 @@ mod tests {
     const TEAM_X: &str = "http://www.bbc.co.uk/things/teamX";
 
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        let mut t: Vec<String> = works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect();
+        let mut t: Vec<String> = works
+            .iter()
+            .map(|&w| pstr(g, w, "title").unwrap_or("?").to_string())
+            .collect();
         t.sort();
         t
     }
@@ -176,25 +179,68 @@ mod tests {
         let g = load_str(FIXTURE).0;
         // "football" hits cw1/cw2/cw4/cw5; cw4 lacks primaryFormat -> dropped.
         let hits = run(&g, "football", None, None, None, None, None, None, 500);
-        assert_eq!(titles(&g, &hits), ["Berlin football match", "London football derby", "Paris football club"]);
+        assert_eq!(
+            titles(&g, &hits),
+            [
+                "Berlin football match",
+                "London football derby",
+                "Paris football club"
+            ]
+        );
     }
 
     #[test]
     fn category_facet() {
         let g = load_str(FIXTURE).0;
         // football + category=sport: cw5 is politics -> only cw1, cw2.
-        let hits = run(&g, "football", Some(SPORT), None, None, None, None, None, 500);
-        assert_eq!(titles(&g, &hits), ["London football derby", "Paris football club"]);
+        let hits = run(
+            &g,
+            "football",
+            Some(SPORT),
+            None,
+            None,
+            None,
+            None,
+            None,
+            500,
+        );
+        assert_eq!(
+            titles(&g, &hits),
+            ["London football derby", "Paris football club"]
+        );
     }
 
     #[test]
     fn audience_and_tag_facets() {
         let g = load_str(FIXTURE).0;
         // football + audience=national: cw1, cw5 (cw2 is international).
-        let aud = run(&g, "football", None, Some(NATIONAL), None, None, None, None, 500);
-        assert_eq!(titles(&g, &aud), ["Berlin football match", "London football derby"]);
+        let aud = run(
+            &g,
+            "football",
+            None,
+            Some(NATIONAL),
+            None,
+            None,
+            None,
+            None,
+            500,
+        );
+        assert_eq!(
+            titles(&g, &aud),
+            ["Berlin football match", "London football derby"]
+        );
         // football + tag=teamX: cw1 only (cw2 teamY, cw5 teamZ; cw3 teamX but not football).
-        let tag = run(&g, "football", None, None, Some(TEAM_X), None, None, None, 500);
+        let tag = run(
+            &g,
+            "football",
+            None,
+            None,
+            Some(TEAM_X),
+            None,
+            None,
+            None,
+            500,
+        );
         assert_eq!(titles(&g, &tag), ["London football derby"]);
     }
 
@@ -202,17 +248,40 @@ mod tests {
     fn date_range_and_live_coverage_facets() {
         let g = load_str(FIXTURE).0;
         // football + dateCreated in 2012: cw1 (cw2 2013, cw5 2011).
-        let dated = run(&g, "football", None, None, None, Some("2012-01-01"), Some("2012-12-31"), None, 500);
+        let dated = run(
+            &g,
+            "football",
+            None,
+            None,
+            None,
+            Some("2012-01-01"),
+            Some("2012-12-31"),
+            None,
+            500,
+        );
         assert_eq!(titles(&g, &dated), ["London football derby"]);
         // football + liveCoverage=true: cw1 only (cw2, cw5 are false).
-        let live = run(&g, "football", None, None, None, None, None, Some(true), 500);
+        let live = run(
+            &g,
+            "football",
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(true),
+            500,
+        );
         assert_eq!(titles(&g, &live), ["London football derby"]);
     }
 
     #[test]
     fn limit_truncates() {
         let g = load_str(FIXTURE).0;
-        assert_eq!(run(&g, "football", None, None, None, None, None, None, 500).len(), 3);
+        assert_eq!(
+            run(&g, "football", None, None, None, None, None, None, 500).len(),
+            3
+        );
         // LIMIT 1 over the id-ordered set keeps cw1 (interned first).
         let one = run(&g, "football", None, None, None, None, None, None, 1);
         assert_eq!(titles(&g, &one), ["London football derby"]);

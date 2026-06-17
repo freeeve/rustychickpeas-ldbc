@@ -16,18 +16,18 @@
 //! ```
 //!
 //! Identity comes from the FILTER (word in title OR description), which we serve
-//! from the core inverted index — the boolean union of `fts(title)` and
-//! `fts(description)`, exactly as basic q8 does. `cwork:dateModified` is a required
+//! from the core inverted index — the boolean union of `full_text_search(title)` and
+//! `full_text_search(description)`, exactly as basic q8 does. `cwork:dateModified` is a required
 //! pattern (and the sort key), so works lacking it are excluded; we then
 //! `ORDER BY DESC(?dateModified)` (ISO-8601, hence lexicographic) and `LIMIT`.
 //!
 //! Caveats / deviations:
-//! - CONTAINS vs token: SPB's `CONTAINS` is a substring test; our `fts` matches
+//! - CONTAINS vs token: SPB's `CONTAINS` is a substring test; our `full_text_search` matches
 //!   whole-word tokens (case-insensitive), so a substring-of-a-word hit
 //!   (e.g. "foot" in "football") would match in SPARQL but not here. Same caveat
 //!   as q8.
 //! - The required `cwork:title` / `cwork:description` patterns mean a work must
-//!   carry BOTH fields; in the extract every CreativeWork does, and the fts union
+//!   carry BOTH fields; in the extract every CreativeWork does, and the full_text_search union
 //!   already covers the FILTER, so we do not separately re-check both are present.
 //! - The OPTIONAL projections (dateCreated / about / category / web document) only
 //!   decorate rows in the CONSTRUCT; we return the ranked work ids.
@@ -40,7 +40,7 @@ use crate::props::top_k_by_key;
 /// index, whole-word), ranked by `dateModified` descending (tie-broken by node id
 /// ascending) and truncated to `limit` rows.
 pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
-    let hits = &g.fts("CreativeWork", "description", word) | &g.fts("CreativeWork", "title", word);
+    let hits = &g.full_text_search("CreativeWork", "description", word) | &g.full_text_search("CreativeWork", "title", word);
 
     // `cwork:dateModified ?dateModified` is required and is the ORDER BY key, so a
     // work without it is excluded; carry the value to sort without re-lookup.
@@ -48,9 +48,12 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
     // empty as absent for the required `dateModified` sort key.
     let rows: Vec<(u32, &str)> = hits
         .iter()
-        .filter_map(|w| g.str_prop(w, "dateModified").map(|d| (w, d)))
+        .filter_map(|w| g.prop_str(w, "dateModified").map(|d| (w, d)))
         .collect();
-    top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
+    top_k_by_key(rows, limit)
+        .into_iter()
+        .map(|(w, _)| w)
+        .collect()
 }
 
 #[cfg(test)]
@@ -89,7 +92,10 @@ mod tests {
 "#;
 
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| pstr(g, w, "title").unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]
@@ -100,14 +106,21 @@ mod tests {
         // `dateModified`-less "Football extra" are excluded.
         assert_eq!(
             titles(&g, &works),
-            ["Football weekly review", "London derby", "Football classics"]
+            [
+                "Football weekly review",
+                "London derby",
+                "Football classics"
+            ]
         );
     }
 
     #[test]
     fn limit_truncates_after_ordering() {
         let g = load_str(FIXTURE).0;
-        assert_eq!(titles(&g, &run(&g, "football", 2)), ["Football weekly review", "London derby"]);
+        assert_eq!(
+            titles(&g, &run(&g, "football", 2)),
+            ["Football weekly review", "London derby"]
+        );
     }
 
     #[test]

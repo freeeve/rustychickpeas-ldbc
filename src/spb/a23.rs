@@ -53,19 +53,24 @@ use crate::props::{parse_date, pstr, top_k_by_key};
 /// `dateCreated` calendar days. Returned as `(topic_uri, distinct_days)` ordered
 /// by day count descending (tie-broken by uri ascending) and truncated to `limit`
 /// (the template's `LIMIT 500`).
-pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> Vec<(String, usize)> {
+pub fn run(
+    g: &GraphSnapshot,
+    word: &str,
+    category_uri: &str,
+    limit: usize,
+) -> Vec<(String, usize)> {
     // topic node -> the set of distinct creation days (epoch-day count) seen for it.
     let mut by_tag: HashMap<u32, HashSet<i64>> = HashMap::new();
-    for w in g.fts("CreativeWork", "title", word).iter() {
+    for w in g.full_text_search("CreativeWork", "title", word).iter() {
         // {{{filter2}}}: the pinned category facet (an outgoing edge to the uri).
         if !g.has_neighbor_with_property(w, Direction::Outgoing, "category", "uri", category_uri) {
             continue;
         }
         // The rest of the fixed BGP must be bound for a solution to exist.
-        let Some(created) = g.str_prop(w, "dateCreated") else {
+        let Some(created) = g.prop_str(w, "dateCreated") else {
             continue;
         };
-        if g.str_prop(w, "description").is_none()
+        if g.prop_str(w, "description").is_none()
             || !g.has_rel(w, Direction::Outgoing, "audience")
             || !g.has_rel(w, Direction::Outgoing, "primaryFormat")
             || g.prop(w, "liveCoverage").is_none()
@@ -85,8 +90,9 @@ pub fn run(g: &GraphSnapshot, word: &str, category_uri: &str, limit: usize) -> V
         }
     }
 
-    let rows =
-        by_tag.into_iter().map(|(t, days)| (pstr(g, t, "uri").unwrap_or("?").to_string(), days.len()));
+    let rows = by_tag
+        .into_iter()
+        .map(|(t, days)| (pstr(g, t, "uri").unwrap_or("?").to_string(), days.len()));
     top_k_by_key(rows, limit)
 }
 
@@ -209,7 +215,11 @@ mod tests {
         let rows = run(&g, "football", SPORT, 500);
         assert_eq!(
             rows,
-            vec![(TEAM_X.to_string(), 2), (TEAM_A.to_string(), 1), (TEAM_Y.to_string(), 1)]
+            vec![
+                (TEAM_X.to_string(), 2),
+                (TEAM_A.to_string(), 1),
+                (TEAM_Y.to_string(), 1)
+            ]
         );
     }
 
@@ -224,7 +234,10 @@ mod tests {
     fn category_pin_selects_its_own_works() {
         let g = g();
         // Pinning category=politics leaves only cw5 -> TeamZ with its single day.
-        assert_eq!(run(&g, "football", POLITICS, 500), vec![(TEAM_Z.to_string(), 1)]);
+        assert_eq!(
+            run(&g, "football", POLITICS, 500),
+            vec![(TEAM_Z.to_string(), 1)]
+        );
     }
 
     #[test]

@@ -783,102 +783,40 @@ pub fn cr6(
     truncation_limit: u32,
     truncation_order: &str,
 ) -> Vec<(u32, f64, f64)> {
-    let mut results = Vec::new();
-
-    // Determine sort order for truncation: descending by default, ascending if specified
-    let descending = !truncation_order.to_lowercase().contains("asc");
-
-    let sort_by_amt = |a: &(u32, f64), b: &(u32, f64)| {
-        if descending {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        } else {
-            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-        }
-    };
-
-    // Step 1: Find all withdrawals to dstCard within time window and amount > threshold2
-    let mut mid_withdrawals: HashMap<u32, Vec<f64>> = HashMap::new();
-    let mut withdraw_edges: Vec<(u32, f64)> = g
-        .relationships(dst_card, Direction::Incoming, "withdraw")
+    // The card's outgoing withdrawals in window, amount > threshold2.
+    let withdraws: Vec<(i64, f64)> = g
+        .relationships(dst_card, Direction::Outgoing, "withdraw")
         .filter_map(|r| {
-            let ts = rel_ts(g, r.pos);
-            let amt = rel_amt(g, r.pos);
-            if (start_ms..=end_ms).contains(&ts) && amt > threshold2 {
-                Some((r.neighbor, amt))
-            } else {
-                None
-            }
+            let (ts, amt) = (rel_ts(g, r.pos), rel_amt(g, r.pos));
+            ((start_ms..=end_ms).contains(&ts) && amt > threshold2).then_some((ts, amt))
         })
         .collect();
-
-    // Sort by amount and truncate
-    withdraw_edges.sort_by(sort_by_amt);
-    if (withdraw_edges.len() as u32) > truncation_limit {
-        withdraw_edges.truncate(truncation_limit as usize);
+    if withdraws.is_empty() {
+        return Vec::new();
     }
+    let total_withdraw: f64 = withdraws.iter().map(|(_, a)| a).sum();
+    let last_withdraw = withdraws.iter().map(|(t, _)| *t).max().unwrap();
 
-    // Group by mid account
-    for (mid, amt) in withdraw_edges {
-        mid_withdrawals
-            .entry(mid)
-            .or_insert_with(Vec::new)
-            .push(amt);
-    }
-
-    // Step 2: For each mid, find incoming transfers within time window and amount > threshold1
-    for (mid, withdrawal_amts) in mid_withdrawals {
-        let mut transfer_sources: HashMap<u32, Vec<f64>> = HashMap::new();
-        let mut transfer_edges: Vec<(u32, f64)> = g
-            .relationships(mid, Direction::Incoming, "transfer")
-            .filter_map(|r| {
-                let ts = rel_ts(g, r.pos);
-                let amt = rel_amt(g, r.pos);
-                if (start_ms..=end_ms).contains(&ts) && amt > threshold1 {
-                    Some((r.neighbor, amt))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Sort by amount and truncate
-        transfer_edges.sort_by(sort_by_amt);
-        if (transfer_edges.len() as u32) > truncation_limit {
-            transfer_edges.truncate(truncation_limit as usize);
-        }
-
-        // Collect by source account
-        for (src, amt) in transfer_edges {
-            transfer_sources
-                .entry(src)
-                .or_insert_with(Vec::new)
-                .push(amt);
-        }
-
-        // Filter: need > 3 distinct transfer sources
-        if transfer_sources.len() > 3 {
-            let sum_edge1 = transfer_sources
-                .values()
-                .flat_map(|amts| amts.iter())
-                .sum::<f64>();
-            let sum_edge2 = withdrawal_amts.iter().sum::<f64>();
-
-            // Round to 3 decimal places as per spec
-            let sum_edge1 = (sum_edge1 * 1000.0).round() / 1000.0;
-            let sum_edge2 = (sum_edge2 * 1000.0).round() / 1000.0;
-
-            results.push((mid, sum_edge1, sum_edge2));
+    // Many-to-one: source accounts whose in-window transfer in (> threshold1)
+    // precedes a withdrawal. Sum per source; pair with the card's total withdrawn.
+    let _ = (truncation_limit, truncation_order);
+    let mut by_src: HashMap<u32, f64> = HashMap::new();
+    for r in g.relationships(dst_card, Direction::Incoming, "transfer") {
+        let (ts, amt) = (rel_ts(g, r.pos), rel_amt(g, r.pos));
+        if (start_ms..=end_ms).contains(&ts) && amt > threshold1 && ts <= last_withdraw {
+            *by_src.entry(r.neighbor).or_default() += amt;
         }
     }
-
-    // Sort results: by sumEdge2Amount descending, then midId ascending
-    results.sort_by(|a, b| {
-        b.2.partial_cmp(&a.2)
+    let mut out: Vec<(u32, f64, f64)> = by_src
+        .into_iter()
+        .map(|(s, a)| (s, a, total_withdraw))
+        .collect();
+    out.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
+            .then(a.0.cmp(&b.0))
     });
-
-    results
+    out
 }
 
 // ===== CR7 =====
@@ -1217,46 +1155,30 @@ fn round_3dp(x: f64) -> f32 {
 }
 
 // ===== CR10 =====
-/// TCR10-style — Similarity of investor relationship: Given two Persons and a
-/// time window, find all Companies each invests in and return the Jaccard
-/// similarity of the two company sets. Returns 0 if either person has no
-/// investments in the window.
-pub fn cr10(g: &GraphSnapshot, pid1: u32, pid2: u32, start_ms: i64, end_ms: i64) -> f32 {
-    // Collect companies that person1 invests in within the time window
-    let mut companies1 = HashSet::new();
-    for r in g.relationships(pid1, Direction::Outgoing, "invest") {
+/// TCR10 — Similarity of investor relationship: for a Person, find the other
+/// investors who share invested Companies (in window), returning `(otherId,
+/// sharedCompanyCount)` sorted by count desc, id asc. One-to-many per the spec
+/// (the draft's pairwise Jaccard was a different shape). Note: incoming `invest`
+/// also carries `companyInvest`, so a few `otherId`s may be companies.
+pub fn cr10(g: &GraphSnapshot, person: u32, start_ms: i64, end_ms: i64) -> Vec<(u32, usize)> {
+    let mut companies = HashSet::new();
+    for r in g.relationships(person, Direction::Outgoing, "invest") {
         let ts = rel_ts(g, r.pos);
         if ts >= start_ms && ts <= end_ms {
-            companies1.insert(r.neighbor);
+            companies.insert(r.neighbor);
         }
     }
-
-    // Collect companies that person2 invests in within the time window
-    let mut companies2 = HashSet::new();
-    for r in g.relationships(pid2, Direction::Outgoing, "invest") {
-        let ts = rel_ts(g, r.pos);
-        if ts >= start_ms && ts <= end_ms {
-            companies2.insert(r.neighbor);
+    let mut shared: HashMap<u32, usize> = HashMap::new();
+    for &c in &companies {
+        for r in g.relationships(c, Direction::Incoming, "invest") {
+            if r.neighbor != person {
+                *shared.entry(r.neighbor).or_default() += 1;
+            }
         }
     }
-
-    // If either set is empty, return 0
-    if companies1.is_empty() || companies2.is_empty() {
-        return 0.0;
-    }
-
-    // Calculate Jaccard similarity: |A ∩ B| / |A ∪ B|
-    let intersection = companies1.intersection(&companies2).count();
-    let union = companies1.union(&companies2).count();
-
-    let similarity = if union == 0 {
-        0.0
-    } else {
-        (intersection as f32) / (union as f32)
-    };
-
-    // Round to 3 decimal places
-    ((similarity * 1000.0).round() / 1000.0)
+    let mut out: Vec<(u32, usize)> = shared.into_iter().collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    out
 }
 
 // ===== CR12 =====

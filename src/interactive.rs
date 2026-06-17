@@ -512,7 +512,7 @@ pub fn ic3_friends_two_countries(
     duration_days: i64,
 ) -> Vec<(u32, u32, u32)> {
     let end_day = start_day + duration_days;
-    let by_name = |name: &str| g.node_by_label_property("Country", "name", name);
+    let by_name = |name: &str| g.node_with_label_property("Country", "name", name);
     let (Some(cx), Some(cy)) = (by_name(country_x), by_name(country_y)) else {
         return Vec::new();
     };
@@ -714,7 +714,7 @@ pub fn ic11_job_referral(
     country_name: &str,
     year: i64,
 ) -> Vec<(u32, u32, i64)> {
-    let Some(country) = g.node_by_label_property("Country", "name", country_name) else {
+    let Some(country) = g.node_with_label_property("Country", "name", country_name) else {
         return Vec::new();
     };
     // Companies located in the country (orgPlace -> the country, or a city in it).
@@ -784,7 +784,7 @@ pub fn ic12_expert_search(
     person: u32,
     class_name: &str,
 ) -> Vec<(u32, usize, Vec<String>)> {
-    let Some(root_class) = g.node_by_label_property("TagClass", "name", class_name) else {
+    let Some(root_class) = g.node_with_label_property("TagClass", "name", class_name) else {
         return Vec::new();
     };
     // The class plus all descendants (children point at the parent via isSubclassOf).

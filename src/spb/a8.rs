@@ -23,16 +23,22 @@ use crate::props::{pstr, top_k_by_count};
 /// Topics (`tag` targets) ranked by how many works of `cw_type` with audience
 /// `audience_uri` and `dateModified` strictly within `(after, before)` tag them.
 /// Returned as `(topic_uri, count)` ordered by count descending, then uri.
-pub fn run(g: &GraphSnapshot, cw_type: &str, audience_uri: &str, after: &str, before: &str) -> Vec<(String, usize)> {
+pub fn run(
+    g: &GraphSnapshot,
+    cw_type: &str,
+    audience_uri: &str,
+    after: &str,
+    before: &str,
+) -> Vec<(String, usize)> {
     let Some(works) = g.nodes_with_label(cw_type) else {
         return Vec::new();
     };
     // Works in the dateModified window with the pinned audience; count their
     // `tag` targets (materialized about/mentions) via the core histogram.
     let qualifying = works.iter().filter(|&w| {
-        g.str_prop(w, "dateModified").is_some_and(|dt| dt > after && dt < before)
-            && g
-                .neighbors_by_type(w, Direction::Outgoing, "audience")
+        g.prop_str(w, "dateModified")
+            .is_some_and(|dt| dt > after && dt < before)
+            && g.neighbors_by_type(w, Direction::Outgoing, "audience")
                 .any(|a| pstr(g, a, "uri") == Some(audience_uri))
     });
     let counts = g.neighbor_counts(qualifying, Direction::Outgoing, "tag");
@@ -87,7 +93,10 @@ mod tests {
         // BlogPosts; cw3 is a NewsItem, cw4 is out of window. So Acme=2, London=1.
         assert_eq!(
             rows,
-            vec![("http://ex/Acme".to_string(), 2), ("http://ex/London".to_string(), 1)]
+            vec![
+                ("http://ex/Acme".to_string(), 2),
+                ("http://ex/London".to_string(), 1)
+            ]
         );
     }
 }

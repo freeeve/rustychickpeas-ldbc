@@ -32,7 +32,7 @@ pub fn run(g: &GraphSnapshot, after: &str, before: &str) -> Vec<(String, usize)>
     };
     let mut counts: HashMap<u32, usize> = HashMap::new();
     for w in works.iter() {
-        let Some(dt) = g.str_prop(w, "dateModified") else {
+        let Some(dt) = g.prop_str(w, "dateModified") else {
             continue;
         };
         if !(dt > after && dt < before) {
@@ -85,7 +85,11 @@ mod tests {
         let rows = run(&g, "2011-01-01", "2012-01-01");
         assert_eq!(
             rows,
-            vec![("30".to_string(), 2), ("4".to_string(), 1), ("15".to_string(), 1)]
+            vec![
+                ("30".to_string(), 2),
+                ("4".to_string(), 1),
+                ("15".to_string(), 1)
+            ]
         );
     }
 }

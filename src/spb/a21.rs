@@ -9,7 +9,7 @@
 //! over a `LIMIT {{{randomLimit}}}`; the drill-down adds one constraint per
 //! iteration (FTS word + category, then date, then tag, then format, then a
 //! specific day/month/year). We model the search as the title FTS set intersected
-//! with the bound facet predicates — the same `fts` core as q8, plus the q3-style
+//! with the bound facet predicates — the same `full_text_search` core as q8, plus the q3-style
 //! `tag` (about/mentions) traversal.
 //!
 //! Facets (each an `Option`, applied only when bound — `None` = "any"):
@@ -46,8 +46,12 @@ fn matches_facets(
     // SPB q21's fixed BGP requires `cwork:tag ?tag`. The generator emits no literal
     // `cwork:tag`, so — as the doc above and `q5` describe — the topic tag is the
     // `about`/`mentions` link: a solution must carry at least one.
-    if g.neighbors_by_type(work, Direction::Outgoing, "about").next().is_none()
-        && g.neighbors_by_type(work, Direction::Outgoing, "mentions").next().is_none()
+    if g.neighbors_by_type(work, Direction::Outgoing, "about")
+        .next()
+        .is_none()
+        && g.neighbors_by_type(work, Direction::Outgoing, "mentions")
+            .next()
+            .is_none()
     {
         return false;
     }
@@ -99,10 +103,19 @@ pub fn run(
     limit: usize,
 ) -> Vec<u32> {
     let mut out: Vec<u32> = g
-        .fts("CreativeWork", "title", word)
+        .full_text_search("CreativeWork", "title", word)
         .iter()
         .filter(|&w| {
-            matches_facets(g, w, category_uri, audience_uri, tag_uri, live_coverage, date_from, date_to)
+            matches_facets(
+                g,
+                w,
+                category_uri,
+                audience_uri,
+                tag_uri,
+                live_coverage,
+                date_from,
+                date_to,
+            )
         })
         .collect();
     out.sort_unstable();
@@ -172,14 +185,27 @@ mod tests {
         let g = g();
         // 'football' in title -> the two football works, not tennis/cooking.
         let out = run(&g, "football", None, None, None, None, None, None, 100);
-        assert_eq!(titles(&g, &out), ["London football derby", "Paris football match"]);
+        assert_eq!(
+            titles(&g, &out),
+            ["London football derby", "Paris football match"]
+        );
     }
 
     #[test]
     fn audience_facet_narrows() {
         let g = g();
         // football + audience=National -> only the derby (PSG is International).
-        let out = run(&g, "football", Some(SPORT), Some(NATIONAL), None, None, None, None, 100);
+        let out = run(
+            &g,
+            "football",
+            Some(SPORT),
+            Some(NATIONAL),
+            None,
+            None,
+            None,
+            None,
+            100,
+        );
         assert_eq!(titles(&g, &out), ["London football derby"]);
     }
 
@@ -187,10 +213,30 @@ mod tests {
     fn live_coverage_and_tag_facets() {
         let g = g();
         // football + liveCoverage=true -> derby (PSG is false).
-        let live = run(&g, "football", None, None, None, Some(true), None, None, 100);
+        let live = run(
+            &g,
+            "football",
+            None,
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+            100,
+        );
         assert_eq!(titles(&g, &live), ["London football derby"]);
         // football + tag mentions London -> derby (PSG mentions Paris).
-        let tagged = run(&g, "football", None, None, Some(LONDON), None, None, None, 100);
+        let tagged = run(
+            &g,
+            "football",
+            None,
+            None,
+            Some(LONDON),
+            None,
+            None,
+            None,
+            100,
+        );
         assert_eq!(titles(&g, &tagged), ["London football derby"]);
     }
 
@@ -198,7 +244,17 @@ mod tests {
     fn date_range_facet() {
         let g = g();
         // football created on/after 2024-02-01 -> derby (Mar); PSG (Jan) excluded.
-        let out = run(&g, "football", None, None, None, None, Some("2024-02-01"), None, 100);
+        let out = run(
+            &g,
+            "football",
+            None,
+            None,
+            None,
+            None,
+            Some("2024-02-01"),
+            None,
+            100,
+        );
         assert_eq!(titles(&g, &out), ["London football derby"]);
     }
 
@@ -215,7 +271,17 @@ mod tests {
     fn unmatched_facet_yields_empty() {
         let g = g();
         // football but require a category nobody has -> empty.
-        let out = run(&g, "football", Some("http://www.bbc.co.uk/category/Weather"), None, None, None, None, None, 100);
+        let out = run(
+            &g,
+            "football",
+            Some("http://www.bbc.co.uk/category/Weather"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            100,
+        );
         assert!(out.is_empty());
     }
 }

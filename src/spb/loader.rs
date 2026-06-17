@@ -18,8 +18,8 @@ use std::path::Path;
 use hashbrown::{HashMap, HashSet};
 use rustychickpeas_core::{GraphBuilder, GraphSnapshot};
 
-use crate::harness::Result;
 use super::ntriples::{self, Term};
+use crate::harness::Result;
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDFS_SUBCLASS: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
@@ -134,10 +134,18 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
         for ty in types.get(&id).map(Vec::as_slice).unwrap_or_default() {
             label_iris.insert(ty);
             if let Some(supers) = subclass.get(ty) {
-                label_iris.extend(supers.iter().map(String::as_str).filter(|s| *s != OWL_THING));
+                label_iris.extend(
+                    supers
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|s| *s != OWL_THING),
+                );
             }
         }
-        let node_labels: Vec<&str> = label_iris.iter().map(|iri| ntriples::local_name(iri)).collect();
+        let node_labels: Vec<&str> = label_iris
+            .iter()
+            .map(|iri| ntriples::local_name(iri))
+            .collect();
         builder.add_node(Some(id), &node_labels).expect("add_node");
         if let Some(iri) = uri_of.get(&id) {
             builder.set_prop_str(id, "uri", iri).ok();
@@ -164,19 +172,25 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
         match &t.object {
             obj if obj.is_resource() => {
                 let dst = ids[&resource_key(obj).unwrap()];
-                builder.add_relationship(subj, dst, key).expect("add_relationship");
+                builder
+                    .add_relationship(subj, dst, key)
+                    .expect("add_relationship");
                 stats.edges += 1;
                 // RDFS subPropertyOf: the same statement also satisfies every
                 // super-property (e.g. an `about`/`mentions` edge is a `tag` edge).
                 if let Some(supers) = subprop.get(pred) {
                     for s in supers {
-                        builder.add_relationship(subj, dst, ntriples::local_name(s)).expect("add_relationship");
+                        builder
+                            .add_relationship(subj, dst, ntriples::local_name(s))
+                            .expect("add_relationship");
                     }
                 }
             }
             // First literal for a (node, key) wins; the guard both dedups and
             // records the (node, key) so later duplicates fall through.
-            Term::Literal { value, datatype, .. } if seen_props.insert((subj, key.to_string())) => {
+            Term::Literal {
+                value, datatype, ..
+            } if seen_props.insert((subj, key.to_string())) => {
                 set_literal_prop(&mut builder, subj, key, value, datatype.as_deref());
                 stats.literals += 1;
             }
@@ -303,7 +317,12 @@ mod tests {
     #[test]
     fn edge_uses_predicate_local_name() {
         let (g, _) = load_str(DOC);
-        let cw = g.nodes_with_label("CreativeWork").unwrap().iter().next().unwrap();
+        let cw = g
+            .nodes_with_label("CreativeWork")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
         let about: Vec<u32> = g
             .neighbors_by_type(cw, rustychickpeas_core::Direction::Outgoing, "about")
             .collect();
@@ -329,16 +348,32 @@ mod tests {
 
         // subClassOf: cw1 is a BlogPost AND a CreativeWork (owl:Thing dropped);
         // Acme is a Company AND a Thing.
-        let cw1 = g.nodes_with_label("BlogPost").unwrap().iter().next().unwrap();
+        let cw1 = g
+            .nodes_with_label("BlogPost")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
         assert!(g.nodes_with_label("CreativeWork").unwrap().contains(cw1));
-        let acme = g.nodes_with_label("Company").unwrap().iter().next().unwrap();
+        let acme = g
+            .nodes_with_label("Company")
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
         let thing = g.nodes_with_label("Thing").unwrap();
         assert!(thing.contains(acme) && !thing.contains(cw1));
 
         // subPropertyOf: the `about` edge is also a `tag` edge.
         use rustychickpeas_core::Direction;
-        let tag: Vec<u32> = g.neighbors_by_type(cw1, Direction::Outgoing, "tag").collect();
-        assert_eq!(tag, g.neighbors_by_type(cw1, Direction::Outgoing, "about").collect::<Vec<_>>());
+        let tag: Vec<u32> = g
+            .neighbors_by_type(cw1, Direction::Outgoing, "tag")
+            .collect();
+        assert_eq!(
+            tag,
+            g.neighbors_by_type(cw1, Direction::Outgoing, "about")
+                .collect::<Vec<_>>()
+        );
         assert_eq!(tag.len(), 1);
     }
 }

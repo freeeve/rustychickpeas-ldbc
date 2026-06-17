@@ -49,7 +49,8 @@ use crate::props::pstr;
 
 /// The distinct entity targets of `work`'s outgoing `edge` (`about` / `mentions`).
 fn targets(g: &GraphSnapshot, work: u32, edge: &str) -> HashSet<u32> {
-    g.neighbors_by_type(work, Direction::Outgoing, edge).collect()
+    g.neighbors_by_type(work, Direction::Outgoing, edge)
+        .collect()
 }
 
 /// Run SPB basic q9: creative works related to `cw_uri` by shared tagged
@@ -84,7 +85,7 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str, limit: usize) -> Vec<(String, f64)> 
     // materializing a HashSet per candidate; uris are resolved only for kept rows.
     let mut rows: Vec<(u32, &str, f64)> = Vec::new();
     for o in candidates {
-        let Some(dt) = g.str_prop(o, "dateModified") else {
+        let Some(dt) = g.prop_str(o, "dateModified") else {
             continue;
         };
         let (mut a2a, mut m2a, mut a2m, mut m2m) = (0usize, 0usize, 0usize, 0usize);
@@ -105,10 +106,14 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str, limit: usize) -> Vec<(String, f64)> 
 
     // ORDER BY score DESC, then dateModified DESC (ISO-8601, hence lexicographic).
     rows.sort_by(|a, b| {
-        b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal).then_with(|| b.1.cmp(a.1))
+        b.2.partial_cmp(&a.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.1.cmp(a.1))
     });
     rows.truncate(limit);
-    rows.into_iter().map(|(o, _dt, score)| (pstr(g, o, "uri").unwrap_or("?").to_string(), score)).collect()
+    rows.into_iter()
+        .map(|(o, _dt, score)| (pstr(g, o, "uri").unwrap_or("?").to_string(), score))
+        .collect()
 }
 
 #[cfg(test)]
@@ -181,7 +186,10 @@ mod tests {
         let rows = run(&g, "http://ex/cwF", 2);
         assert_eq!(
             rows,
-            vec![("http://ex/cw5".to_string(), 2.0), ("http://ex/cw1".to_string(), 2.0)]
+            vec![
+                ("http://ex/cw5".to_string(), 2.0),
+                ("http://ex/cw1".to_string(), 2.0)
+            ]
         );
     }
 

@@ -110,23 +110,14 @@ fn run_queries(g: &GraphSnapshot) {
     let loan_seed = max_by("Loan", "deposit");
     let investor = max_by("Person", "invest");
     let owner = max_by("Person", "own");
-    // CR10 needs two persons sharing an invested company.
-    let coinvestor = g
-        .relationships(investor, Direction::Outgoing, "invest")
-        .flat_map(|r| {
-            g.relationships(r.neighbor, Direction::Incoming, "invest")
-                .map(|x| x.neighbor)
-        })
-        .find(|&p| p != investor)
-        .unwrap_or(investor);
     println!(
-        "seeds: account={seed} person={seed_person} owner={owner} card={card} loan={loan_seed} investor={investor}/{coinvestor} cycle={cyc_seed} dst={dst}"
+        "seeds: account={seed} person={seed_person} owner={owner} card={card} loan={loan_seed} investor={investor} cycle={cyc_seed} dst={dst}"
     );
     let to = finbench::TruncationOrder::Descending;
     let (ws, we) = (i64::MIN, i64::MAX);
     // Result shapes (full window) — confirm non-empty before timing.
     println!(
-        "  CR1:{} CR2:{} CR3:{}h CR4:{}cyc CR5:{} CR6:{} CR7:{:?} CR8:{} CR9:{:?} CR10:{:.0} CR11:{:.0} CR12:{}",
+        "  CR1:{} CR2:{} CR3:{}h CR4:{}cyc CR5:{} CR6:{} CR7:{:?} CR8:{} CR9:{:?} CR10:{} CR11:{:.0} CR12:{}",
         finbench::cr1(g, seed, ws, we, 10_000, false).len(),
         finbench::cr2(g, owner, ws, we, 10_000, false).len(),
         finbench::shortest_transfer_path(g, seed, dst, ws, we),
@@ -136,7 +127,7 @@ fn run_queries(g: &GraphSnapshot) {
         finbench::cr7(g, seed, 0.0, ws, we, 10_000, to),
         finbench::cr8(g, loan_seed, 0.0, ws, we, 10_000, "desc").len(),
         finbench::cr9(g, seed, 0.0, ws, we, 10_000, false),
-        finbench::cr10(g, investor, coinvestor, ws, we),
+        finbench::cr10(g, investor, ws, we).len(),
         finbench::guarantee_exposure(g, seed_person),
         finbench::cr12(g, owner, ws, we, 10_000, to).len(),
     );
@@ -170,7 +161,7 @@ fn run_queries(g: &GraphSnapshot) {
         finbench::cr9(g, seed, 0.0, ws, we, 10_000, false).0 as usize
     });
     harness::time_query("CR10 investor-sim", runs, || {
-        finbench::cr10(g, investor, coinvestor, ws, we) as usize
+        finbench::cr10(g, investor, ws, we).len()
     });
     harness::time_query("CR11 guarantee-chain", runs, || {
         finbench::guarantee_exposure(g, seed_person) as usize

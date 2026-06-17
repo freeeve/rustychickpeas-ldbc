@@ -17,7 +17,7 @@ pub(crate) fn q13_zombies(
     end_day: i64,
     end_ym: i64,
 ) -> Vec<(u32, u64, u64)> {
-    let country = g.node_by_label_property("Country", "name", country_name);
+    let country = g.node_with_label_property("Country", "name", country_name);
     let Some(country) = country else {
         return Vec::new();
     };
@@ -100,10 +100,10 @@ pub(crate) fn knows_reachability(g: &GraphSnapshot) -> (usize, u32) {
 }
 
 /// Find a place node (City/Country/...) by its globally-unique LDBC id (`lid`),
-/// via the cached label-free `node_by_property` index (one index serves City and
+/// via the cached label-free `node_with_property` index (one index serves City and
 /// Country, replacing the per-label scan).
 pub(crate) fn place_by_lid(g: &GraphSnapshot, lid: i64) -> Option<u32> {
-    g.node_by_property("lid", lid)
+    g.node_with_property("lid", lid)
 }
 
 /// Precompute the per-pair person interaction counts for Q19: the number of
@@ -187,13 +187,13 @@ pub(crate) fn q19_interaction_path(
 
 /// Find an Organisation node (Company/University) by name.
 pub(crate) fn org_by_name(g: &GraphSnapshot, label: &str, name: &str) -> Option<u32> {
-    g.node_by_label_property(label, "name", name)
+    g.node_with_label_property(label, "name", name)
 }
 
 /// Find a Person node by its globally-unique LDBC id (`plid`), via the cached
-/// label-free `node_by_property` index.
+/// label-free `node_with_property` index.
 pub(crate) fn person_by_plid(g: &GraphSnapshot, plid: i64) -> Option<u32> {
-    g.node_by_property("plid", plid)
+    g.node_with_property("plid", plid)
 }
 
 /// Per-person study records (university, classYear), read from studyAt edges and
@@ -348,7 +348,7 @@ pub(crate) fn q14_international_dialog(
     c1_name: &str,
     c2_name: &str,
 ) -> Vec<(u32, u32, String, i64)> {
-    let country = |name: &str| g.node_by_label_property("Country", "name", name);
+    let country = |name: &str| g.node_with_label_property("Country", "name", name);
     let (Some(country1), Some(country2)) = (country(c1_name), country(c2_name)) else {
         return Vec::new();
     };

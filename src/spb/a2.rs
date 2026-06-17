@@ -32,7 +32,7 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str) -> Vec<String> {
     if !has_label(g, work, "CreativeWork") {
         return Vec::new();
     }
-    if g.str_prop(work, "title").is_none() {
+    if g.prop_str(work, "title").is_none() {
         return Vec::new();
     }
     let mut subtypes: Vec<String> = ["BlogPost", "NewsItem", "Programme"]
