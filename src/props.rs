@@ -47,6 +47,20 @@ pub fn parse_date(s: &str) -> Option<(i64, i64)> {
     Some((y, days_from_civil(y, m, d)))
 }
 
+/// Parse the leading `YYYY-MM-DD` of an ISO-8601 date into calendar components
+/// `(year, month, day)`; `None` if the string is too short or non-numeric. The
+/// component analog of [`parse_date`] — use it when the calendar fields are the
+/// group-by / render key rather than a sortable day number.
+pub fn parse_ymd(s: &str) -> Option<(i32, u32, u32)> {
+    if s.len() < 10 {
+        return None;
+    }
+    let year: i32 = s[0..4].parse().ok()?;
+    let month: u32 = s[5..7].parse().ok()?;
+    let day: u32 = s[8..10].parse().ok()?;
+    Some((year, month, day))
+}
+
 /// Parse an LDBC creationDate ("2010-02-24T08:06:02.996+00:00") into epoch
 /// milliseconds (for Q17's sub-day timing comparison).
 pub fn parse_ms(s: &str) -> i64 {

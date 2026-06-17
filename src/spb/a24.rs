@@ -45,19 +45,7 @@ use std::collections::{BTreeMap, HashSet};
 use rustychickpeas_core::{bitmap::NodeSet, Direction, GraphSnapshot};
 
 use super::queries::node_by_uri;
-use crate::props::pstr;
-
-/// Parse the leading `YYYY-MM-DD` of an ISO-8601 `dateCreated` into
-/// `(year, month, day)`; `None` if it is too short or non-numeric.
-fn ymd(s: &str) -> Option<(i32, u32, u32)> {
-    if s.len() < 10 {
-        return None;
-    }
-    let year: i32 = s[0..4].parse().ok()?;
-    let month: u32 = s[5..7].parse().ok()?;
-    let day: u32 = s[8..10].parse().ok()?;
-    Some((year, month, day))
-}
+use crate::props::{parse_ymd, pstr};
 
 /// SPB advanced q24: the per-day count of creative works tagging BOTH `uri_a`
 /// and `uri_b` (via `cwork:about`), as `((year, month, day), count)` rows sorted
@@ -97,7 +85,7 @@ pub fn run(
         let Some(created) = pstr(g, w, "dateCreated").filter(|s| !s.is_empty()) else {
             continue;
         };
-        let Some(key) = ymd(created) else {
+        let Some(key) = parse_ymd(created) else {
             continue;
         };
         // {{{timeFilter}}}: inclusive [from, to] window on the date prefix.
