@@ -219,11 +219,11 @@ pub fn build_knows_interaction(g: &GraphSnapshot) -> HashMap<(u32, u32), u32> {
     let mut m: HashMap<(u32, u32), u32> = HashMap::new();
     if let Some(comments) = g.nodes_with_label("Comment") {
         for c in comments.iter() {
-            let Some(a) = g.neighbors_by_type(c, Direction::Incoming, "hasCreator").next() else {
+            let Some(a) = g.first_neighbor(c, Direction::Incoming, "hasCreator") else {
                 continue;
             };
             for parent in g.neighbors_by_type(c, Direction::Outgoing, "replyOf") {
-                if let Some(b) = g.neighbors_by_type(parent, Direction::Incoming, "hasCreator").next() {
+                if let Some(b) = g.first_neighbor(parent, Direction::Incoming, "hasCreator") {
                     if a != b {
                         *m.entry((a.min(b), a.max(b))).or_insert(0) += 1;
                     }
@@ -512,8 +512,8 @@ pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
 /// root Post, then one `containerOf` hop to the forum.
 pub fn is6_forum_of_message(g: &GraphSnapshot, message: u32, roots: &[u32]) -> Option<(u32, u32)> {
     let root = *roots.get(message as usize)?; // root Post (a Post maps to itself)
-    let forum = g.neighbors_by_type(root, Direction::Incoming, "containerOf").next()?;
-    let moderator = g.neighbors_by_type(forum, Direction::Outgoing, "hasModerator").next()?;
+    let forum = g.first_neighbor(root, Direction::Incoming, "containerOf")?;
+    let moderator = g.first_neighbor(forum, Direction::Outgoing, "hasModerator")?;
     Some((forum, moderator))
 }
 
@@ -521,7 +521,7 @@ pub fn is6_forum_of_message(g: &GraphSnapshot, message: u32, roots: &[u32]) -> O
 /// `knows` = replyAuthor is a `knows` friend of the original message's author
 /// (false if the same person). Ordered (replyMs desc, replyAuthor plid asc).
 pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)> {
-    let author = g.neighbors_by_type(message, Direction::Incoming, "hasCreator").next();
+    let author = g.first_neighbor(message, Direction::Incoming, "hasCreator");
     let author_friends: HashSet<u32> = author
         .map(|a| g.neighbors_by_type(a, Direction::Outgoing, "knows").collect())
         .unwrap_or_default();
@@ -551,10 +551,8 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
     let (Some(cx), Some(cy)) = (by_name(country_x), by_name(country_y)) else {
         return Vec::new();
     };
-    let home_country = |p: u32| -> Option<u32> {
-        let city = g.neighbors_by_type(p, Direction::Outgoing, "isLocatedIn").next()?;
-        g.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next()
-    };
+    let home_country =
+        |p: u32| g.follow(p, &[(Direction::Outgoing, "isLocatedIn"), (Direction::Outgoing, "isPartOf")]);
     let reach = g.bfs_distances(person, Direction::Outgoing, "knows", Some(2));
     // Hoist the day column once instead of pi64() re-resolving the "day" key
     // (an interner lookup) for every friend-of-friend message.
@@ -580,7 +578,7 @@ pub fn ic3_friends_two_countries(g: &GraphSnapshot, person: u32, country_x: &str
             if day < start_day || day >= end_day {
                 continue;
             }
-            match g.neighbors_by_type(msg, Direction::Outgoing, "msgCountry").next() {
+            match g.first_neighbor(msg, Direction::Outgoing, "msgCountry") {
                 Some(c) if c == cx => xc += 1,
                 Some(c) if c == cy => yc += 1,
                 _ => {}
@@ -625,7 +623,7 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
             continue;
         }
         for post in g.neighbors_by_type(p, Direction::Outgoing, "hasCreator") {
-            if let Some(forum) = g.neighbors_by_type(post, Direction::Incoming, "containerOf").next() {
+            if let Some(forum) = g.first_neighbor(post, Direction::Incoming, "containerOf") {
                 if qforums.contains(&forum) {
                     *forum_counts.entry(forum).or_insert(0) += 1;
                 }
@@ -971,12 +969,12 @@ pub fn run() -> Result<()> {
     let seed_country = graph
         .neighbors_by_type(seeds.person, Direction::Outgoing, "isLocatedIn")
         .next()
-        .and_then(|city| graph.neighbors_by_type(city, Direction::Outgoing, "isPartOf").next())
+        .and_then(|city| graph.first_neighbor(city, Direction::Outgoing, "isPartOf"))
         .and_then(|country| pstr(&graph, country, "name"))
         .unwrap_or("India")
         .to_string();
     let seed_class_name = tag_by_name(&graph, &seed_tag_name)
-        .and_then(|t| graph.neighbors_by_type(t, Direction::Outgoing, "hasType").next())
+        .and_then(|t| graph.first_neighbor(t, Direction::Outgoing, "hasType"))
         .and_then(|c| pstr(&graph, c, "name"))
         .unwrap_or("")
         .to_string();
