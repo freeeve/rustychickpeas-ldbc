@@ -468,11 +468,14 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
     // posts, not every post of every forum (a post has one container Post-forum;
     // Comments have none, so only Posts count, matching the forum-post scan).
     let mut forum_counts: HashMap<u32, u32> = HashMap::new();
+    // Reuse one set across FoFs (clear keeps capacity) rather than allocating a
+    // fresh HashSet per member — that fresh-per-FoF alloc dominated IC5's bytes.
+    let mut qforums: HashSet<u32> = HashSet::new();
     for (&p, &d) in &reach {
         if d == 0 {
             continue;
         }
-        let mut qforums: HashSet<u32> = HashSet::new();
+        qforums.clear();
         for e in g.relationships(p, Direction::Incoming, &["hasMember"]) {
             if let Some(ValueId::I64(day)) = hd_col.and_then(|c| c.get(e.pos)) {
                 if day > min_day {
