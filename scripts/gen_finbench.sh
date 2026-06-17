@@ -68,9 +68,12 @@ ADD_OPENS=(
 )
 
 GEN_OUT="${SRC_DIR}/out"
-echo "Generating scale factor ${SF} (Spark local mode) ..." >&2
+# Heap for the local Spark driver; larger scale factors need more (override with
+# FINBENCH_MEM, e.g. FINBENCH_MEM=24g for SF10).
+MEM="${FINBENCH_MEM:-8g}"
+echo "Generating scale factor ${SF} (Spark local mode, -Xmx${MEM}) ..." >&2
 rm -rf "${GEN_OUT}"
-"${JAVA}" -Xmx8g "${ADD_OPENS[@]}" -cp "${JAR}" \
+"${JAVA}" "-Xmx${MEM}" "${ADD_OPENS[@]}" -cp "${JAR}" \
     ldbc.finbench.datagen.LdbcDatagen --scale-factor "${SF}" --output-dir "${GEN_OUT}"
 
 mkdir -p "${OUT_DIR}"
