@@ -40,12 +40,11 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use super::queries::has_label;
 use crate::props::{parse_ms, pstr};
 
-/// Edges making up `cwork:tag` once its `about` / `mentions` sub-properties are
-/// folded in (no RDFS engine), plus any direct `tag` edge.
-const TAG_PREDICATES: [&str; 3] = ["about", "mentions", "tag"];
+/// The sub-properties making up `cwork:tag` (`tag` itself is the materialized
+/// union of these, so traversing it as well would be redundant work).
+const TAG_PREDICATES: [&str; 2] = ["about", "mentions"];
 
 /// Run SPB basic q5: per topic, the number of creative works tagging it, subject
 /// to the type / audience / dateModified restrictions, ordered by count
@@ -66,7 +65,10 @@ pub fn run(
     let start_ms = parse_ms(start);
     let end_ms = parse_ms(end);
 
-    let Some(works) = g.nodes_with_label("CreativeWork") else {
+    // `?creativeWork a {{{cwType}}}` — iterate that type's nodes directly (or all
+    // CreativeWorks when unrestricted) rather than scanning every work and testing
+    // the label.
+    let Some(works) = g.nodes_with_label(cw_type.unwrap_or("CreativeWork")) else {
         return Vec::new();
     };
 
@@ -74,10 +76,6 @@ pub fn run(
     let mut counts: HashMap<u32, usize> = HashMap::new();
 
     for cw in works.iter() {
-        // ?creativeWork a {{{cwType}}}
-        if cw_type.is_some_and(|ty| !has_label(g, cw, ty)) {
-            continue;
-        }
         // cwork:audience {{{cwAudience}}}
         if let Some(aud) = audience_uri {
             let matches = g
