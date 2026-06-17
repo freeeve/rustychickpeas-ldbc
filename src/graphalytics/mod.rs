@@ -37,21 +37,22 @@ pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
         return dist;
     }
     dist[source as usize] = 0;
-    let mut frontier = vec![source];
-    let mut next: Vec<u32> = Vec::new();
-    let mut depth = 0i64;
-    while !frontier.is_empty() {
-        depth += 1;
-        next.clear();
-        for &u in &frontier {
-            for w in g.neighbors(u, dir) {
-                if dist[w as usize] == i64::MAX {
-                    dist[w as usize] = depth;
-                    next.push(w);
-                }
+    // Single FIFO queue (the growing visited list, read via `head`) rather than two
+    // level frontiers: allocated once at the reached-set bound instead of
+    // reallocating per level. Each vertex's depth is its parent's plus one.
+    let mut queue: Vec<u32> = Vec::with_capacity(n as usize);
+    queue.push(source);
+    let mut head = 0;
+    while head < queue.len() {
+        let u = queue[head];
+        head += 1;
+        let du = dist[u as usize];
+        for w in g.neighbors(u, dir) {
+            if dist[w as usize] == i64::MAX {
+                dist[w as usize] = du + 1;
+                queue.push(w);
             }
         }
-        std::mem::swap(&mut frontier, &mut next);
     }
     dist
 }
@@ -220,51 +221,49 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
         adj[s..p].sort_unstable();
     }
 
-    // Dense membership marker for N(v): mark[node] == gen means "in N(v)". The gen
-    // stamp is bumped per vertex so the array never needs clearing, and it doubles
-    // as the dedup for N(v). Reused across all vertices (no per-vertex allocation).
-    let mut mark: Vec<u32> = vec![0; n as usize];
-    let mut gen = 0u32;
+    // Membership of N(v) as a bit set: ~1/32 the size of a u32 marker array and
+    // cache-resident. Set each neighbour's bit while building N(v), test it in the
+    // scan branch, then clear exactly those bits (via `nbrs`) before the next
+    // vertex -- so no per-vertex O(n) clear and no per-vertex allocation.
+    let mut mark = vec![0u64; (n as usize + 63) / 64];
     let mut nbrs: Vec<u32> = Vec::new();
     for v in 0..n {
-        gen += 1;
-        if gen == 0 {
-            // Stamp counter wrapped; clear so a stale 0 can't read as current.
-            mark.iter_mut().for_each(|m| *m = 0);
-            gen = 1;
-        }
         nbrs.clear();
         for u in g.neighbors(v, Direction::Both) {
-            if u != v && mark[u as usize] != gen {
-                mark[u as usize] = gen;
+            let marked = mark[(u >> 6) as usize] >> (u & 63) & 1 != 0;
+            if u != v && !marked {
+                mark[(u >> 6) as usize] |= 1u64 << (u & 63);
                 nbrs.push(u);
             }
         }
         let k = nbrs.len();
-        if k <= 1 {
-            continue;
-        }
-        let mut edges = 0u64;
-        for &u in &nbrs {
-            let uo = &adj[off[u as usize] as usize..off[u as usize + 1] as usize];
-            if uo.len() <= k {
-                // Short out-list: scan it, testing N(v) membership by marker.
-                for &w in uo {
-                    if w != u && mark[w as usize] == gen {
-                        edges += 1;
+        if k >= 2 {
+            let mut edges = 0u64;
+            for &u in &nbrs {
+                let uo = &adj[off[u as usize] as usize..off[u as usize + 1] as usize];
+                if uo.len() <= k {
+                    // Short out-list: scan it, testing N(v) membership by bit.
+                    for &w in uo {
+                        if w != u && mark[(w >> 6) as usize] >> (w & 63) & 1 != 0 {
+                            edges += 1;
+                        }
                     }
-                }
-            } else {
-                // High-degree u: iterate the smaller neighbour set and
-                // binary-search u's out-list rather than scanning it.
-                for &w in &nbrs {
-                    if w != u && uo.binary_search(&w).is_ok() {
-                        edges += 1;
+                } else {
+                    // High-degree u: iterate the smaller neighbour set and
+                    // binary-search u's out-list rather than scanning it.
+                    for &w in &nbrs {
+                        if w != u && uo.binary_search(&w).is_ok() {
+                            edges += 1;
+                        }
                     }
                 }
             }
+            result[v as usize] = edges as f64 / (k as f64 * (k as f64 - 1.0));
         }
-        result[v as usize] = edges as f64 / (k as f64 * (k as f64 - 1.0));
+        // Reset N(v)'s bits for the next vertex (including the k < 2 case).
+        for &u in &nbrs {
+            mark[(u >> 6) as usize] &= !(1u64 << (u & 63));
+        }
     }
     result
 }
