@@ -431,13 +431,8 @@ pub(crate) fn q17_information_propagation(g: &GraphSnapshot, tag_name: &str, del
             }
         }
     }
-    let mut rows: Vec<(i64, i64)> = counts
-        .into_iter()
-        .map(|(p, m)| (pi64(g, p, "plid"), m.len() as i64))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows.truncate(10);
-    rows
+    let rows = counts.into_iter().map(|(p, m)| (pi64(g, p, "plid"), m.len() as i64));
+    top_k_by_key(rows, 10)
 }
 
 // ============ Simplified analytical patterns (synthetic-benchmark parity) ============

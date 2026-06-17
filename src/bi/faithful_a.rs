@@ -219,13 +219,10 @@ pub(crate) fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(Strin
             }
         }
     }
-    let mut rows: Vec<(String, usize)> = related
+    let rows = related
         .into_iter()
-        .map(|(rt, cs)| (pstr(g, rt, "name").unwrap_or("").to_string(), cs.len()))
-        .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows.truncate(100);
-    rows
+        .map(|(rt, cs)| (pstr(g, rt, "name").unwrap_or("").to_string(), cs.len()));
+    top_k_by_key(rows, 100)
 }
 
 /// Q12 — How many people have a given number of messages. Per person, count
