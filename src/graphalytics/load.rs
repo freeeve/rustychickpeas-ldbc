@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use rustychickpeas_core::{GraphBuilder, GraphSnapshot};
+use rustychickpeas_core::{GraphBuilder, GraphSnapshot, PropertyValue};
 
 use crate::harness::Result;
 
@@ -112,8 +112,10 @@ pub fn load_str(v_text: &str, e_text: &str, props: &str) -> Dataset {
         };
         let weight: f64 = it.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
         if let (Some(&su), Some(&du)) = (node_of_vertex.get(&sv), node_of_vertex.get(&dv)) {
-            b.add_relationship(su, du, "e").unwrap();
-            b.set_relationship_prop_f64(su, du, "e", "weight", weight);
+            // Set the weight via the returned index: set_relationship_prop_f64 does
+            // a linear find_rel_index scan, which is O(E^2) over a real edge list.
+            let idx = b.add_relationship(su, du, "e").unwrap();
+            b.set_relationship_props_by_index(idx, &[("weight", PropertyValue::Float(weight))]);
         }
     }
 
