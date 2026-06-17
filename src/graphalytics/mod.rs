@@ -200,7 +200,6 @@ pub fn cdlp_seeded(g: &GraphSnapshot, directed: bool, iterations: u32, init: &[u
 pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
     let n = g.node_count();
     let out = fwd(directed);
-    let mut result = vec![0.0_f64; n as usize];
 
     // Sorted forward-adjacency (CSR), built once, so the triangle count can probe
     // the smaller side of each intersection: scan u's out-list when it is short,
@@ -221,13 +220,38 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
         adj[s..p].sort_unstable();
     }
 
-    // Membership of N(v) as a bit set: ~1/32 the size of a u32 marker array and
-    // cache-resident. Set each neighbour's bit while building N(v), test it in the
-    // scan branch, then clear exactly those bits (via `nbrs`) before the next
-    // vertex -- so no per-vertex O(n) clear and no per-vertex allocation.
+    // The per-vertex triangle count is independent across vertices, so split the
+    // range across cores: each worker owns its membership bitset + neighbour
+    // buffer, reads the shared adjacency, and writes a disjoint slice of `result`.
+    let mut result = vec![0.0_f64; n as usize];
+    let workers = std::thread::available_parallelism().map_or(1, |p| p.get());
+    let chunk = (((n as usize) + workers - 1) / workers).max(1);
+    let (off, adj) = (&off, &adj);
+    std::thread::scope(|scope| {
+        for (c, slice) in result.chunks_mut(chunk).enumerate() {
+            let start = (c * chunk) as u32;
+            scope.spawn(move || lcc_count_range(g, off, adj, n, start, slice));
+        }
+    });
+    result
+}
+
+/// Local clustering coefficient for vertices `start .. start + result.len()`,
+/// written into `result`. Worker body for [`lcc`]: owns the per-thread membership
+/// bitset (N(v): ~1/32 the size of a u32 marker array, cache-resident) and the
+/// neighbour buffer; `off`/`adj` are the shared sorted forward-adjacency.
+fn lcc_count_range(
+    g: &GraphSnapshot,
+    off: &[u32],
+    adj: &[u32],
+    n: u32,
+    start: u32,
+    result: &mut [f64],
+) {
     let mut mark = vec![0u64; (n as usize + 63) / 64];
     let mut nbrs: Vec<u32> = Vec::new();
-    for v in 0..n {
+    for (i, slot) in result.iter_mut().enumerate() {
+        let v = start + i as u32;
         nbrs.clear();
         for u in g.neighbors(v, Direction::Both) {
             let marked = mark[(u >> 6) as usize] >> (u & 63) & 1 != 0;
@@ -258,14 +282,13 @@ pub fn lcc(g: &GraphSnapshot, directed: bool) -> Vec<f64> {
                     }
                 }
             }
-            result[v as usize] = edges as f64 / (k as f64 * (k as f64 - 1.0));
+            *slot = edges as f64 / (k as f64 * (k as f64 - 1.0));
         }
         // Reset N(v)'s bits for the next vertex (including the k < 2 case).
         for &u in &nbrs {
             mark[(u >> 6) as usize] &= !(1u64 << (u & 63));
         }
     }
-    result
 }
 
 #[cfg(test)]
