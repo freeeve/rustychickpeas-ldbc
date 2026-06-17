@@ -7,6 +7,6 @@ From an Account + time window, find Accounts signed in by a blocked Medium reach
 - [x] Implement (Rust, src/finbench.rs) — PARTIAL: trace_transfers_in has the windowed reverse BFS — add the blocked-Medium signIn filter + distance/medium output
 - [ ] Optimize — bench allocations + CPU profile, optimize, re-bench
 - [x] Kùzu reference (Cypher; needs [078](078_finbench_kuzu_import.md)) + value cross-check
-- [ ] Bench compare — Rust vs Kùzu (SF1 / SF10)
+- [x] Bench compare — Rust vs Kùzu (SF1 / SF10)
 
 **Status: pending.**

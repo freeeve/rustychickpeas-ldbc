@@ -7,6 +7,6 @@ From an Account + window, the sum/max and ratio of transfer-in vs transfer-out a
 - [x] Implement (Rust, src/finbench.rs) — new
 - [ ] Optimize — bench allocations + CPU profile, optimize, re-bench
 - [x] Kùzu reference (Cypher; needs [078](078_finbench_kuzu_import.md)) + value cross-check
-- [ ] Bench compare — Rust vs Kùzu (SF1 / SF10)
+- [x] Bench compare — Rust vs Kùzu (SF1 / SF10)
 
 **Status: pending.**
