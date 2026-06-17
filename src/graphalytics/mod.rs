@@ -107,29 +107,51 @@ pub fn pagerank(g: &GraphSnapshot, directed: bool, damping: f64, iterations: u32
     }
     let nf = n as f64;
     let out = fwd(directed);
+    // Pull formulation: each vertex sums its in-neighbours' shares, writing `next[v]`
+    // disjointly so it parallelizes (the push `next[w] += ...` would race). In-edges
+    // are incoming for a directed graph, both for undirected.
+    let in_dir = if directed { Direction::Incoming } else { Direction::Both };
     let outdeg: Vec<u32> = (0..n as u32).map(|v| g.neighbors(v, out).count() as u32).collect();
     let mut pr = vec![1.0 / nf; n];
     let mut next = vec![0.0_f64; n];
+    let workers = std::env::var("GA_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |p| p.get()));
+    const BATCH: u32 = 2048;
     for _ in 0..iterations {
+        // Sinks (out-degree 0) redistribute their rank uniformly through `base`.
         let dangling: f64 = (0..n).filter(|&v| outdeg[v] == 0).map(|v| pr[v]).sum();
-        // Push each non-sink's share along its forward edges, accumulating the
-        // pull into each in-neighbour. `next` is reused (zeroed in place) rather
-        // than reallocated per iteration.
-        next.iter_mut().for_each(|x| *x = 0.0);
-        for u in 0..n as u32 {
-            let d = outdeg[u as usize];
-            if d == 0 {
-                continue;
-            }
-            let share = pr[u as usize] / d as f64;
-            for w in g.neighbors(u, out) {
-                next[w as usize] += share;
-            }
-        }
         let base = (1.0 - damping) / nf + damping * dangling / nf;
-        for v in next.iter_mut() {
-            *v = base + damping * *v;
-        }
+        let cursor = std::sync::atomic::AtomicU32::new(0);
+        let nxt_ptr = next.as_mut_ptr() as usize;
+        let (pr_ref, outdeg_ref): (&[f64], &[u32]) = (&pr, &outdeg);
+        let cursor = &cursor;
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(move || loop {
+                    let start = cursor.fetch_add(BATCH, std::sync::atomic::Ordering::Relaxed);
+                    if start as usize >= n {
+                        break;
+                    }
+                    let end = (start as usize + BATCH as usize).min(n) as u32;
+                    for v in start..end {
+                        let mut pull = 0.0_f64;
+                        for u in g.neighbors(v, in_dir) {
+                            let d = outdeg_ref[u as usize];
+                            if d > 0 {
+                                pull += pr_ref[u as usize] / d as f64;
+                            }
+                        }
+                        // SAFETY: the atomic cursor hands out disjoint vertex batches,
+                        // so the `next` slots never alias; `next` outlives the scope.
+                        unsafe {
+                            *(nxt_ptr as *mut f64).add(v as usize) = base + damping * pull;
+                        }
+                    }
+                });
+            }
+        });
         std::mem::swap(&mut pr, &mut next);
     }
     pr
