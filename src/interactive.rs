@@ -245,13 +245,28 @@ pub fn is1_profile(g: &GraphSnapshot, person: u32) -> Option<(String, String, i6
 
 /// IS2 — a person's own 10 most recent messages on/before `max_day`.
 pub fn is2_recent_of_person(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u32, i64)> {
-    let mut rows: Vec<(u32, i64)> = g
-        .neighbors_by_type(person, Direction::Outgoing, "hasCreator")
-        .filter(|&m| pi64(g, m, "day") <= max_day)
-        .map(|m| (m, pi64(g, m, "ms")))
+    // Top 10 by (ms desc, id asc) via a size-10 heap rather than collecting every
+    // message of a prolific person and sorting the lot (IC8 shape).
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut top: BinaryHeap<Reverse<(i64, Reverse<u32>)>> = BinaryHeap::with_capacity(11);
+    for m in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
+        if pi64(g, m, "day") > max_day {
+            continue;
+        }
+        let key = (pi64(g, m, "ms"), Reverse(m));
+        if top.len() < 10 {
+            top.push(Reverse(key));
+        } else if key > top.peek().unwrap().0 {
+            top.pop();
+            top.push(Reverse(key));
+        }
+    }
+    let mut rows: Vec<(u32, i64)> = top
+        .into_iter()
+        .map(|Reverse((ms, Reverse(id)))| (id, ms))
         .collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    rows.truncate(10);
     rows
 }
 
