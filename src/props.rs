@@ -5,6 +5,10 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use rustychickpeas_core::GraphSnapshot;
+// Re-exported so query modules read typed properties via `crate::props::PropExt`
+// (`g.prop(n, k).str()` / `.i64_or(0)` / `.bool_or(false)`) — the replacement for
+// the former pstr/pi64/pbool helpers.
+pub use rustychickpeas_core::PropExt;
 
 /// Sort a `node -> count` histogram (e.g. from `GraphSnapshot::neighbor_counts`) by
 /// count descending, node id ascending on ties, and keep the top `limit` — the
@@ -129,23 +133,11 @@ pub fn parse_ms(s: &str) -> i64 {
     day * 86_400_000 + h * 3_600_000 + mi * 60_000 + se * 1_000 + ms
 }
 
-pub fn pi64(g: &GraphSnapshot, n: u32, k: &str) -> i64 {
-    g.prop(n, k).and_then(|p| p.i64()).unwrap_or(0)
-}
-
-pub fn pbool(g: &GraphSnapshot, n: u32, k: &str) -> bool {
-    g.prop(n, k).and_then(|p| p.bool()).unwrap_or(false)
-}
-
-pub fn pstr<'a>(g: &'a GraphSnapshot, n: u32, k: &str) -> Option<&'a str> {
-    g.prop(n, k).and_then(|p| p.str())
-}
-
 /// Minimal JSON string escaper (enough for LDBC tag/place names).
 /// Find a Tag node by its name property.
 pub fn tag_by_name(g: &GraphSnapshot, name: &str) -> Option<u32> {
     g.nodes_with_label("Tag")
-        .and_then(|tags| tags.iter().find(|&t| pstr(g, t, "name") == Some(name)))
+        .and_then(|tags| tags.iter().find(|&t| g.prop(t, "name").str() == Some(name)))
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// Creative works whose outgoing `mentions` count equals the maximum over all
 /// works and which carry a `dateCreated`. Returned as `(work_uri,
@@ -48,7 +48,7 @@ pub fn run(g: &GraphSnapshot, limit: usize) -> Vec<(String, usize)> {
     let mut rows: Vec<(String, usize)> = counts
         .into_iter()
         .filter(|&(w, n)| n == max && g.prop_str(w, "dateCreated").is_some())
-        .map(|(w, n)| (pstr(g, w, "uri").unwrap_or("?").to_string(), n))
+        .map(|(w, n)| (g.prop(w, "uri").str().unwrap_or("?").to_string(), n))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0));
     rows.truncate(limit);

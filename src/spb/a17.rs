@@ -23,7 +23,7 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// Creative works `mentions`-linked to a geonames `Feature` inside the square box
 /// of half-extent `deviation` degrees centered on `(ref_lat, ref_lon)` — the
@@ -40,7 +40,7 @@ pub fn run(g: &GraphSnapshot, ref_lat: f64, ref_lon: f64, deviation: f64) -> Vec
     let mut works: HashSet<u32> = HashSet::new();
     for f in g.geo_within_bbox("Feature", "lat", "long", min, max).iter() {
         for w in g.neighbors_in_set(f, Direction::Incoming, "mentions", cworks) {
-            if pstr(g, w, "dateModified").is_some() {
+            if g.prop(w, "dateModified").str().is_some() {
                 works.insert(w);
             }
         }
@@ -105,7 +105,10 @@ mod tests {
         let g = load_str(FIXTURE).0;
         // +/-1 deg around London covers London and Nearby; Paris is far outside,
         // and the dateModified-less work is rejected by the required triple.
-        assert_eq!(titles(&g, &run(&g, 51.5074, -0.1278, 1.0)), ["London", "Nearby"]);
+        assert_eq!(
+            titles(&g, &run(&g, 51.5074, -0.1278, 1.0)),
+            ["London", "Nearby"]
+        );
     }
 
     #[test]

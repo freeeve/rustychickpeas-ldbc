@@ -28,7 +28,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pbool, pstr};
+use crate::props::PropExt;
 
 /// Whether `work` satisfies every bound facet (an unbound `None` facet matches
 /// anything). Mirrors the SPARQL's conjunction of `{{{filter1..3}}}`.
@@ -73,12 +73,12 @@ fn matches_facets(
         }
     }
     if let Some(want) = live_coverage {
-        if pbool(g, work, "liveCoverage") != want {
+        if g.prop(work, "liveCoverage").bool_or(false) != want {
             return false;
         }
     }
     if date_from.is_some() || date_to.is_some() {
-        let Some(created) = pstr(g, work, "dateCreated") else {
+        let Some(created) = g.prop(work, "dateCreated").str() else {
             return false;
         };
         if date_from.is_some_and(|lo| created < lo) || date_to.is_some_and(|hi| created > hi) {

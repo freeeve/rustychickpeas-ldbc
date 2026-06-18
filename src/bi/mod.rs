@@ -158,7 +158,7 @@ pub fn run() -> Result<()> {
 
         // Map internal person NodeId -> original LDBC id (stored as `plid`) so
         // ids line up with Kùzu's person.id.
-        let plid = |n: u32| pi64(&graph, n, "plid");
+        let plid = |n: u32| graph.prop(n, "plid").i64_or(0);
         let mut s = String::from("["); // Q5: [pid, messageCount, replyCount, likeCount, score]
         for (i, (p, m, r, l, score)) in q5_rows.iter().enumerate() {
             if i > 0 {

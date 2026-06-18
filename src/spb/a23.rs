@@ -43,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{parse_date, pstr, top_k_by_key};
+use crate::props::{parse_date, top_k_by_key, PropExt};
 
 /// SPB advanced **q23** final drill-down: over creative works whose `title`
 /// matches the full-text `word`, that are `category`-linked to `category_uri`, and
@@ -92,7 +92,7 @@ pub fn run(
 
     let rows = by_tag
         .into_iter()
-        .map(|(t, days)| (pstr(g, t, "uri").unwrap_or("?").to_string(), days.len()));
+        .map(|(t, days)| (g.prop(t, "uri").str().unwrap_or("?").to_string(), days.len()));
     top_k_by_key(rows, limit)
 }
 

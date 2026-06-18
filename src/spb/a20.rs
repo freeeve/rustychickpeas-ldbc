@@ -60,7 +60,7 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
-    use crate::props::pstr;
+    use crate::props::PropExt;
 
     // Creative works matching "football" in title or description with assorted
     // `dateModified`, one "tennis"-only work, and one "football" work with no
@@ -94,7 +94,7 @@ mod tests {
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
         works
             .iter()
-            .map(|&w| pstr(g, w, "title").unwrap_or("?").to_string())
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
             .collect()
     }
 

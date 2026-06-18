@@ -19,7 +19,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// `(work_uri, tag_uri)` pairs for `CreativeWork`s `category`-linked to `cat1` or
 /// `cat2` with a non-empty `dateModified`, one per distinct `tag` target (the
@@ -36,7 +36,7 @@ pub fn run(g: &GraphSnapshot, cat1: &str, cat2: &str, limit: usize) -> Vec<(Stri
         let in_category = g
             .neighbors_by_type(w, Direction::Outgoing, "category")
             .any(|c| {
-                let u = pstr(g, c, "uri");
+                let u = g.prop(c, "uri").str();
                 u == Some(cat1) || u == Some(cat2)
             });
         if !in_category {
@@ -59,10 +59,10 @@ pub fn run(g: &GraphSnapshot, cat1: &str, cat2: &str, limit: usize) -> Vec<(Stri
     let (mut last_work, mut work_uri) = (u32::MAX, "?");
     for (w, tag) in pairs {
         if w != last_work {
-            work_uri = pstr(g, w, "uri").unwrap_or("?");
+            work_uri = g.prop(w, "uri").str().unwrap_or("?");
             last_work = w;
         }
-        if let Some(tag_uri) = pstr(g, tag, "uri") {
+        if let Some(tag_uri) = g.prop(tag, "uri").str() {
             rows.push((work_uri.to_string(), tag_uri.to_string()));
         }
     }

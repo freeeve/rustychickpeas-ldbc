@@ -34,7 +34,7 @@ use std::collections::BTreeSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// q16: for each creative work whose `title` matches `word` (full-text) and that
 /// carries a `category` edge and a non-empty `title`, one `(work_uri, tag_uri)`
@@ -56,11 +56,11 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<(String, String)>
         {
             continue;
         }
-        let Some(work_uri) = pstr(g, w, "uri") else {
+        let Some(work_uri) = g.prop(w, "uri").str() else {
             continue;
         };
         for tag in g.neighbors_by_type(w, Direction::Outgoing, "tag") {
-            if let Some(tag_uri) = pstr(g, tag, "uri") {
+            if let Some(tag_uri) = g.prop(tag, "uri").str() {
                 rows.insert((tag_uri.to_string(), work_uri.to_string()));
             }
         }

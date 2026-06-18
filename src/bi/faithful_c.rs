@@ -26,7 +26,7 @@ pub(crate) fn q16_param_result(
     let mut cm: HashMap<u32, i64> = HashMap::new(); // person -> their tagged-on-day message count
     let mut creators_on_day: HashSet<u32> = HashSet::new();
     for msg in g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]) {
-        if pi64(g, msg, "day") != day {
+        if g.prop(msg, "day").i64_or(0) != day {
             continue;
         }
         for creator in g.neighbors_by_type(msg, Direction::Incoming, &["hasCreator"]) {
@@ -117,7 +117,7 @@ pub(crate) fn q10_experts(
         .map(|((e, t), msgs)| {
             (
                 e,
-                pstr(g, t, "name").unwrap_or("").to_string(),
+                g.prop(t, "name").str().unwrap_or("").to_string(),
                 msgs.len() as i64,
             )
         })
@@ -172,10 +172,10 @@ pub(crate) fn q3_popular_topics(
                 }
                 if !msgs.is_empty() {
                     rows.push((
-                        pi64(g, forum, "flid"),
-                        pstr(g, forum, "title").unwrap_or("").to_string(),
-                        pi64(g, forum, "fday"),
-                        pi64(g, person, "plid"),
+                        g.prop(forum, "flid").i64_or(0),
+                        g.prop(forum, "title").str().unwrap_or("").to_string(),
+                        g.prop(forum, "fday").i64_or(0),
+                        g.prop(person, "plid").i64_or(0),
                         msgs.len() as i64,
                     ));
                 }
@@ -216,7 +216,7 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
     let mut cf: FastMap<(u32, u32), i64> = FastMap::new();
     if let Some(forums) = g.nodes_with_label("Forum") {
         for forum in forums.iter() {
-            if pi64(g, forum, "fday") <= after_day {
+            if g.prop(forum, "fday").i64_or(0) <= after_day {
                 continue;
             }
             for m in g.neighbors_by_type(forum, Direction::Outgoing, t_member) {
@@ -229,7 +229,7 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
     // Precompute (flid, lid) sort keys so the comparator does no property reads.
     let mut ranked: Vec<(i64, i64, i64, u32)> = cf
         .iter()
-        .map(|(&(c, f), &n)| (n, pi64(g, f, "flid"), pi64(g, c, "lid"), f))
+        .map(|(&(c, f), &n)| (n, g.prop(f, "flid").i64_or(0), g.prop(c, "lid").i64_or(0), f))
         .collect();
     ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
     let mut top_forums: Vec<u32> = Vec::new();
@@ -275,14 +275,14 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
         .collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
     });
     rows.truncate(100);
-    let mut top_flids: Vec<i64> = top_forums.iter().map(|&f| pi64(g, f, "flid")).collect();
+    let mut top_flids: Vec<i64> = top_forums.iter().map(|&f| g.prop(f, "flid").i64_or(0)).collect();
     top_flids.sort();
     (
         rows.into_iter()
-            .map(|(p, c)| (pi64(g, p, "plid"), c))
+            .map(|(p, c)| (g.prop(p, "plid").i64_or(0), c))
             .collect(),
         top_flids,
     )
@@ -341,7 +341,7 @@ pub(crate) fn q15_weighted_path(
                     else {
                         return acc;
                     };
-                    let fday = pi64(g, forum, "fday");
+                    let fday = g.prop(forum, "fday").i64_or(0);
                     if fday >= start_day && fday <= end_day {
                         let contrib = if is_post(parent) { 1.0 } else { 0.5 };
                         *acc.entry((cc.min(pc), cc.max(pc))).or_insert(0.0) += contrib;
@@ -405,14 +405,14 @@ pub(crate) fn q17_information_propagation(
     let mut cand: Vec<(u32, u32, u32, u32, i64)> = Vec::new();
     for &m in &tagged {
         if let (Some(p1), Some(f1)) = (creator(m), forum_of(g, m)) {
-            m1_list.push((p1, f1, pi64(g, m, "ms")));
+            m1_list.push((p1, f1, g.prop(m, "ms").i64_or(0)));
         }
         if let Some(msg2) = g.first_neighbor(m, Direction::Outgoing, &["replyOf"]) {
             if tagged_set.contains(&msg2) {
                 if let (Some(p2), Some(p3), Some(f2)) =
                     (creator(m), creator(msg2), forum_of(g, msg2))
                 {
-                    cand.push((p2, p3, msg2, f2, pi64(g, msg2, "ms")));
+                    cand.push((p2, p3, msg2, f2, g.prop(msg2, "ms").i64_or(0)));
                 }
             }
         }
@@ -450,7 +450,7 @@ pub(crate) fn q17_information_propagation(
     }
     let rows = counts
         .into_iter()
-        .map(|(p, m)| (pi64(g, p, "plid"), m.len() as i64));
+        .map(|(p, m)| (g.prop(p, "plid").i64_or(0), m.len() as i64));
     top_k_by_key(rows, 10)
 }
 

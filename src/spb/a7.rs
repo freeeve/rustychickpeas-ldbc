@@ -20,7 +20,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pstr, top_k_by_count};
+use crate::props::{top_k_by_count, PropExt};
 
 /// Mention targets ranked by how many qualifying works mention them, where a work
 /// qualifies when its outgoing `primaryContentOf` edge count is strictly greater
@@ -33,12 +33,14 @@ pub fn run(g: &GraphSnapshot, min_primary_content: usize, limit: usize) -> Vec<(
     // Works whose `primaryContentOf` out-degree exceeds the threshold; count each
     // of their `mentions` targets (core target histogram) and keep the top rows.
     let qualifying = works.iter().filter(|&w| {
-        g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf").count() > min_primary_content
+        g.neighbors_by_type(w, Direction::Outgoing, "primaryContentOf")
+            .count()
+            > min_primary_content
     });
     let counts = g.neighbor_counts(qualifying, Direction::Outgoing, "mentions");
     top_k_by_count(counts, limit)
         .into_iter()
-        .map(|(m, n)| (pstr(g, m, "uri").unwrap_or("?").to_string(), n))
+        .map(|(m, n)| (g.prop(m, "uri").str().unwrap_or("?").to_string(), n))
         .collect()
 }
 
@@ -80,7 +82,10 @@ mod tests {
         let rows = run(&g, 1, 10);
         assert_eq!(
             rows,
-            vec![("http://ex/London".to_string(), 2), ("http://ex/Paris".to_string(), 1)]
+            vec![
+                ("http://ex/London".to_string(), 2),
+                ("http://ex/Paris".to_string(), 1)
+            ]
         );
     }
 }

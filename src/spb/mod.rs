@@ -48,7 +48,7 @@ use std::time::Instant;
 use rustychickpeas_core::GraphSnapshot;
 
 use crate::harness::{emit_json, jstr, time_query, Result};
-use crate::props::pstr;
+use crate::props::PropExt;
 
 const DEFAULT_SAMPLE: &str = "samples/spb-sample.nt";
 const DEF_LAT: f64 = 51.5074; // London
@@ -60,7 +60,7 @@ const DEF_WORD: &str = "football";
 fn uri_list(g: &GraphSnapshot, nodes: impl IntoIterator<Item = u32>) -> String {
     let items: Vec<String> = nodes
         .into_iter()
-        .filter_map(|n| pstr(g, n, "uri"))
+        .filter_map(|n| g.prop(n, "uri").str())
         .map(jstr)
         .collect();
     format!("[{}]", items.join(","))

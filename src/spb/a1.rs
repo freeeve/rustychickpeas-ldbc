@@ -46,7 +46,7 @@ pub fn run(g: &GraphSnapshot, pred: &str, thing_uri: &str) -> Vec<u32> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
-    use crate::props::pstr;
+    use crate::props::PropExt;
 
     // TBox (BlogPost/NewsItem subClassOf CreativeWork) + a Company thing with two
     // dated about-works, one undated about-work (excluded), and one mentions-work.
@@ -79,7 +79,7 @@ mod tests {
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
         works
             .iter()
-            .map(|&w| pstr(g, w, "title").unwrap_or("?").to_string())
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
             .collect()
     }
 

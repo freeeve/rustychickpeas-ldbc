@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{parse_ms, pstr};
+use crate::props::{parse_ms, PropExt};
 
 /// The sub-properties making up `cwork:tag` (`tag` itself is the materialized
 /// union of these, so traversing it as well would be redundant work).
@@ -80,13 +80,13 @@ pub fn run(
         if let Some(aud) = audience_uri {
             let matches = g
                 .neighbors_by_type(cw, Direction::Outgoing, "audience")
-                .any(|a| pstr(g, a, "uri") == Some(aud));
+                .any(|a| g.prop(a, "uri").str() == Some(aud));
             if !matches {
                 continue;
             }
         }
         // cwork:dateModified ?dt . FILTER (?dt > start && ?dt < end)
-        let Some(dt) = pstr(g, cw, "dateModified") else {
+        let Some(dt) = g.prop(cw, "dateModified").str() else {
             continue;
         };
         let dt_ms = parse_ms(dt);
@@ -99,7 +99,7 @@ pub fn run(
             topics.extend(g.neighbors_by_type(cw, Direction::Outgoing, pred));
         }
         for topic in topics {
-            if pstr(g, topic, "label").is_some() {
+            if g.prop(topic, "label").str().is_some() {
                 *counts.entry(topic).or_insert(0) += 1;
             }
         }
@@ -107,7 +107,7 @@ pub fn run(
 
     let mut rows: Vec<(String, usize)> = counts
         .into_iter()
-        .map(|(topic, cnt)| (pstr(g, topic, "label").unwrap_or("?").to_string(), cnt))
+        .map(|(topic, cnt)| (g.prop(topic, "label").str().unwrap_or("?").to_string(), cnt))
         .collect();
     // ORDER BY DESC(?cnt), then label ascending for determinism.
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
@@ -188,7 +188,10 @@ mod tests {
         //   Hidden has no label -> excluded by the prefLabel join.
         // cw4 (out of window), cw5 (International), cw6 (NewsItem) are excluded.
         let rows = run(&g, Some("BlogPost"), Some(NAT), WIN_START, WIN_END);
-        assert_eq!(rows, vec![("Acme Corp".to_string(), 3), ("Globex".to_string(), 2)]);
+        assert_eq!(
+            rows,
+            vec![("Acme Corp".to_string(), 3), ("Globex".to_string(), 2)]
+        );
     }
 
     #[test]
@@ -196,7 +199,10 @@ mod tests {
         let g = load_str(FIXTURE).0;
         // No type restriction adds cw6 (NewsItem, National, in window) -> Globex 3.
         let rows = run(&g, None, Some(NAT), WIN_START, WIN_END);
-        assert_eq!(rows, vec![("Acme Corp".to_string(), 3), ("Globex".to_string(), 3)]);
+        assert_eq!(
+            rows,
+            vec![("Acme Corp".to_string(), 3), ("Globex".to_string(), 3)]
+        );
     }
 
     #[test]
@@ -204,7 +210,10 @@ mod tests {
         let g = load_str(FIXTURE).0;
         // No audience restriction adds cw5 (International, about Acme) -> Acme 4.
         let rows = run(&g, Some("BlogPost"), None, WIN_START, WIN_END);
-        assert_eq!(rows, vec![("Acme Corp".to_string(), 4), ("Globex".to_string(), 2)]);
+        assert_eq!(
+            rows,
+            vec![("Acme Corp".to_string(), 4), ("Globex".to_string(), 2)]
+        );
     }
 
     #[test]
@@ -218,6 +227,9 @@ mod tests {
             "2012-01-01T10:20:00.000Z",
             "2012-01-01T10:48:00.000Z",
         );
-        assert_eq!(rows, vec![("Acme Corp".to_string(), 1), ("Globex".to_string(), 1)]);
+        assert_eq!(
+            rows,
+            vec![("Acme Corp".to_string(), 1), ("Globex".to_string(), 1)]
+        );
     }
 }

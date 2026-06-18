@@ -28,7 +28,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// Whether `node` has an outgoing `edge` satisfying the facet:
 /// * `Some(uri)` — at least one edge target carries that `uri`;
@@ -59,12 +59,12 @@ pub fn run(
     let mut out: Vec<u32> = works
         .iter()
         .filter(|&w| {
-            let Some(created) = pstr(g, w, "dateCreated") else {
+            let Some(created) = g.prop(w, "dateCreated").str() else {
                 return false;
             };
             created >= after
                 && created <= before
-                && pstr(g, w, "title").is_some()
+                && g.prop(w, "title").str().is_some()
                 && g.prop(w, "liveCoverage").is_some()
                 && facet_matches(g, w, "category", category_uri)
                 && facet_matches(g, w, "audience", audience_uri)
@@ -117,7 +117,10 @@ mod tests {
     const NATIONAL: &str = "http://www.bbc.co.uk/audience/national";
 
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        let mut t: Vec<String> = works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect();
+        let mut t: Vec<String> = works
+            .iter()
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
+            .collect();
         t.sort();
         t
     }
@@ -134,7 +137,14 @@ mod tests {
     fn category_facet() {
         let g = load_str(FIXTURE).0;
         // 2012 + category=sport: cw1 only (cw2 is politics; cw4 sport but no audience).
-        let hits = run(&g, "CreativeWork", "2012-01-01", "2012-12-31", Some(SPORT), None);
+        let hits = run(
+            &g,
+            "CreativeWork",
+            "2012-01-01",
+            "2012-12-31",
+            Some(SPORT),
+            None,
+        );
         assert_eq!(titles(&g, &hits), ["Winter derby"]);
     }
 
@@ -142,7 +152,14 @@ mod tests {
     fn audience_facet_over_full_range() {
         let g = load_str(FIXTURE).0;
         // all years + audience=national: cw1 + cw3 (cw2 international; cw4 unbound).
-        let hits = run(&g, "CreativeWork", "2010-01-01", "2014-12-31", None, Some(NATIONAL));
+        let hits = run(
+            &g,
+            "CreativeWork",
+            "2010-01-01",
+            "2014-12-31",
+            None,
+            Some(NATIONAL),
+        );
         assert_eq!(titles(&g, &hits), ["Spring final", "Winter derby"]);
     }
 

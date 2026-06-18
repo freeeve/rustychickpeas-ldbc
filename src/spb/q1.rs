@@ -24,8 +24,8 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
 use super::queries::node_by_uri;
+use crate::props::PropExt;
 
 /// Creative works `about` OR `mentions` the topic at `topic_uri`, ranked by
 /// `dateModified` descending (tie-broken by node id ascending for a stable order).
@@ -47,8 +47,10 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str) -> Vec<u32> {
 
     // The sub-SELECT's `cwork:dateModified ?modified` is required, so works with no
     // `dateModified` never reach the ORDER BY; carry the value to sort without re-lookup.
-    let mut rows: Vec<(u32, &str)> =
-        works.into_iter().filter_map(|w| pstr(g, w, "dateModified").map(|d| (w, d))).collect();
+    let mut rows: Vec<(u32, &str)> = works
+        .into_iter()
+        .filter_map(|w| g.prop(w, "dateModified").str().map(|d| (w, d)))
+        .collect();
     rows.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(&b.0)));
     rows.into_iter().map(|(w, _)| w).collect()
 }
@@ -93,7 +95,10 @@ mod tests {
 "#;
 
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]
@@ -102,7 +107,10 @@ mod tests {
         let works = run(&g, "http://sws.geonames.org/london");
         // about + mentions union, newest `dateModified` first; the paris-topic work
         // and the `dateModified`-less work are excluded.
-        assert_eq!(titles(&g, &works), ["About September", "Mentions June", "Mentions March"]);
+        assert_eq!(
+            titles(&g, &works),
+            ["About September", "Mentions June", "Mentions March"]
+        );
     }
 
     #[test]

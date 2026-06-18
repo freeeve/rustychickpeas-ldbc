@@ -50,7 +50,7 @@ pub fn pick_seeds(g: &GraphSnapshot) -> Option<IcSeeds> {
         if d == 0 {
             continue;
         }
-        if let Some(fname) = pstr(g, p, "fname") {
+        if let Some(fname) = g.prop(p, "fname").str() {
             *name_counts.entry(fname.to_string()).or_insert(0) += 1;
         }
     }
@@ -85,13 +85,13 @@ pub fn ic1_friends_by_name(
     let dist = g.bfs_distances(person, Direction::Outgoing, "knows", Some(3));
     let mut rows: Vec<(u32, u32, String)> = dist
         .iter()
-        .filter(|(&p, &d)| d >= 1 && pstr(g, p, "fname") == Some(first_name))
-        .map(|(&p, &d)| (p, d, pstr(g, p, "lname").unwrap_or("").to_string()))
+        .filter(|(&p, &d)| d >= 1 && g.prop(p, "fname").str() == Some(first_name))
+        .map(|(&p, &d)| (p, d, g.prop(p, "lname").str().unwrap_or("").to_string()))
         .collect();
     rows.sort_by(|a, b| {
         a.1.cmp(&b.1)
             .then(a.2.cmp(&b.2))
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
     });
     rows.truncate(20);
     rows
@@ -108,10 +108,10 @@ pub fn ic2_recent_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<
     let mut top = TopK::new(20);
     for friend in g.neighbors_by_type(person, Direction::Outgoing, "knows") {
         for msg in g.neighbors_by_type(friend, Direction::Outgoing, "hasCreator") {
-            if pi64(g, msg, "day") > max_day {
+            if g.prop(msg, "day").i64_or(0) > max_day {
                 continue;
             }
-            top.push((pi64(g, msg, "ms"), Reverse(msg)));
+            top.push((g.prop(msg, "ms").i64_or(0), Reverse(msg)));
         }
     }
     top.into_sorted_desc()
@@ -214,9 +214,9 @@ pub fn build_knows_interaction(g: &GraphSnapshot) -> HashMap<(u32, u32), u32> {
 /// IS1 — a person's profile: (firstName, lastName, creation day).
 pub fn is1_profile(g: &GraphSnapshot, person: u32) -> Option<(String, String, i64)> {
     Some((
-        pstr(g, person, "fname")?.to_string(),
-        pstr(g, person, "lname")?.to_string(),
-        pi64(g, person, "pday"),
+        g.prop(person, "fname").str()?.to_string(),
+        g.prop(person, "lname").str()?.to_string(),
+        g.prop(person, "pday").i64_or(0),
     ))
 }
 
@@ -227,10 +227,10 @@ pub fn is2_recent_of_person(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec
     use std::cmp::Reverse;
     let mut top = TopK::new(10);
     for m in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
-        if pi64(g, m, "day") > max_day {
+        if g.prop(m, "day").i64_or(0) > max_day {
             continue;
         }
-        top.push((pi64(g, m, "ms"), Reverse(m)));
+        top.push((g.prop(m, "ms").i64_or(0), Reverse(m)));
     }
     top.into_sorted_desc()
         .into_iter()
@@ -313,7 +313,7 @@ pub fn ic4_new_topics(
                 continue;
             }
             let tag = lo + i as u32;
-            top.push((c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag));
+            top.push((c, Reverse(g.prop(tag, "name").str().unwrap_or("")), tag));
         }
         let mut rows: Vec<(u32, u32)> = top
             .into_sorted_desc()
@@ -322,7 +322,7 @@ pub fn ic4_new_topics(
             .collect();
         rows.sort_by(|a, b| {
             b.1.cmp(&a.1)
-                .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+                .then(g.prop(a.0, "name").str().cmp(&g.prop(b.0, "name").str()))
         });
         return rows;
     }
@@ -353,7 +353,7 @@ pub fn ic4_new_topics(
         .collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+            .then(g.prop(a.0, "name").str().cmp(&g.prop(b.0, "name").str()))
     });
     rows.truncate(10);
     rows
@@ -401,7 +401,7 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
                 continue;
             }
             let tag = lo + i as u32;
-            top.push((c, Reverse(pstr(g, tag, "name").unwrap_or("")), tag));
+            top.push((c, Reverse(g.prop(tag, "name").str().unwrap_or("")), tag));
         }
         let mut rows: Vec<(u32, u32)> = top
             .into_sorted_desc()
@@ -410,7 +410,7 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
             .collect();
         rows.sort_by(|a, b| {
             b.1.cmp(&a.1)
-                .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+                .then(g.prop(a.0, "name").str().cmp(&g.prop(b.0, "name").str()))
         });
         return rows;
     }
@@ -438,7 +438,7 @@ pub fn ic6_tag_cooccurrence(g: &GraphSnapshot, person: u32, tag_name: &str) -> V
     let mut rows: Vec<(u32, u32)> = counts.into_iter().collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pstr(g, a.0, "name").cmp(&pstr(g, b.0, "name")))
+            .then(g.prop(a.0, "name").str().cmp(&g.prop(b.0, "name").str()))
     });
     rows.truncate(10);
     rows
@@ -453,7 +453,7 @@ pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
     let mut top = TopK::new(20);
     for msg in g.neighbors_by_type(person, Direction::Outgoing, "hasCreator") {
         for reply in g.neighbors_by_type(msg, Direction::Incoming, "replyOf") {
-            top.push((pi64(g, reply, "ms"), Reverse(reply)));
+            top.push((g.prop(reply, "ms").i64_or(0), Reverse(reply)));
         }
     }
     top.into_sorted_desc()
@@ -490,11 +490,11 @@ pub fn is7_replies(g: &GraphSnapshot, message: u32) -> Vec<(u32, i64, u32, bool)
             .next()
             .unwrap_or(u32::MAX);
         let knows = author.is_some_and(|a| a != ra && author_friends.contains(&ra));
-        rows.push((reply, pi64(g, reply, "ms"), ra, knows));
+        rows.push((reply, g.prop(reply, "ms").i64_or(0), ra, knows));
     }
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pi64(g, a.2, "plid").cmp(&pi64(g, b.2, "plid")))
+            .then(g.prop(a.2, "plid").i64_or(0).cmp(&g.prop(b.2, "plid").i64_or(0)))
     });
     rows
 }
@@ -560,7 +560,7 @@ pub fn ic3_friends_two_countries(
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
     });
     rows.truncate(20);
     rows
@@ -603,7 +603,7 @@ pub fn ic5_new_groups(g: &GraphSnapshot, person: u32, min_day: i64) -> Vec<(u32,
     let mut rows: Vec<(u32, u32)> = forum_counts.into_iter().collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pi64(g, a.0, "flid").cmp(&pi64(g, b.0, "flid")))
+            .then(g.prop(a.0, "flid").i64_or(0).cmp(&g.prop(b.0, "flid").i64_or(0)))
     });
     rows.truncate(20);
     rows
@@ -636,7 +636,7 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
     use std::cmp::Reverse;
     let mut top = TopK::new(20);
     for (&liker, &(lms, msg)) in &best {
-        top.push((lms, Reverse(pi64(g, liker, "plid")), liker, msg));
+        top.push((lms, Reverse(g.prop(liker, "plid").i64_or(0)), liker, msg));
     }
     let mut rows: Vec<(u32, i64, u32, bool)> = top
         .into_sorted_desc()
@@ -645,7 +645,7 @@ pub fn ic7_recent_likers(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64, u32, 
         .collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
     });
     rows
 }
@@ -700,7 +700,7 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
         .collect();
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
     });
     rows
 }
@@ -755,8 +755,8 @@ pub fn ic11_job_referral(
             // larger key ranks earlier: smaller wf, smaller plid, larger name.
             let item = (
                 Reverse(wf),
-                Reverse(pi64(g, p, "plid")),
-                pstr(g, e.neighbor, "name").unwrap_or(""),
+                Reverse(g.prop(p, "plid").i64_or(0)),
+                g.prop(e.neighbor, "name").str().unwrap_or(""),
                 p,
                 e.neighbor,
             );
@@ -770,8 +770,8 @@ pub fn ic11_job_referral(
         .collect();
     rows.sort_by(|a, b| {
         a.2.cmp(&b.2)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
-            .then(pstr(g, b.1, "name").cmp(&pstr(g, a.1, "name")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
+            .then(g.prop(b.1, "name").str().cmp(&g.prop(a.1, "name").str()))
     });
     rows
 }
@@ -827,14 +827,14 @@ pub fn ic12_expert_search(
     }
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(pi64(g, a.0, "plid").cmp(&pi64(g, b.0, "plid")))
+            .then(g.prop(a.0, "plid").i64_or(0).cmp(&g.prop(b.0, "plid").i64_or(0)))
     });
     rows.truncate(20);
     rows.into_iter()
         .map(|(friend, count, tag_ids)| {
             let mut names: Vec<String> = tag_ids
                 .iter()
-                .filter_map(|&t| pstr(g, t, "name").map(str::to_string))
+                .filter_map(|&t| g.prop(t, "name").str().map(str::to_string))
                 .collect();
             names.sort();
             (friend, count, names)
@@ -846,8 +846,8 @@ pub fn ic12_expert_search(
 /// option (the `ctext` property); image-only Posts fall back to their imageFile.
 pub fn is4_message_content(g: &GraphSnapshot, message: u32) -> Option<(i64, String)> {
     Some((
-        pi64(g, message, "ms"),
-        pstr(g, message, "ctext")?.to_string(),
+        g.prop(message, "ms").i64_or(0),
+        g.prop(message, "ctext").str()?.to_string(),
     ))
 }
 
@@ -901,9 +901,9 @@ pub fn run() -> Result<()> {
     println!(
         "Seeds: person={} (plid {}), person_b={} (plid {}), firstName=\"{}\", maxDay={}",
         seeds.person,
-        pi64(&graph, seeds.person, "plid"),
+        graph.prop(seeds.person, "plid").i64_or(0),
         seeds.person_b,
-        pi64(&graph, seeds.person_b, "plid"),
+        graph.prop(seeds.person_b, "plid").i64_or(0),
         seeds.first_name,
         seeds.max_day
     );
@@ -922,7 +922,7 @@ pub fn run() -> Result<()> {
         }
         c.into_iter()
             .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
-            .and_then(|(t, _)| pstr(&graph, t, "name"))
+            .and_then(|(t, _)| graph.prop(t, "name").str())
             .unwrap_or("")
             .to_string()
     };
@@ -931,7 +931,7 @@ pub fn run() -> Result<()> {
     let seed_post = graph
         .neighbors_by_type(seeds.person, Direction::Outgoing, "hasCreator")
         .filter(|&m| posts.is_some_and(|p| p.contains(m)))
-        .max_by_key(|&m| pi64(&graph, m, "ms"));
+        .max_by_key(|&m| graph.prop(m, "ms").i64_or(0));
     let reply_roots = graph
         .rel_type("replyOf")
         .map(|rt| graph.chain_roots(Direction::Outgoing, rt));
@@ -940,12 +940,12 @@ pub fn run() -> Result<()> {
         .neighbors_by_type(seeds.person, Direction::Outgoing, "isLocatedIn")
         .next()
         .and_then(|city| graph.first_neighbor(city, Direction::Outgoing, "isPartOf"))
-        .and_then(|country| pstr(&graph, country, "name"))
+        .and_then(|country| graph.prop(country, "name").str())
         .unwrap_or("India")
         .to_string();
     let seed_class_name = tag_by_name(&graph, &seed_tag_name)
         .and_then(|t| graph.first_neighbor(t, Direction::Outgoing, "hasType"))
-        .and_then(|c| pstr(&graph, c, "name"))
+        .and_then(|c| graph.prop(c, "name").str())
         .unwrap_or("")
         .to_string();
 
@@ -953,7 +953,7 @@ pub fn run() -> Result<()> {
     // tag names, not internal node ids) so `kuzu/run_ic.py` can diff against Kùzu
     // via the shared `compare.py`. Emit mode skips the timing block.
     if let Ok(dir) = std::env::var("LDBC_EMIT_JSON") {
-        let plid = |p: u32| pi64(&graph, p, "plid");
+        let plid = |p: u32| graph.prop(p, "plid").i64_or(0);
         let arr_ms = |rows: &[(u32, i64)]| {
             format!(
                 "[{}]",
@@ -1031,7 +1031,7 @@ pub fn run() -> Result<()> {
             format!(
                 "[{}]",
                 rows.iter()
-                    .map(|(t, c)| format!("[{},{c}]", jstr(pstr(&graph, *t, "name").unwrap_or(""))))
+                    .map(|(t, c)| format!("[{},{c}]", jstr(graph.prop(*t, "name").str().unwrap_or(""))))
                     .collect::<Vec<_>>()
                     .join(",")
             )
@@ -1057,7 +1057,7 @@ pub fn run() -> Result<()> {
             &dir,
             "is6.rust.json",
             match is6 {
-                Some((f, mo)) => format!("[[{},{}]]", pi64(&graph, f, "flid"), plid(mo)),
+                Some((f, mo)) => format!("[[{},{}]]", graph.prop(f, "flid").i64_or(0), plid(mo)),
                 None => "[]".to_string(),
             },
         );
@@ -1114,7 +1114,7 @@ pub fn run() -> Result<()> {
             "ic5.rust.json",
             join(
                 ic5.iter()
-                    .map(|(f, c)| format!("[{},{c}]", pi64(&graph, *f, "flid")))
+                    .map(|(f, c)| format!("[{},{c}]", graph.prop(*f, "flid").i64_or(0)))
                     .collect(),
             ),
         );
@@ -1148,7 +1148,7 @@ pub fn run() -> Result<()> {
                         format!(
                             "[{},{},{wf}]",
                             plid(*p),
-                            jstr(pstr(&graph, *co, "name").unwrap_or(""))
+                            jstr(graph.prop(*co, "name").str().unwrap_or(""))
                         )
                     })
                     .collect(),

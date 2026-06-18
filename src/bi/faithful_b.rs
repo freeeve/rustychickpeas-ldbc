@@ -24,14 +24,14 @@ pub(crate) fn q13_zombies(
     let mut zombies: HashSet<u32> = HashSet::new();
     for city in g.neighbors_by_type(country, Direction::Incoming, &["isPartOf"]) {
         for p in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
-            if pi64(g, p, "pday") >= end_day {
+            if g.prop(p, "pday").i64_or(0) >= end_day {
                 continue;
             }
             let mcount = g
                 .neighbors_by_type(p, Direction::Outgoing, &["hasCreator"])
-                .filter(|&m| pi64(g, m, "day") < end_day)
+                .filter(|&m| g.prop(m, "day").i64_or(0) < end_day)
                 .count() as i64;
-            let months = end_ym - pi64(g, p, "pym") + 1;
+            let months = end_ym - g.prop(p, "pym").i64_or(0) + 1;
             if months > 0 && mcount < months {
                 zombies.insert(p);
             }
@@ -44,7 +44,7 @@ pub(crate) fn q13_zombies(
             let mut tlc = 0u64;
             for m in g.neighbors_by_type(z, Direction::Outgoing, &["hasCreator"]) {
                 for liker in g.neighbors_by_type(m, Direction::Incoming, &["likes"]) {
-                    if pi64(g, liker, "pday") < end_day {
+                    if g.prop(liker, "pday").i64_or(0) < end_day {
                         tlc += 1;
                     }
                     if zombies.contains(&liker) {
@@ -396,7 +396,7 @@ pub(crate) fn q14_international_dialog(
     }
     let mut rows: Vec<(u32, u32, String, i64)> = Vec::new();
     for city in g.neighbors_by_type(country1, Direction::Incoming, &["isPartOf"]) {
-        let city_name = pstr(g, city, "name").unwrap_or("").to_string();
+        let city_name = g.prop(city, "name").str().unwrap_or("").to_string();
         let mut best: Option<(i64, i64, i64, u32, u32)> = None; // score, p1plid, p2plid, p1, p2
         for p1 in g.neighbors_by_type(city, Direction::Incoming, &["isLocatedIn"]) {
             let p1_co = commented_on(p1);

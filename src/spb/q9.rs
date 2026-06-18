@@ -45,7 +45,7 @@ use std::collections::HashSet;
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::{has_label, node_by_uri};
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// The distinct entity targets of `work`'s outgoing `edge` (`about` / `mentions`).
 fn targets(g: &GraphSnapshot, work: u32, edge: &str) -> HashSet<u32> {
@@ -112,7 +112,7 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str, limit: usize) -> Vec<(String, f64)> 
     });
     rows.truncate(limit);
     rows.into_iter()
-        .map(|(o, _dt, score)| (pstr(g, o, "uri").unwrap_or("?").to_string(), score))
+        .map(|(o, _dt, score)| (g.prop(o, "uri").str().unwrap_or("?").to_string(), score))
         .collect()
 }
 

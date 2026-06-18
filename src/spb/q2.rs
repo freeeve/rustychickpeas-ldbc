@@ -28,21 +28,22 @@
 
 use rustychickpeas_core::GraphSnapshot;
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// Resolve SPB basic q2: the `CreativeWork` whose `uri` equals `cw_uri`, but only
 /// if it carries the required (non-OPTIONAL) `title`. Returns its node id, or
 /// `None` for an unknown uri, a non-`CreativeWork` resource, or a titleless work.
 ///
-/// The caller "describes" the node by reading its properties (`crate::props::pstr`
-/// for `title` / `dateCreated` / `dateModified`) and its `about` / `mentions`
+/// The caller "describes" the node by reading its properties
+/// (`g.prop(n, k).str()` for `title` / `dateCreated` / `dateModified`) and its
+/// `about` / `mentions`
 /// edges, mirroring the SPARQL `CONSTRUCT` block.
 pub fn run(g: &GraphSnapshot, cw_uri: &str) -> Option<u32> {
     let node = g
         .nodes_with_property("CreativeWork", "uri", cw_uri)
         .and_then(|ns| ns.iter().next())?;
     // The non-OPTIONAL `cwork:title ?title` pattern: no title -> no solution.
-    pstr(g, node, "title").map(|_| node)
+    g.prop(node, "title").str().map(|_| node)
 }
 
 #[cfg(test)]
@@ -70,8 +71,11 @@ mod tests {
         // Known creative work with a title -> Some, and its describe payload is
         // readable off the returned node.
         let node = run(&g, "http://ex/cw1").expect("cw1 should resolve");
-        assert_eq!(pstr(&g, node, "title"), Some("London derby"));
-        assert_eq!(pstr(&g, node, "dateModified"), Some("2011-08-15T12:30:00.000Z"));
+        assert_eq!(g.prop(node, "title").str(), Some("London derby"));
+        assert_eq!(
+            g.prop(node, "dateModified").str(),
+            Some("2011-08-15T12:30:00.000Z")
+        );
 
         // Unknown uri -> None.
         assert_eq!(run(&g, "http://ex/missing"), None);

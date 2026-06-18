@@ -21,7 +21,7 @@
 
 use rustychickpeas_core::GraphSnapshot;
 
-use crate::props::{pstr, top_k_by_key};
+use crate::props::{top_k_by_key, PropExt};
 
 /// The concrete `CreativeWork` subclasses the SPB data instantiates; `?type !=
 /// cwork:CreativeWork` in the template ranges over exactly these (the loader
@@ -37,7 +37,7 @@ pub fn run(g: &GraphSnapshot, after: &str, before: &str, limit: usize) -> Vec<(S
             works
                 .iter()
                 .filter(|&w| {
-                    pstr(g, w, "dateModified")
+                    g.prop(w, "dateModified").str()
                         .filter(|s| !s.is_empty())
                         .is_some_and(|dm| dm > after && dm < before)
                 })
@@ -83,6 +83,9 @@ mod tests {
         let rows = run(&g, "2011-03-01", "2011-06-01", 10);
         // bp1+bp2 in window -> BlogPost 2; ni1 in, ni2 (Sept) out -> NewsItem 1;
         // Programme has no work, so it never appears.
-        assert_eq!(rows, vec![("BlogPost".to_string(), 2), ("NewsItem".to_string(), 1)]);
+        assert_eq!(
+            rows,
+            vec![("BlogPost".to_string(), 2), ("NewsItem".to_string(), 1)]
+        );
     }
 }

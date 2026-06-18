@@ -26,8 +26,8 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pstr, top_k_by_key};
 use super::queries::node_by_uri;
+use crate::props::{top_k_by_key, PropExt};
 
 /// Blog posts (`BlogPost`-labelled creative works) `about` OR `mentions` the topic
 /// at `topic_uri`, ranked by `dateCreated` descending (tie-broken by node id
@@ -50,8 +50,13 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
 
     // `cwork:dateCreated ?created` is required, so a post with no `dateCreated`
     // never reaches the ORDER BY; carry the value so the rank sorts without re-lookup.
-    let rows = posts.into_iter().filter_map(|w| pstr(g, w, "dateCreated").map(|d| (w, d)));
-    top_k_by_key(rows, limit).into_iter().map(|(w, _)| w).collect()
+    let rows = posts
+        .into_iter()
+        .filter_map(|w| g.prop(w, "dateCreated").str().map(|d| (w, d)));
+    top_k_by_key(rows, limit)
+        .into_iter()
+        .map(|(w, _)| w)
+        .collect()
 }
 
 #[cfg(test)]
@@ -104,7 +109,10 @@ mod tests {
 "#;
 
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]

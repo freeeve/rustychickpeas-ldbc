@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pbool, pstr, top_k_by_key};
+use crate::props::{top_k_by_key, PropExt};
 
 /// The entity types an about-target can carry: the two leaf classes plus the
 /// materialized `coreconcepts:Thing` super-class (`rdfs:subClassOf` closure).
@@ -33,22 +33,29 @@ const ENTITY_TYPES: [&str; 3] = ["Company", "Event", "Thing"];
 /// works whose `liveCoverage` equals `live_coverage` and that carry an `audience`
 /// edge to `audience_uri`. Returned as `(type_local_name, count)` ordered by count
 /// descending then name, truncated to `limit` (the template's `LIMIT 1000`).
-pub fn run(g: &GraphSnapshot, live_coverage: bool, audience_uri: &str, limit: usize) -> Vec<(String, usize)> {
+pub fn run(
+    g: &GraphSnapshot,
+    live_coverage: bool,
+    audience_uri: &str,
+    limit: usize,
+) -> Vec<(String, usize)> {
     let Some(works) = g.nodes_with_label("CreativeWork") else {
         return Vec::new();
     };
     // Resolve each entity type's node set ONCE; the inner loop is then a bitmap
     // membership test rather than a per-node label string lookup.
-    let type_sets: Vec<(&str, _)> =
-        ENTITY_TYPES.iter().filter_map(|&ty| g.nodes_with_label(ty).map(|s| (ty, s))).collect();
+    let type_sets: Vec<(&str, _)> = ENTITY_TYPES
+        .iter()
+        .filter_map(|&ty| g.nodes_with_label(ty).map(|s| (ty, s)))
+        .collect();
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for w in works.iter() {
-        if pbool(g, w, "liveCoverage") != live_coverage {
+        if g.prop(w, "liveCoverage").bool_or(false) != live_coverage {
             continue;
         }
         let in_audience = g
             .neighbors_by_type(w, Direction::Outgoing, "audience")
-            .any(|a| pstr(g, a, "uri") == Some(audience_uri));
+            .any(|a| g.prop(a, "uri").str() == Some(audience_uri));
         if !in_audience {
             continue;
         }

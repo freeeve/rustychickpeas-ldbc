@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// Whether `node` carries the given label (core `has_label`).
 pub(crate) fn has_label(g: &GraphSnapshot, node: u32, label: &str) -> bool {
@@ -32,8 +32,8 @@ pub(crate) fn node_by_uri(g: &GraphSnapshot, uri: &str) -> Option<u32> {
 
 /// Display name: a creative work's `title`, or a feature's `name`.
 pub fn name_of(g: &GraphSnapshot, node: u32) -> &str {
-    pstr(g, node, "title")
-        .or_else(|| pstr(g, node, "name"))
+    g.prop(node, "title").str()
+        .or_else(|| g.prop(node, "name").str())
         .unwrap_or("?")
 }
 

@@ -82,7 +82,7 @@ pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
-    use crate::props::pstr;
+    use crate::props::PropExt;
 
     // TBox: a work subtype reaches `CreativeWork`; the about-target `Company` and
     // the mentions-target `Feature` each reach `coreconcepts:Thing` (the shared
@@ -137,7 +137,7 @@ mod tests {
     fn uris(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
         works
             .iter()
-            .map(|&w| pstr(g, w, "uri").unwrap_or("?").to_string())
+            .map(|&w| g.prop(w, "uri").str().unwrap_or("?").to_string())
             .collect()
     }
 

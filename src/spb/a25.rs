@@ -98,7 +98,7 @@ pub fn run(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(u32, usize)> {
 mod tests {
     use super::super::loader::load_str;
     use super::*;
-    use crate::props::pstr;
+    use crate::props::PropExt;
 
     const ENT_A: &str = "http://dbpedia.org/resource/EntA";
     const ENT_B: &str = "http://dbpedia.org/resource/EntB";
@@ -162,7 +162,7 @@ mod tests {
     fn rows(g: &GraphSnapshot, uri_a: &str, limit: usize) -> Vec<(String, usize)> {
         run(g, uri_a, limit)
             .into_iter()
-            .map(|(who, d)| (pstr(g, who, "uri").unwrap_or("?").to_string(), d))
+            .map(|(who, d)| (g.prop(who, "uri").str().unwrap_or("?").to_string(), d))
             .collect()
     }
 

@@ -43,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::has_label;
-use crate::props::{parse_ms, pstr};
+use crate::props::{parse_ms, PropExt};
 
 /// Edges making up `cwork:tag` once its `about` / `mentions` sub-properties are
 /// folded in (no RDFS engine), plus any direct `tag` edge.
@@ -87,13 +87,13 @@ pub fn run(
         if let Some(aud) = audience_uri {
             let matches = g
                 .neighbors_by_type(cw, Direction::Outgoing, "audience")
-                .any(|a| pstr(g, a, "uri") == Some(aud));
+                .any(|a| g.prop(a, "uri").str() == Some(aud));
             if !matches {
                 continue;
             }
         }
         // ?cwork cwork:dateModified ?dateModif . FILTER (start <= ?dateModif <= end)
-        let Some(dt) = pstr(g, cw, "dateModified") else {
+        let Some(dt) = g.prop(cw, "dateModified").str() else {
             continue;
         };
         let dt_ms = parse_ms(dt);
@@ -117,14 +117,22 @@ pub fn run(
 
     // Sort / truncate on node ids (ms desc, count desc, node asc) and render the
     // display name + date strings only for the kept rows.
-    let mut rows: Vec<(u32, usize, i64, &str)> =
-        acc.into_iter().map(|(topic, (cnt, ms, date))| (topic, cnt, ms, date)).collect();
-    rows.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.1.cmp(&a.1)).then_with(|| a.0.cmp(&b.0)));
+    let mut rows: Vec<(u32, usize, i64, &str)> = acc
+        .into_iter()
+        .map(|(topic, (cnt, ms, date))| (topic, cnt, ms, date))
+        .collect();
+    rows.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.0.cmp(&b.0))
+    });
     rows.truncate(limit);
     rows.into_iter()
         .map(|(topic, cnt, _ms, date)| {
-            let name =
-                pstr(g, topic, "label").or_else(|| pstr(g, topic, "uri")).unwrap_or("?").to_string();
+            let name = g.prop(topic, "label").str()
+                .or_else(|| g.prop(topic, "uri").str())
+                .unwrap_or("?")
+                .to_string();
             (name, cnt, date.to_string())
         })
         .collect()
@@ -210,8 +218,16 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                ("Globex".to_string(), 2, "2012-01-01T10:40:00.000Z".to_string()),
-                ("Acme Corp".to_string(), 3, "2012-01-01T10:20:00.000Z".to_string()),
+                (
+                    "Globex".to_string(),
+                    2,
+                    "2012-01-01T10:40:00.000Z".to_string()
+                ),
+                (
+                    "Acme Corp".to_string(),
+                    3,
+                    "2012-01-01T10:20:00.000Z".to_string()
+                ),
                 (
                     "http://dbpedia.org/resource/Hidden".to_string(),
                     1,
@@ -228,8 +244,16 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                ("Globex".to_string(), 2, "2012-01-01T10:40:00.000Z".to_string()),
-                ("Acme Corp".to_string(), 3, "2012-01-01T10:20:00.000Z".to_string()),
+                (
+                    "Globex".to_string(),
+                    2,
+                    "2012-01-01T10:40:00.000Z".to_string()
+                ),
+                (
+                    "Acme Corp".to_string(),
+                    3,
+                    "2012-01-01T10:20:00.000Z".to_string()
+                ),
             ]
         );
     }
@@ -249,7 +273,11 @@ mod tests {
         );
         assert_eq!(
             rows,
-            vec![("Globex".to_string(), 2, "2012-01-01T10:40:00.000Z".to_string())]
+            vec![(
+                "Globex".to_string(),
+                2,
+                "2012-01-01T10:40:00.000Z".to_string()
+            )]
         );
     }
 }

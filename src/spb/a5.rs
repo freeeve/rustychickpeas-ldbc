@@ -21,26 +21,35 @@ use std::collections::HashMap;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pstr, top_k_by_count};
+use crate::props::{top_k_by_count, PropExt};
 
 /// About-targets of the given entity-type `label` ranked by how many works
 /// `category`-linked to `cat1` or `cat2` are about them. Returned as
 /// `(entity_uri, count)` ordered by count descending then uri, truncated to
 /// `limit` (the template's `LIMIT 1000`).
-pub fn run(g: &GraphSnapshot, entity_label: &str, cat1: &str, cat2: &str, limit: usize) -> Vec<(String, usize)> {
+pub fn run(
+    g: &GraphSnapshot,
+    entity_label: &str,
+    cat1: &str,
+    cat2: &str,
+    limit: usize,
+) -> Vec<(String, usize)> {
     // Resolve the entity-type node set ONCE (the `?about a {{{entityType}}}`
     // restriction is then a bitmap test, not a per-node label string lookup).
-    let (Some(entities), Some(works)) =
-        (g.nodes_with_label(entity_label), g.nodes_with_label("CreativeWork"))
-    else {
+    let (Some(entities), Some(works)) = (
+        g.nodes_with_label(entity_label),
+        g.nodes_with_label("CreativeWork"),
+    ) else {
         return Vec::new();
     };
     let mut counts: HashMap<u32, usize> = HashMap::new();
     for w in works.iter() {
-        let in_category = g.neighbors_by_type(w, Direction::Outgoing, "category").any(|c| {
-            let u = pstr(g, c, "uri");
-            u == Some(cat1) || u == Some(cat2)
-        });
+        let in_category = g
+            .neighbors_by_type(w, Direction::Outgoing, "category")
+            .any(|c| {
+                let u = g.prop(c, "uri").str();
+                u == Some(cat1) || u == Some(cat2)
+            });
         if !in_category {
             continue;
         }
@@ -53,7 +62,7 @@ pub fn run(g: &GraphSnapshot, entity_label: &str, cat1: &str, cat2: &str, limit:
     // Rank by count (node id breaks ties), then resolve uris for the kept rows only.
     top_k_by_count(counts, limit)
         .into_iter()
-        .map(|(a, n)| (pstr(g, a, "uri").unwrap_or("?").to_string(), n))
+        .map(|(a, n)| (g.prop(a, "uri").str().unwrap_or("?").to_string(), n))
         .collect()
 }
 

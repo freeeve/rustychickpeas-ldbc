@@ -31,7 +31,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::pstr;
+use crate::props::PropExt;
 
 /// SPB advanced **q18**: the `limit` most-recently-modified creative works
 /// labelled `cw_type` whose `dateModified` lies in `[after, before]`
@@ -46,10 +46,10 @@ pub fn run(g: &GraphSnapshot, cw_type: &str, after: &str, before: &str, limit: u
     let mut rows: Vec<(u32, &str)> = works
         .iter()
         .filter_map(|w| {
-            let modified = pstr(g, w, "dateModified")?;
+            let modified = g.prop(w, "dateModified").str()?;
             let keep = modified >= after
                 && modified <= before
-                && pstr(g, w, "title").is_some()
+                && g.prop(w, "title").str().is_some()
                 && g.prop(w, "liveCoverage").is_some()
                 && g.has_rel(w, Direction::Outgoing, "category")
                 && g.has_rel(w, Direction::Outgoing, "audience");
@@ -106,7 +106,10 @@ mod tests {
 
     /// Titles in result order (no sort — verifies ORDER BY DESC is applied).
     fn ordered_titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
-        works.iter().map(|&w| pstr(g, w, "title").unwrap_or("?").to_string()).collect()
+        works
+            .iter()
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
+            .collect()
     }
 
     #[test]
@@ -124,7 +127,10 @@ mod tests {
         // Full range, all bound: cwC(2013), cwB(08/2012), cwA(02/2012), cwE(2011).
         // DESC then LIMIT 2 -> the two newest.
         let hits = run(&g, "CreativeWork", "2010-01-01", "2014-12-31", 2);
-        assert_eq!(ordered_titles(&g, &hits), ["Charlie update", "Bravo update"]);
+        assert_eq!(
+            ordered_titles(&g, &hits),
+            ["Charlie update", "Bravo update"]
+        );
     }
 
     #[test]

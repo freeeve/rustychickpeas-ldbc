@@ -28,7 +28,7 @@ use std::collections::HashSet;
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pstr, top_k_by_key};
+use crate::props::{top_k_by_key, PropExt};
 
 use super::queries::node_by_uri;
 
@@ -51,7 +51,7 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
     let mut seen: HashSet<u32> = HashSet::new();
     for pred in ["about", "mentions"] {
         for w in g.neighbors_in_set(topic, Direction::Incoming, pred, cworks) {
-            if let Some(d) = pstr(g, w, "dateCreated") {
+            if let Some(d) = g.prop(w, "dateCreated").str() {
                 if seen.insert(w) {
                     out.push((w, d));
                 }
@@ -59,7 +59,10 @@ pub fn run(g: &GraphSnapshot, topic_uri: &str, limit: usize) -> Vec<u32> {
         }
     }
 
-    top_k_by_key(out, limit).into_iter().map(|(w, _)| w).collect()
+    top_k_by_key(out, limit)
+        .into_iter()
+        .map(|(w, _)| w)
+        .collect()
 }
 
 #[cfg(test)]
@@ -107,7 +110,10 @@ mod tests {
     fn orders_by_date_desc_and_excludes_other_topics() {
         let g = load_str(FIXTURE).0;
         // Newest-first over London's works; the (newer) Paris work is excluded.
-        assert_eq!(titles_in_order(&g, &run(&g, LONDON, 10)), ["Mar", "Feb", "Jan"]);
+        assert_eq!(
+            titles_in_order(&g, &run(&g, LONDON, 10)),
+            ["Mar", "Feb", "Jan"]
+        );
     }
 
     #[test]

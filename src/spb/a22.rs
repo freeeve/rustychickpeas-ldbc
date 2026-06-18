@@ -39,7 +39,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pbool, pstr};
+use crate::props::PropExt;
 
 /// Whether `node` has an outgoing `edge` satisfying the facet:
 /// * `Some(uri)` — at least one edge target carries that `uri`;
@@ -82,12 +82,12 @@ pub fn run(
     let mut out: Vec<u32> = hits
         .iter()
         .filter(|&w| {
-            let Some(created) = pstr(g, w, "dateCreated") else {
+            let Some(created) = g.prop(w, "dateCreated").str() else {
                 return false;
             };
             // Full BGP bound + the pinned facets (a `None` facet only requires the
             // property/edge to exist, matching the SPARQL's bound semantics).
-            pstr(g, w, "description").is_some()
+            g.prop(w, "description").str().is_some()
                 && g.prop(w, "liveCoverage").is_some()
                 && facet_edge(g, w, "primaryFormat", None)
                 && facet_edge(g, w, "category", category_uri)
@@ -95,7 +95,7 @@ pub fn run(
                 && folded_tag(g, w, tag_uri)
                 && after.is_none_or(|a| created >= a)
                 && before.is_none_or(|b| created <= b)
-                && live_coverage.is_none_or(|lc| pbool(g, w, "liveCoverage") == lc)
+                && live_coverage.is_none_or(|lc| g.prop(w, "liveCoverage").bool_or(false) == lc)
         })
         .collect();
     out.sort_unstable();
@@ -168,7 +168,7 @@ mod tests {
     fn titles(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
         let mut t: Vec<String> = works
             .iter()
-            .map(|&w| pstr(g, w, "title").unwrap_or("?").to_string())
+            .map(|&w| g.prop(w, "title").str().unwrap_or("?").to_string())
             .collect();
         t.sort();
         t

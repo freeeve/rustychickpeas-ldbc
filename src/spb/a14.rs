@@ -101,7 +101,7 @@ pub fn run(
 mod tests {
     use super::super::loader::load_str;
     use super::*;
-    use crate::props::pstr;
+    use crate::props::PropExt;
 
     const VIDEO: &str = "http://www.bbc.co.uk/ontologies/creativework/VideoFormat";
     const MOBILE: &str = "http://www.bbc.co.uk/ontologies/bbc/Mobile";
@@ -173,7 +173,7 @@ mod tests {
     fn uris(g: &GraphSnapshot, works: &[u32]) -> Vec<String> {
         works
             .iter()
-            .map(|&w| pstr(g, w, "uri").unwrap_or("?").to_string())
+            .map(|&w| g.prop(w, "uri").str().unwrap_or("?").to_string())
             .collect()
     }
 

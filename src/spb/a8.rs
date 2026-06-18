@@ -18,7 +18,7 @@
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use crate::props::{pstr, top_k_by_count};
+use crate::props::{top_k_by_count, PropExt};
 
 /// Topics (`tag` targets) ranked by how many works of `cw_type` with audience
 /// `audience_uri` and `dateModified` strictly within `(after, before)` tag them.
@@ -39,12 +39,12 @@ pub fn run(
         g.prop_str(w, "dateModified")
             .is_some_and(|dt| dt > after && dt < before)
             && g.neighbors_by_type(w, Direction::Outgoing, "audience")
-                .any(|a| pstr(g, a, "uri") == Some(audience_uri))
+                .any(|a| g.prop(a, "uri").str() == Some(audience_uri))
     });
     let counts = g.neighbor_counts(qualifying, Direction::Outgoing, "tag");
     top_k_by_count(counts, usize::MAX)
         .into_iter()
-        .map(|(t, n)| (pstr(g, t, "uri").unwrap_or("?").to_string(), n))
+        .map(|(t, n)| (g.prop(t, "uri").str().unwrap_or("?").to_string(), n))
         .collect()
 }
 

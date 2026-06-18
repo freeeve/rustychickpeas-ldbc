@@ -189,7 +189,7 @@ pub(crate) fn q2_tag_evolution(
         .map(|&t| {
             let n1 = c1.get(&t).copied().unwrap_or(0);
             let n2 = c2.get(&t).copied().unwrap_or(0);
-            let name = pstr(g, t, "name").unwrap_or("").to_string();
+            let name = g.prop(t, "name").str().unwrap_or("").to_string();
             (name, n1, n2, n1.abs_diff(n2))
         })
         .collect();
@@ -222,7 +222,7 @@ pub(crate) fn q7_related_topics(g: &GraphSnapshot, tag_name: &str) -> Vec<(Strin
     }
     let rows = related
         .into_iter()
-        .map(|(rt, cs)| (pstr(g, rt, "name").unwrap_or("").to_string(), cs.len()));
+        .map(|(rt, cs)| (g.prop(rt, "name").str().unwrap_or("").to_string(), cs.len()));
     top_k_by_key(rows, 100)
 }
 
@@ -248,7 +248,7 @@ pub(crate) fn q12_message_counts(
             Some(roots) => roots[start as usize],
             None => start,
         };
-        pstr(g, root, "lang")
+        g.prop(root, "lang").str()
     };
 
     // Read day/content/len from dense column slices (index by node id) instead of
@@ -266,21 +266,21 @@ pub(crate) fn q12_message_counts(
                 let i = msg as usize;
                 let day = match day_s {
                     Some(s) => s[i],
-                    None => pi64(g, msg, "day"),
+                    None => g.prop(msg, "day").i64_or(0),
                 };
                 if day <= min_day {
                     continue;
                 }
                 let content = match content_s {
                     Some(s) => s[i],
-                    None => pbool(g, msg, "content"),
+                    None => g.prop(msg, "content").bool_or(false),
                 };
                 if !content {
                     continue;
                 }
                 let len = match len_s {
                     Some(s) => s[i],
-                    None => pi64(g, msg, "len"),
+                    None => g.prop(msg, "len").i64_or(0),
                 };
                 if len >= len_thr {
                     continue;
@@ -409,7 +409,7 @@ pub(crate) fn q8_central_person(
         .collect();
     let mut msgcount: HashMap<u32, i64> = HashMap::new();
     for msg in g.neighbors_by_type(tag, Direction::Incoming, &["hasTag"]) {
-        let day = pi64(g, msg, "day");
+        let day = g.prop(msg, "day").i64_or(0);
         if day > start_day && day < end_day {
             for creator in g.neighbors_by_type(msg, Direction::Incoming, &["hasCreator"]) {
                 *msgcount.entry(creator).or_insert(0) += 1;
