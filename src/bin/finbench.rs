@@ -110,15 +110,23 @@ fn run_queries(g: &GraphSnapshot) {
     let loan_seed = max_by("Loan", "deposit");
     let investor = max_by("Person", "invest");
     let owner = max_by("Person", "own");
+    // CR1 seed: a high-degree account that actually has a blocked-medium upstream
+    // (the pattern is sparse — most accounts have none within 3 hops).
+    let cr1_seed = by_deg
+        .iter()
+        .take(500)
+        .map(|&(a, _)| a)
+        .find(|&a| !finbench::cr1(g, a, i64::MIN, i64::MAX, 10_000, false).is_empty())
+        .unwrap_or(seed);
     println!(
-        "seeds: account={seed} person={seed_person} owner={owner} card={card} loan={loan_seed} investor={investor} cycle={cyc_seed} dst={dst}"
+        "seeds: account={seed} cr1={cr1_seed} person={seed_person} owner={owner} card={card} loan={loan_seed} investor={investor} cycle={cyc_seed} dst={dst}"
     );
     let to = finbench::TruncationOrder::Descending;
     let (ws, we) = (i64::MIN, i64::MAX);
     // Result shapes (full window) — confirm non-empty before timing.
     println!(
         "  CR1:{} CR2:{} CR3:{}h CR4:{}cyc CR5:{} CR6:{} CR7:{:?} CR8:{} CR9:{:?} CR10:{} CR11:{:.0} CR12:{}",
-        finbench::cr1(g, seed, ws, we, 10_000, false).len(),
+        finbench::cr1(g, cr1_seed, ws, we, 10_000, false).len(),
         finbench::cr2(g, owner, ws, we, 10_000, false).len(),
         finbench::shortest_transfer_path(g, seed, dst, ws, we),
         cyc,
@@ -134,7 +142,7 @@ fn run_queries(g: &GraphSnapshot) {
 
     let runs = 30;
     harness::time_query("CR1 blocked-medium", runs, || {
-        finbench::cr1(g, seed, ws, we, 10_000, false).len()
+        finbench::cr1(g, cr1_seed, ws, we, 10_000, false).len()
     });
     harness::time_query("CR2 loan-gather", runs, || {
         finbench::cr2(g, owner, ws, we, 10_000, false).len()
