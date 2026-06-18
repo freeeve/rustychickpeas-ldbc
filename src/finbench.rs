@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::time::Instant;
 
-use rustychickpeas_core::{Direction, GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
+use rustychickpeas_core::{Direction, GraphBuilder, GraphSnapshot, PropertyValue};
 
 /// hashbrown's foldhash beats std's SipHash on the dense `u32` node ids these
 /// traversals insert/look-up by the thousand; use it for the hot per-query sets.
@@ -342,32 +342,19 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
 
 /// Edge timestamp (`ts`, epoch ms) at CSR position `pos`.
 fn rel_ts(g: &GraphSnapshot, pos: u32) -> i64 {
-    match g.relationship_property(pos, "ts") {
-        Some(ValueId::I64(t)) => t,
-        _ => i64::MIN,
-    }
+    g.rel_prop(pos, "ts")
+        .and_then(|p| p.i64())
+        .unwrap_or(i64::MIN)
 }
 
 /// Edge amount (`amt`) at CSR position `pos`.
 fn rel_amt(g: &GraphSnapshot, pos: u32) -> f64 {
-    g.relationship_property(pos, "amt")
-        .and_then(|v| v.to_f64())
-        .unwrap_or(0.0)
+    g.rel_prop(pos, "amt").and_then(|p| p.f64()).unwrap_or(0.0)
 }
 
-/// Read a node property (loan `amount`/`balance`, account/medium `blocked`).
-fn node_prop(g: &GraphSnapshot, node: u32, key: &str) -> Option<rustychickpeas_core::ValueId> {
-    g.property_key_from_str(key)
-        .and_then(|id| g.columns.get(&id))
-        .and_then(|c| c.get(node))
-}
-
-/// True if `medium`/`account` carries `blocked = true`.
-fn is_blocked(g: &GraphSnapshot, node: u32) -> bool {
-    matches!(
-        node_prop(g, node, "blocked"),
-        Some(rustychickpeas_core::ValueId::Bool(true))
-    )
+/// Read a node's f64 property (loan `amount` / `balance`).
+fn node_f64(g: &GraphSnapshot, node: u32, key: &str) -> Option<f64> {
+    g.prop(node, key).and_then(|p| p.f64())
 }
 
 /// TCR1-style — trace `transfer` paths (≤`max_hops`) feeding into `account`
@@ -664,12 +651,8 @@ pub fn cr2(
                     continue;
                 }
                 if loans.insert(dep.neighbor) {
-                    amt += node_prop(g, dep.neighbor, "amount")
-                        .and_then(|v| v.to_f64())
-                        .unwrap_or(0.0);
-                    bal += node_prop(g, dep.neighbor, "balance")
-                        .and_then(|v| v.to_f64())
-                        .unwrap_or(0.0);
+                    amt += node_f64(g, dep.neighbor, "amount").unwrap_or(0.0);
+                    bal += node_f64(g, dep.neighbor, "balance").unwrap_or(0.0);
                 }
             }
             if !loans.is_empty() {
@@ -948,7 +931,7 @@ pub fn cr7(
 
     // Calculate ratio (return -1.0 if no outgoing transfers)
     let in_out_ratio = if out_amount > 0.0 {
-        ((in_amount / out_amount * 1000.0).round() / 1000.0)
+        (in_amount / out_amount * 1000.0).round() / 1000.0
     } else {
         -1.0
     };
@@ -971,9 +954,7 @@ pub fn cr8(
     truncation_order: &str,
 ) -> Vec<(u32, f64, u32)> {
     // Get loan amount (for ratio calculation: inflow / loan_amount)
-    let loan_amount = node_prop(g, loan_id, "amount")
-        .and_then(|v| v.to_f64())
-        .unwrap_or(1.0);
+    let loan_amount = node_f64(g, loan_id, "amount").unwrap_or(1.0);
 
     // Find all deposit edges from the loan within the time window [start_ms, end_ms]
     let deposit_edges: Vec<(u32, f64)> = g

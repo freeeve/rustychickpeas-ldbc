@@ -61,9 +61,8 @@ fn main() {
             println!(
                 "  sample transfer {n} -> {}: ts={:?} amt={:?}",
                 r.neighbor,
-                g.relationship_property(r.pos, "ts"),
-                g.relationship_property(r.pos, "amt")
-                    .and_then(|v| v.to_f64()),
+                g.rel_prop(r.pos, "ts").and_then(|p| p.i64()),
+                g.rel_prop(r.pos, "amt").and_then(|p| p.f64()),
             );
             break;
         }
