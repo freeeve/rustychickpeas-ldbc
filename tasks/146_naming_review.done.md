@@ -83,3 +83,13 @@ empty→None like `prop_str` (113 tests confirm no regression).
 - Transitional aliases left in core (removable once LDBC fully migrates + sessions are
   in separate worktrees): `prop_str` → `prop().str()`, `relationship_property` →
   `rel_prop`.
+
+### `pstr`/`pi64`/`pbool` → core, then deleted
+"If this is such a strong use case (129+ sites), should it be in core?" — yes. Added
+`PropExt` (core `380d50c`): an extension trait on `Option<Prop>` so `g.prop(n, k)`
+reads directly — `.str()`/`.i64()`/`.bool()`/`.f64()` flatten the `and_then`, and
+`.str_or`/`.i64_or`/`.bool_or`/`.f64_or` fold in a default. The LDBC `pstr`/`pi64`/
+`pbool` helpers were then **deleted** (`f68c96e`), all ~146 call sites using the core
+API (`pstr→.str()`, `pi64→.i64_or(0)`, `pbool→.bool_or(false)`); `props` re-exports
+`PropExt` so glob importers get it free. 113 tests, all bins, no new warnings — the
+hot comparators read cleanly now (`g.prop(a,"plid").i64_or(0).cmp(&g.prop(b,"plid").i64_or(0))`).
