@@ -72,3 +72,14 @@ use `git worktree` to isolate next time). Each broke a Rust convention, not tast
 ## Status: COMPLETE
 Rename set 1 applied (core `cf2d48b`, ldbc folded into `d15180b`); weak set reviewed
 (`657e189`). Keeps documented above + in the "Keep — already idiomatic" section.
+
+## Postscript — `prop()` got the `col()` treatment (the consistent finish)
+The `col(key).i64()` decision implied the single-value reads should match: `prop_str`
+was the type-suffixed odd-one-out. So `prop(node, key)` now returns a narrowable
+`Prop` (core `b340204`), narrowed by `Prop::str()` / `.i64()` / `.bool()` / `.f64()`,
+with `Prop::value()` for the raw `ValueId` — the polars `…​.i64()` shape, symmetric
+with `Col`. LDBC `pstr`/`pi64`/`pbool` now wrap it (`1bd43a8`); `pstr` thereby folds
+empty→None like `prop_str` (113 tests confirm no regression).
+- Transitional aliases left in core (removable once LDBC fully migrates + sessions are
+  in separate worktrees): `prop_str` → `prop().str()`, `relationship_property` →
+  `rel_prop`.
