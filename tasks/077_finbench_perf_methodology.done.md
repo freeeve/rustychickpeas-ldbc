@@ -28,3 +28,10 @@ the relationship accessor's CSR position (`relationship_property(pos, key)`).
 The spec tags each TCR with choke points (truncation on hub vertices, time-window
 filtering, recursive path filtering, edge multiplicity). Note the relevant CPs per
 query — they're what the optimization pass should target.
+
+## Outcome (done)
+All four phases complete for TCR1–TCR12 (tasks 079–090). Results, the
+Rust-vs-Kùzu SF10 table, and the before/after optimization numbers are in
+[`../docs/finbench-results.md`](../docs/finbench-results.md); raw medians +
+allocation profile in `../results/finbench-sf10.txt`. Faithful results are
+pinned by `../tests/finbench_queries.rs` (exact-result assertions for all 12).
