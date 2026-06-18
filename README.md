@@ -1,11 +1,29 @@
 # rustychickpeas-ldbc
 
-Loads the **real** [LDBC SNB BI](https://ldbcouncil.org/benchmarks/snb/) SF1
-dataset into [rustychickpeas](https://github.com/freeeve/rustychickpeas) and
-times analytical queries against it. The goal is a legitimate, reproducible,
-**laptop-scale** reading of graph-analytics performance on real LDBC data.
+Loads **real** [LDBC](https://ldbcouncil.org/benchmarks/snb/) datasets into
+[rustychickpeas](https://github.com/freeeve/rustychickpeas) — a CSR / RoaringBitmap
+property-graph engine with **no query optimizer** — and times hand-coded queries
+against them. The goal is a legitimate, reproducible, **laptop-scale** reading of
+graph performance on real LDBC data.
 
-Two query families run:
+It began with SNB BI and now spans **five benchmark families**, each a thin
+`src/bin/<family>.rs` over a shared loader/harness:
+
+| Family | What runs | Validation | Status |
+|--------|-----------|------------|--------|
+| **BI** | 20 faithful analytical queries + 5 simplified patterns (SF1) | value-identical vs Kùzu on the cross-checkable subset | ✅ |
+| **Interactive (IC)** | IC1–IC14 complex + IS1–IS7 short reads (SF1) | **20/20 value-identical vs Kùzu** | ✅ |
+| **Graphalytics** | BFS · PageRank · WCC · CDLP · LCC · SSSP | **PASS vs official reference outputs** (the one family with standardized validation) | ✅ |
+| **SPB** | 30 SPARQL queries hand-translated to graph traversals (3.85 M triples) | **30/30 value-identical vs Oxigraph** | ✅ |
+| **FinBench** | 12 Transaction Complex Reads (SF10) | vs Kùzu — see [`docs/finbench-results.md`](docs/finbench-results.md) | ✅ |
+
+The same honesty caveat carries throughout: **correctness is cross-checked;
+magnitudes are preliminary** (single-threaded, often on a loaded machine, vs
+multi-threaded reference engines). Graphalytics and SPB are the strongest — they
+validate value-for-value against an independent reference (LDBC reference outputs /
+Oxigraph SPARQL), not just result shape.
+
+The **BI** binary runs two query families:
 
 - **Faithful BI queries** (`Q1`, `Q2`, …) — translations of the official
   [`ldbc/ldbc_snb_bi`](https://github.com/ldbc/ldbc_snb_bi) Cypher queries, with
@@ -45,14 +63,15 @@ parquet/object_store dependency tree resolves to versions known to build.
 | **Q19 — Interaction path** | weighted shortest path between people in two cities; edge weight = 1/(reply interactions) | location, `knows`, derived interaction weights, **dijkstra** |
 | **Q20 — Recruitment** | weighted shortest path from a company's employees to a target person; edge weight = university-cohort closeness | `workAt`, `studyAt` (`classYear`), `knows`, **dijkstra** |
 
-Twelve of the 20 BI queries. Q8, Q11, Q19, Q20 are **rustychickpeas-only** in the
-head-to-head for now (Q8 uses Neo4j pattern comprehensions; Q11/Q19/Q20 need more
-of the schema loaded on the Kùzu side).
+The table lists the first 12; **all 20 BI queries now run** (Q3/Q4/Q10/Q14–Q18
+landed after this table was written), plus the 5 simplified patterns. Q8, Q11, Q19,
+Q20 are **rustychickpeas-only** in the head-to-head for now (Q8 uses Neo4j pattern
+comprehensions; Q11/Q19/Q20 need more of the schema loaded on the Kùzu side).
 
 **These queries drove two core features.** Q11 filters `knows` edges by their
 `creationDate` — per-edge property access *during traversal*, which the neighbor
 accessors couldn't do (they return node ids, not the CSR position
-`relationship_property` needs). That gap was closed upstream by
+`rel_prop` needs). That gap was closed upstream by
 `GraphSnapshot::relationships(node, direction, type) -> RelationshipRef { …, pos }`.
 Q19/Q20 are weighted shortest paths, which drove
 `GraphSnapshot::dijkstra(source, …, weight) -> ShortestPaths` — the weight closure
@@ -65,8 +84,9 @@ artists (Rick_Springfield, Enrique_Iglesias, Freddie_Mercury), Q7 surfaces
 plausible co-occurring tags, and Q19 finds 6 city-to-city interaction paths —
 good smoke tests that the joins and weights are correct.
 
-**Still deferred:** the Forum-hierarchy queries (Q3, Q4) and the more involved
-social queries (Q10, Q14, Q15, Q16, Q17, Q18).
+The Forum-hierarchy queries (Q3, Q4) and the involved social queries (Q10, Q14–Q18)
+that were once deferred are now implemented and running (see the per-query timings
+under the IC head-to-head and `results/sf1-results.txt`).
 
 ## Results — real LDBC SF1
 
@@ -191,14 +211,76 @@ edges/properties — additive, so BI stays 20/20 identical on the rebuilt
 `db-sf1-faithful`. Only IS4 (content text, kept out of the shared faithful import
 to keep BI loads lean) is not cross-checked. Full numbers: `results/ic-sf1.txt`.
 
+## Graphalytics — `cargo run --release --bin graphalytics [dir] [name]`
+
+The one family with **standardized validation**: LDBC Graphalytics ships a
+reference output file per dataset × algorithm, so every run is a hard PASS/FAIL,
+not a shape check. All six algorithms validate green, and the runner reports
+**deterministic allocation counts** — the reliable signal, since wall-clock is
+noisy on a shared box.
+
+Real-scale, **wiki-Talk** (2.39 M nodes, 5.02 M edges), Apple M3 Max:
+
+| Algorithm | Time | Allocations | Validation |
+|-----------|-----:|------------:|------------|
+| BFS | 64 ms | 2 | PASS |
+| PageRank | 54 ms | 513 | PASS |
+| WCC | 133 ms | 18 | PASS |
+| CDLP | 170 ms | 715 | PASS |
+| LCC | 1062 ms | 268 | PASS |
+| SSSP | 6 ms | 4 | PASS¹ |
+
+¹ wiki-Talk is unweighted, so SSSP runs unit-weight with no reference there; it
+validates PASS on the weighted `example-directed`/`example-undirected` sets. The
+near-constant allocation counts (BFS 2, WCC 18, SSSP 4) reflect pre-sized working
+buffers over the CSR — there is no per-node allocation churn. Magnitudes are still
+single-threaded laptop numbers, but the PASS/FAIL column is real validation.
+
+## SPB (Semantic Publishing) — `cargo run --release --bin spb_parity`
+
+SPB is RDF/SPARQL natively; we parse the N-Triples serialization, map it to a
+property graph (IRI object → edge, literal → property, `rdf:type` → label), and
+hand-translate the SPARQL templates into Rust traversals — no triple store, no
+reasoner. The full-text (`full_text_search`) and geo queries run off two core
+indexes (an inverted index + a KD-tree) that this family drove into
+rustychickpeas-core.
+
+**30/30 value-identical vs Oxigraph.** `scripts/spb_parity.py` runs the original
+SPARQL against a local [Oxigraph](https://github.com/oxigraph/oxigraph) store over
+the *same* 3.85 M-triple extract and diffs row-for-row against our results — every
+query (q1–q9, a1–a25) MATCHES. Indicative timings (single run, M3 Max):
+
+| Query | Time | Rows | | Query | Time | Rows |
+|-------|-----:|-----:|-|-------|-----:|-----:|
+| q1 minute histogram | 1.0 ms | 9457 | | a5 about-entity | 21 ms | 108476 |
+| q9 fulltext union | 4.5 ms | 9462 | | a13 tag pairs | 40 ms | 336315 |
+| q5 date window | 5.9 ms | 7898 | | a25 relatedness | 8.6 ms | 47499 |
+
+(full 30-query table: the parity-script output + `results/spb.parity.rust.json`.)
+This is the strongest correctness signal in the suite — value-identity against an
+independent SPARQL engine, not a shape check.
+
+## FinBench
+
+Transaction-network schema (Account / `transfer` / `withdraw` / loan) with the 12
+Transaction Complex Reads (TCR1–TCR12) — fraud-tracing-shape temporal-path and
+fund-cycle queries that lean on the edge-`creationDate`-during-traversal capability
+Q11 drove. All 12 are implemented and benchmarked head-to-head against Kùzu on
+SF10; numbers, validation, and methodology live in
+[`docs/finbench-results.md`](docs/finbench-results.md).
+
 ## Roadmap
 
-1. **More faithful queries.** Q1/Q2 done. Next, in rough order of loader cost:
-   - Q3/Q9 (Forum hierarchy: `containerOf`, `hasMember`, `hasModerator`)
-   - Q12 (reply chains: `replyOf` transitive, Post `language`)
-   - Q11/Q13/Q19 (`knows` graph + `isLocatedIn`/`isPartOf` location hierarchy)
-2. **Local head-to-head** vs Kùzu/Neo4j on the same SF1 — the real comparison.
-3. **SF10** to line up with single-node academic numbers (still laptop-feasible).
+All five families are implemented and validating. Open threads:
+
+1. **SPB editorial workload** — the insert/update/delete (write) queries; blocked on
+   a core mutation/delta API (`GraphSnapshot` is currently immutable).
+2. **Expose the read primitives to other surfaces** — Python bindings
+   (`rustychickpeas-python`) and the wasm reader (`rustychickpeas-reader`).
+3. **SF10 across families** to line up with single-node academic numbers (already
+   feasible for BI/IC; the data is present).
+4. **Unloaded-machine timing pass** — every magnitude here is provisional until taken
+   on a quiet box, with the single-threaded-vs-multi-threaded asymmetry settled.
 
 ## Layout
 
@@ -214,9 +296,11 @@ scripts/download_sf1.sh # fetch + extract real SF1 from the current LDBC mirror
 results/sf1-results.txt # captured run
 ```
 
-The loader and helpers live in the library so the planned IC / Graphalytics /
-FinBench / SPB families (`docs/families.md`) can share them as thin
-`src/bin/*.rs` binaries. Run the BI binary with `cargo run --release --bin bi`.
+The loader and helpers live in the library so the IC / Graphalytics / FinBench / SPB
+families (`docs/families.md`) share them as thin `src/bin/*.rs` binaries — all five
+are implemented and wired in (`src/{interactive,graphalytics,spb,finbench}.rs` +
+`src/bin/{bi,ic,graphalytics,spb,spb_parity,finbench}.rs`). Run a family with
+`cargo run --release --bin <bi|ic|graphalytics|spb_parity|finbench>`.
 
 Query sources: official Cypher in
 [`ldbc/ldbc_snb_bi/neo4j/queries`](https://github.com/ldbc/ldbc_snb_bi/tree/main/neo4j/queries).

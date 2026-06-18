@@ -4,6 +4,13 @@ Why these families, in what order, and how they fit rustychickpeas — a CSR /
 RoaringBitmap property-graph engine with **no query optimizer**, where every
 query is a hand-coded scan + traversal + aggregation.
 
+> **Status.** This is the original planning + rationale doc. All of it has shipped:
+> tasks **001–013 are implemented and validating** (IC 20/20 vs Kùzu, Graphalytics
+> 6/6 PASS vs reference, SPB 30/30 vs Oxigraph, FinBench TCR1–12 vs Kùzu) — see the
+> [README](../README.md) results tables. Remaining open work is the SPB **editorial
+> writes** (049–051, needs a core mutation API) and exposing the read primitives to
+> the **Python / wasm** surfaces (143/144).
+
 ## Rationale (read from the SF1 head-to-head)
 
 The BI results split cleanly by query shape:
@@ -71,10 +78,10 @@ Before adding families, extract `src/lib.rs`:
 - BI stays a thin bin (`src/bin/bi.rs`) calling the lib.
 - One bin per family: `src/bin/{ic,graphalytics,finbench}.rs`.
 
-The stub modules `src/{interactive,graphalytics,finbench,spb}.rs` already sketch
-the per-family work; they are **not yet declared** in any crate root (cargo
-ignores undeclared module files, so the build stays green) and get wired in by
-`tasks/001`.
+The per-family modules `src/{interactive,graphalytics,finbench,spb}.rs` are
+implemented and declared in the crate root, each driven by a thin
+`src/bin/<family>.rs`. (They began as undeclared stubs and were wired in by
+`tasks/001`, which extracted `src/lib.rs` as described above.)
 
 ## Sequencing
 
