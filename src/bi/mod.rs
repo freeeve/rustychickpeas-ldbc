@@ -26,14 +26,14 @@ pub(crate) type Q1Row = (i64, bool, u8, u64, i64);
 /// (dense-slice fast path) by value — it is `Copy` and `Sync`, so it stays usable
 /// in the parallel scan in Q1.
 #[inline]
-pub(crate) fn col_i64(c: Option<I64Col>, n: u32) -> i64 {
+pub(crate) fn i64_or_zero(c: Option<I64Col>, n: u32) -> i64 {
     c.and_then(|c| c.get(n)).unwrap_or(0)
 }
 
 /// Read a resolved boolean column at `n` (false if absent) — the boolean analogue
-/// of [`col_i64`].
+/// of [`i64_or_zero`].
 #[inline]
-pub(crate) fn col_bool(c: Option<BoolCol>, n: u32) -> bool {
+pub(crate) fn bool_or_false(c: Option<BoolCol>, n: u32) -> bool {
     c.and_then(|c| c.get(n)).unwrap_or(false)
 }
 pub fn run() -> Result<()> {
@@ -268,9 +268,10 @@ pub fn run() -> Result<()> {
         // Q20: weighted SP over cohort graph -> [pid, dist(6dp)]
         let studyat = build_studyat(&graph);
         let study_wm = build_study_weight_map(&graph, &studyat);
-        if let (Some(co), Some(p2)) =
-            (org_by_name(&graph, "Company", "Falcon_Air"), person_by_plid(&graph, 66))
-        {
+        if let (Some(co), Some(p2)) = (
+            org_by_name(&graph, "Company", "Falcon_Air"),
+            person_by_plid(&graph, 66),
+        ) {
             let q20 = q20_recruitment(&graph, co, p2, &study_wm);
             let mut s = String::from("[");
             for (i, (p1, d)) in q20.iter().enumerate() {
@@ -518,7 +519,9 @@ pub fn run() -> Result<()> {
         q3_popular_topics(&graph, "Burma", "MusicalArtist").len()
     });
     time_query("Q4 top creators", runs, || {
-        q4_top_creators(&graph, days_from_civil(2010, 1, 29)).0.len()
+        q4_top_creators(&graph, days_from_civil(2010, 1, 29))
+            .0
+            .len()
     });
     let q10_person: i64 = std::env::var("LDBC_Q10_PERSON")
         .ok()
@@ -531,7 +534,13 @@ pub fn run() -> Result<()> {
         q14_international_dialog(&graph, "Chile", "Argentina").len()
     });
     time_query("Q15 weighted path", runs, || {
-        let _ = q15_weighted_path(&graph, 14, 16, days_from_civil(2010, 11, 1), days_from_civil(2010, 12, 1));
+        let _ = q15_weighted_path(
+            &graph,
+            14,
+            16,
+            days_from_civil(2010, 11, 1),
+            days_from_civil(2010, 12, 1),
+        );
         1
     });
     time_query("Q16 fake news", runs, || {

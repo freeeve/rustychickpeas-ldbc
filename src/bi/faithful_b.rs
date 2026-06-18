@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
 
-use super::col_i64;
+use super::i64_or_zero;
 use crate::props::*;
 
 /// Q13 — Zombies in a country. Zombies are low-activity persons (created before
@@ -71,7 +71,7 @@ pub(crate) fn q13_zombies(
             .unwrap_or(std::cmp::Ordering::Equal)
             // Tiebreak on the LDBC id (official "ORDER BY person.id"), so the
             // top-100 cut matches reference engines at like-ratio ties.
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
@@ -178,8 +178,8 @@ pub(crate) fn q19_interaction_path(
         a.2.partial_cmp(&b.2)
             .unwrap_or(std::cmp::Ordering::Equal)
             // Tiebreak on LDBC ids (official ORDER BY) so the top-20 cut matches Kùzu.
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
-            .then(col_i64(plid_col, a.1).cmp(&col_i64(plid_col, b.1)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.1).cmp(&i64_or_zero(plid_col, b.1)))
     });
     results.truncate(20);
     results
@@ -294,7 +294,7 @@ pub(crate) fn q20_recruitment(
         a.1.partial_cmp(&b.1)
             .unwrap_or(std::cmp::Ordering::Equal)
             // Tiebreak on the LDBC id (official ORDER BY) so the top-20 matches Kùzu.
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     results.truncate(20);
     results
@@ -332,8 +332,8 @@ pub(crate) fn q18_friend_recommendation(g: &GraphSnapshot, tag_name: &str) -> Ve
     let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
-            .then(col_i64(plid_col, a.1).cmp(&col_i64(plid_col, b.1)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.1).cmp(&i64_or_zero(plid_col, b.1)))
     });
     rows.truncate(20);
     rows
@@ -418,7 +418,7 @@ pub(crate) fn q14_international_dialog(
                 if lc_c2[&p2].contains(&p1) {
                     score += 1;
                 }
-                let (pa, pb) = (col_i64(plid_col, p1), col_i64(plid_col, p2));
+                let (pa, pb) = (i64_or_zero(plid_col, p1), i64_or_zero(plid_col, p2));
                 let cand = (score, pa, pb, p1, p2);
                 best = Some(match best {
                     Some(b) if (b.0, -b.1, -b.2) >= (score, -pa, -pb) => b,
@@ -432,8 +432,8 @@ pub(crate) fn q14_international_dialog(
     }
     rows.sort_by(|a, b| {
         b.3.cmp(&a.3)
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
-            .then(col_i64(plid_col, a.1).cmp(&col_i64(plid_col, b.1)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.1).cmp(&i64_or_zero(plid_col, b.1)))
     });
     rows.truncate(100);
     rows

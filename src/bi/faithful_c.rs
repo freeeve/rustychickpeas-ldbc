@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-use super::col_i64;
+use super::i64_or_zero;
 use super::faithful_b::person_by_plid;
 use crate::props::*;
 
@@ -58,7 +58,7 @@ pub(crate) fn q16_fake_news(
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(20);
     rows
@@ -126,7 +126,7 @@ pub(crate) fn q10_experts(
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
             .then(a.1.cmp(&b.1))
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(100);
     rows

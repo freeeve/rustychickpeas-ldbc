@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
 
-use super::{col_bool, col_i64, Q1Row};
+use super::{bool_or_false, i64_or_zero, Q1Row};
 use crate::props::*;
 
 type Q1Groups = hashbrown::HashMap<(i64, bool, u8), (u64, i64)>;
@@ -43,7 +43,7 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             let i = msg as usize;
             let day = match day_s {
                 Some(s) => s[i],
-                None => col_i64(day_col, msg),
+                None => i64_or_zero(day_col, msg),
             };
             if day >= cutoff_day {
                 return acc;
@@ -51,14 +51,14 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             acc.1 += 1;
             let has_content = match content_s {
                 Some(s) => s[i],
-                None => col_bool(content_col, msg),
+                None => bool_or_false(content_col, msg),
             };
             if !has_content {
                 return acc;
             }
             let len = match len_s {
                 Some(s) => s[i],
-                None => col_i64(len_col, msg),
+                None => i64_or_zero(len_col, msg),
             };
             let cat: u8 = if len < 40 {
                 0
@@ -71,7 +71,7 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             };
             let year = match year_s {
                 Some(s) => s[i],
-                None => col_i64(year_col, msg),
+                None => i64_or_zero(year_col, msg),
             };
             let e = acc.0.entry((year, is_comment, cat)).or_insert((0, 0));
             e.0 += 1;
@@ -150,7 +150,7 @@ pub(crate) fn q2_tag_evolution(
                 |mut acc, msg| {
                     let day = match day_s {
                         Some(s) => s[msg as usize],
-                        None => col_i64(day_col, msg),
+                        None => i64_or_zero(day_col, msg),
                     };
                     let in1 = w1_lo <= day && day < w1_hi;
                     let in2 = w2_lo <= day && day < w2_hi;
@@ -340,7 +340,7 @@ pub(crate) fn q5_active_posters(
     let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.4.cmp(&a.4)
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
@@ -385,7 +385,7 @@ pub(crate) fn q6_authoritative(g: &GraphSnapshot, tag_name: &str) -> Vec<(u32, u
     let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
@@ -439,7 +439,7 @@ pub(crate) fn q8_central_person(
     rows.sort_by(|a, b| {
         (b.1 + b.2)
             .cmp(&(a.1 + a.2))
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
@@ -525,7 +525,7 @@ pub(crate) fn q9_thread_initiators(
     let day_at = |n: u32| -> i64 {
         match day_s {
             Some(s) => s[n as usize],
-            None => col_i64(day_col, n),
+            None => i64_or_zero(day_col, n),
         }
     };
     if let Some(posts) = g.nodes_with_label("Post") {
@@ -563,7 +563,7 @@ pub(crate) fn q9_thread_initiators(
     let plid_col = g.col("plid").map(|c| c.i64());
     rows.sort_by(|a, b| {
         b.2.cmp(&a.2)
-            .then(col_i64(plid_col, a.0).cmp(&col_i64(plid_col, b.0)))
+            .then(i64_or_zero(plid_col, a.0).cmp(&i64_or_zero(plid_col, b.0)))
     });
     rows.truncate(100);
     rows
