@@ -4,13 +4,16 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use rustychickpeas_core::{GraphSnapshot, ValueId};
+use rustychickpeas_core::GraphSnapshot;
 
 /// Sort a `node -> count` histogram (e.g. from `GraphSnapshot::neighbor_counts`) by
 /// count descending, node id ascending on ties, and keep the top `limit` — the
 /// selector behind the group-by-count queries. Takes any `(node, count)` iterable
 /// so it accepts either hashbrown's or std's `HashMap`.
-pub fn top_k_by_count(counts: impl IntoIterator<Item = (u32, usize)>, limit: usize) -> Vec<(u32, usize)> {
+pub fn top_k_by_count(
+    counts: impl IntoIterator<Item = (u32, usize)>,
+    limit: usize,
+) -> Vec<(u32, usize)> {
     top_k_by_key(counts, limit)
 }
 
@@ -19,7 +22,10 @@ pub fn top_k_by_count(counts: impl IntoIterator<Item = (u32, usize)>, limit: usi
 /// alongside the row id (a `dateModified` string, a score, a distinct-day count, …);
 /// the id is itself any `Ord` — a dense node id for the per-node queries, or a
 /// resolved uri / type-name `String` for the queries that group by label.
-pub fn top_k_by_key<T: Ord, K: Ord>(rows: impl IntoIterator<Item = (T, K)>, limit: usize) -> Vec<(T, K)> {
+pub fn top_k_by_key<T: Ord, K: Ord>(
+    rows: impl IntoIterator<Item = (T, K)>,
+    limit: usize,
+) -> Vec<(T, K)> {
     let mut rows: Vec<(T, K)> = rows.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     rows.truncate(limit);
@@ -41,7 +47,10 @@ pub struct TopK<T: Ord> {
 impl<T: Ord> TopK<T> {
     /// A top-`k` accumulator (keeps the `k` largest items offered).
     pub fn new(k: usize) -> Self {
-        TopK { k, heap: BinaryHeap::with_capacity(k + 1) }
+        TopK {
+            k,
+            heap: BinaryHeap::with_capacity(k + 1),
+        }
     }
 
     /// Offer `item`; kept iff it ranks among the `k` largest seen so far (when
@@ -121,21 +130,15 @@ pub fn parse_ms(s: &str) -> i64 {
 }
 
 pub fn pi64(g: &GraphSnapshot, n: u32, k: &str) -> i64 {
-    match g.prop(n, k) {
-        Some(ValueId::I64(v)) => v,
-        _ => 0,
-    }
+    g.prop(n, k).and_then(|p| p.i64()).unwrap_or(0)
 }
 
 pub fn pbool(g: &GraphSnapshot, n: u32, k: &str) -> bool {
-    matches!(g.prop(n, k), Some(ValueId::Bool(true)))
+    g.prop(n, k).and_then(|p| p.bool()).unwrap_or(false)
 }
 
 pub fn pstr<'a>(g: &'a GraphSnapshot, n: u32, k: &str) -> Option<&'a str> {
-    match g.prop(n, k) {
-        Some(ValueId::Str(s)) => g.resolve_string(s),
-        _ => None,
-    }
+    g.prop(n, k).and_then(|p| p.str())
 }
 
 /// Minimal JSON string escaper (enough for LDBC tag/place names).
@@ -165,8 +168,11 @@ mod tests {
         for (s, id) in [(5, 10u32), (5, 3), (5, 7), (1, 1)] {
             top.push((s, Reverse(id)));
         }
-        let got: Vec<(i32, u32)> =
-            top.into_sorted_desc().into_iter().map(|(s, Reverse(id))| (s, id)).collect();
+        let got: Vec<(i32, u32)> = top
+            .into_sorted_desc()
+            .into_iter()
+            .map(|(s, Reverse(id))| (s, id))
+            .collect();
         assert_eq!(got, vec![(5, 3), (5, 7)]);
     }
 

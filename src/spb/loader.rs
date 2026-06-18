@@ -307,11 +307,8 @@ mod tests {
 
         // Typed literals land as their native column types.
         let london = place.iter().next().unwrap();
-        assert_eq!(g.prop(london, "lat").and_then(|v| v.to_f64()), Some(51.5));
-        assert!(matches!(
-            g.prop(london, "views"),
-            Some(rustychickpeas_core::ValueId::I64(42))
-        ));
+        assert_eq!(g.prop(london, "lat").and_then(|v| v.f64()), Some(51.5));
+        assert_eq!(g.prop(london, "views").and_then(|v| v.i64()), Some(42));
     }
 
     #[test]
