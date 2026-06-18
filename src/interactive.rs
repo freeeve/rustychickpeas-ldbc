@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use rustychickpeas_core::{Column, Direction, GraphSnapshot, ValueId};
+use rustychickpeas_core::{Col, Direction, GraphSnapshot, I64Col};
 
 use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::loader::load_graph_opts;
@@ -660,16 +660,11 @@ pub fn ic10_friend_recommend(g: &GraphSnapshot, person: u32, month: i64) -> Vec<
         .collect();
     let posts = g.nodes_with_label("Post");
     let reach = g.neighborhood(person, Direction::Outgoing, "knows", 2..=2);
-    // Hoist the bmon/bdom (birthday filter, read per FoF) and plid (sort key)
-    // columns so each read is a direct column lookup, not pi64 re-resolving the key.
-    let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
+    // Hoist the bmon/bdom (birthday filter, read per FoF) and plid (sort key) i64
+    // columns so each read is a direct dense-slice index, not re-resolving the key.
+    let col = |k: &str| g.col(k).map(Col::i64);
     let (bmon_c, bdom_c, plid_c) = (col("bmon"), col("bdom"), col("plid"));
-    let rd = |c: Option<&Column>, n: u32| -> i64 {
-        match c.and_then(|col| col.get(n)) {
-            Some(ValueId::I64(v)) => v,
-            _ => 0,
-        }
-    };
+    let rd = |c: Option<I64Col>, n: u32| -> i64 { c.and_then(|c| c.get(n)).unwrap_or(0) };
     // Top 10 by (score desc, plid asc) in a heap; plid resolved once per FoF.
     use std::cmp::Reverse;
     let mut top = TopK::new(10);

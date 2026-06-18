@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
+use rustychickpeas_core::{Col, Direction, GraphSnapshot};
 
 use super::i64_or_zero;
 use crate::props::*;
@@ -202,18 +202,13 @@ pub(crate) fn build_studyat(g: &GraphSnapshot) -> HashMap<u32, Vec<(u32, i64)>> 
     let mut m: HashMap<u32, Vec<(u32, i64)>> = HashMap::new();
     // Hoist the edge `cy` (classYear) column once instead of resolving the key
     // per studyAt edge.
-    let cy_col = g
-        .property_key_from_str("cy")
-        .and_then(|id| g.rel_columns.get(&id));
+    let cy_col = g.rel_col("cy").map(Col::i64);
     if let Some(persons) = g.nodes_with_label("Person") {
         for p in persons.iter() {
             let recs: Vec<(u32, i64)> = g
                 .relationships(p, Direction::Outgoing, &["studyAt"])
                 .map(|r| {
-                    let cy = match cy_col.and_then(|c| c.get(r.pos)) {
-                        Some(ValueId::I64(y)) => y,
-                        _ => 0,
-                    };
+                    let cy = cy_col.and_then(|c| c.get(r.pos)).unwrap_or(0);
                     (r.neighbor, cy)
                 })
                 .collect();

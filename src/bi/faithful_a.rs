@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rustychickpeas_core::{Direction, GraphSnapshot, ValueId};
+use rustychickpeas_core::{Col, Direction, GraphSnapshot};
 
 use super::{bool_or_false, i64_or_zero, Q1Row};
 use crate::props::*;
@@ -253,11 +253,9 @@ pub(crate) fn q12_message_counts(
 
     // Read day/content/len from dense column slices (index by node id) instead of
     // re-resolving the property key on every one of millions of rows.
-    let col = |k: &str| g.property_key_from_str(k).and_then(|id| g.columns.get(&id));
-    let (day_col, content_col, len_col) = (col("day"), col("content"), col("len"));
-    let day_s = day_col.and_then(|c| c.as_i64_slice());
-    let len_s = len_col.and_then(|c| c.as_i64_slice());
-    let content_s = content_col.and_then(|c| c.as_bool_slice());
+    let day_s = g.col("day").map(Col::i64).and_then(|c| c.as_slice());
+    let len_s = g.col("len").map(Col::i64).and_then(|c| c.as_slice());
+    let content_s = g.col("content").map(Col::bool).and_then(|c| c.as_slice());
 
     let mut per_person: HashMap<u32, u64> = HashMap::new();
     for label in ["Post", "Comment"] {
@@ -472,18 +470,15 @@ pub(crate) fn q11_friend_triangles(
     // Hoist the edge `kd` (creationDate) column once; the traversal reads it for
     // every knows edge, so index it by CSR position instead of re-resolving the
     // property key per edge.
-    let kd_col = g
-        .property_key_from_str("kd")
-        .and_then(|id| g.rel_columns.get(&id));
+    let kd_col = g.rel_col("kd").map(Col::i64);
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
     for &a in &in_country {
         for e in g.relationships(a, Direction::Outgoing, &["knows"]) {
             if !in_country.contains(&e.neighbor) {
                 continue;
             }
-            let kd = match kd_col.and_then(|c| c.get(e.pos)) {
-                Some(ValueId::I64(d)) => d,
-                _ => continue,
+            let Some(kd) = kd_col.and_then(|c| c.get(e.pos)) else {
+                continue;
             };
             if kd >= start_day && kd <= end_day {
                 adj.entry(a).or_default().insert(e.neighbor);
