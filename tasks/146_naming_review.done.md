@@ -56,14 +56,19 @@ use `git worktree` to isolate next time). Each broke a Rust convention, not tast
 - `TopK::push` (matches `Vec`/`BinaryHeap`), `into_sorted_desc` (`into_` consuming
   conversion).
 
-## Optional — weak / judgment (revisit AFTER rename set 1)
-- `pstr` / `pi64` / `pbool` (LDBC) → `prop_str` / `prop_i64` / `prop_bool`. Cryptic
-  abbreviations, but they're terse hot-loop locals that also **default**
-  (`pi64`→0, `pbool`→false), so not pure renames of core `prop_str`. Fold in only for
-  full property-read uniformity; large call-site churn. Medium.
-- `follow` → `follow_path` — clearer it walks a fixed path of steps. Weak.
-- `TopK::new(k)` → `with_limit(k)` — `new(k)` doesn't say what `k` is. Weak.
-- `col_i64` / `col_bool` (BI) → `i64_or_zero` / `bool_or_false` — honest about the
-  `0`/`false` fallback now that core owns `col().i64()`. Weak.
-- `top_k_by_key` — `_by_key` without a closure mildly clashes with `sort_by_key`;
-  acceptable as-is.
+## Weak / judgment — reviewed ✅ (1 applied, 4 kept)
+- **`col_i64` / `col_bool` (BI) → `i64_or_zero` / `bool_or_false`** — APPLIED
+  (`657e189`). Reads honestly (falls back to 0/false, like `unwrap_or`) and stops
+  colliding in spelling with the core `col().i64()` chain.
+- `pstr` / `pi64` / `pbool` (LDBC) — KEEP. `prop_str` would clash with the new core
+  `g.prop_str` method (different empty-string semantics); `prop_i64`/`prop_bool`
+  wouldn't convey the `0`/`false` defaulting any better than the terse name. Big
+  churn, real downsides — not actually more rusty.
+- `TopK::new(k)` — KEEP. `new(required_arg)` is idiomatic (`Mutex::new`, `Cell::new`,
+  `NonZero::new`); `with_limit` is just more verbose.
+- `follow` — KEEP. Terse and the `steps` arg is self-evident; `follow_path` is taste.
+- `top_k_by_key` — KEEP. Minor `_by_` connotation, acceptable.
+
+## Status: COMPLETE
+Rename set 1 applied (core `cf2d48b`, ldbc folded into `d15180b`); weak set reviewed
+(`657e189`). Keeps documented above + in the "Keep — already idiomatic" section.
