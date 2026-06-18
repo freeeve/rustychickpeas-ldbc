@@ -74,14 +74,14 @@ def q2_tag_evolution_native(g, date0_day: int, class_name: str):
         .where("day", "<", date0_day + 200)
         .bin("day", [w1_hi])  # day_bin 0 = window 1, 1 = window 2
         .through("hasTag", Direction.Outgoing)
+        .only_neighbors(list(qualifying))  # count only this class's tags, in core
         .run()
     )
 
     c1, c2 = {}, {}
     for r in res.rows:
         t = r["neighbor"]
-        if t in qualifying:
-            (c1 if r["day_bin"] == 0 else c2)[t] = r["count"]
+        (c1 if r["day_bin"] == 0 else c2)[t] = r["count"]
 
     rows = []
     for t in qualifying:
