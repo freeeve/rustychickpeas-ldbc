@@ -673,9 +673,10 @@ pub fn cr5(
     start_ms: i64,
     end_ms: i64,
     truncation_limit: u32,
-    _truncation_order: &str,
+    truncation_order: &str,
 ) -> Vec<Vec<u32>> {
     let mut all_paths = Vec::new();
+    let desc = truncation_order.eq_ignore_ascii_case("desc");
 
     // Find accounts owned by this person via "own" edges (person -> account)
     for r in g.relationships(person, Direction::Outgoing, "own") {
@@ -695,16 +696,24 @@ pub fn cr5(
             &mut all_paths,
             0,
             truncation_limit,
+            desc,
         );
     }
 
-    // Sort by path length descending
+    // Per the spec, parallel src->dst edges form one path; collapsing edges by
+    // neighbor (below) makes each node-sequence unique, but dedup defensively
+    // before the length sort so the result is a true set of traces.
+    all_paths.sort();
+    all_paths.dedup();
     all_paths.sort_by(|a, b| b.len().cmp(&a.len()));
     all_paths
 }
 
 /// DFS helper for cr5: explores transfer paths from a node with time-window,
-/// strictly increasing timestamp, and cycle constraints.
+/// strictly increasing timestamp, and cycle constraints. Parallel edges to the
+/// same neighbor are collapsed to their earliest in-window timestamp — the
+/// least-restrictive choice, which is the faithful test for "an ascending
+/// trace to that neighbor exists" and treats them as one path (spec note).
 #[allow(clippy::too_many_arguments)]
 fn cr5_dfs(
     g: &GraphSnapshot,
@@ -717,25 +726,34 @@ fn cr5_dfs(
     out: &mut Vec<Vec<u32>>,
     depth: u32,
     truncation_limit: u32,
+    desc: bool,
 ) {
     // Stop at max 3 hops (edges)
     if depth >= 3 {
         return;
     }
 
-    // Collect valid outgoing transfer edges: in time window, strictly after
-    // last_ts, and target not yet visited in this path
-    let mut candidates: Vec<(u32, i64)> = Vec::new();
+    // Collapse parallel transfer edges per neighbor, keeping the earliest valid
+    // timestamp (in window, strictly after last_ts, target not on this path).
+    let mut by_neighbor: HashMap<u32, i64> = HashMap::new();
     for r in g.relationships(node, Direction::Outgoing, "transfer") {
         let ts = rel_ts(g, r.pos);
         if ts >= start_ms && ts <= end_ms && ts > last_ts && !visited.contains(&r.neighbor) {
-            candidates.push((r.neighbor, ts));
+            by_neighbor
+                .entry(r.neighbor)
+                .and_modify(|t| *t = (*t).min(ts))
+                .or_insert(ts);
         }
     }
+    let mut candidates: Vec<(u32, i64)> = by_neighbor.into_iter().collect();
 
-    // Apply truncation: sort by timestamp ascending, then keep top N edges
+    // Apply truncation: sort by timestamp in the requested order, keep top N.
     if truncation_limit > 0 && candidates.len() > truncation_limit as usize {
-        candidates.sort_by_key(|(_, ts)| *ts);
+        if desc {
+            candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        } else {
+            candidates.sort_by_key(|(_, ts)| *ts);
+        }
         candidates.truncate(truncation_limit as usize);
     }
 
@@ -757,6 +775,7 @@ fn cr5_dfs(
             out,
             depth + 1,
             truncation_limit,
+            desc,
         );
 
         path.pop();
