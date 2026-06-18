@@ -7,7 +7,7 @@
 //! algorithms take a `directed` flag (forward rels = outgoing for directed, both
 //! for undirected).
 
-use rustychickpeas_core::{Direction, GraphSnapshot};
+use rustychickpeas_core::{Direction, GraphSnapshot, PropExt};
 
 pub mod load;
 pub mod validate;
@@ -62,9 +62,7 @@ pub fn bfs(g: &GraphSnapshot, source: u32, directed: bool) -> Vec<i64> {
 pub fn sssp(g: &GraphSnapshot, source: u32, directed: bool, weighted: bool) -> Vec<f64> {
     let sp = g.dijkstra(source, fwd(directed), &[] as &[&str], None, |_from, rel| {
         if weighted {
-            g.rel_prop(rel.pos, "weight")
-                .and_then(|v| v.to_f64())
-                .unwrap_or(1.0)
+            g.rel_prop(rel.pos, "weight").f64_or(1.0)
         } else {
             1.0
         }
