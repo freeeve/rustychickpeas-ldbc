@@ -40,6 +40,8 @@ Transaction-network schema (Account / transfer / withdraw / loan) with
 temporal-path and fund-cycle queries (fraud-tracing shape). Plays to traversal
 strength and to the edge-`creationDate`-during-traversal capability Q11 drove.
 Heaviest lift: new schema, new Spark-based generator. See `tasks/007`–`008`.
+All 12 Transaction Complex Reads (TCR1–TCR12) are implemented and benchmarked
+head-to-head against Kùzu on SF10 — see [`finbench-results.md`](finbench-results.md).
 
 ### Tier 3 — SPB (Semantic Publishing) — feasible *and* drives two core features
 SPB is RDF/SPARQL natively, but we run it with the **same trick as BI**: parse the

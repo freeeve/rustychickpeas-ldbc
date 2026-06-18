@@ -1,0 +1,34 @@
+FinBench SF10 — 1,103,805 nodes / 8,962,710 edges (data/finbench/raw)
+Median wall-clock per query. See docs/finbench-results.md for caveats.
+
+===== RUST (cargo run --release --bin finbench, 30 runs) =====
+FinBench data/finbench/raw: 1103805 nodes, 8962710 edges in 11449 ms
+seeds: account=237519 cr1=138482 person=539169 owner=539170 card=439164 loan=1092626 investor=440226 cycle=138482 dst=234999
+CR1 blocked-medium                      5.96 ms   (result=605)
+CR2 loan-gather                         0.00 ms   (result=2)
+CR3 shortest-path                       0.75 ms   (result=2)
+CR4 3-cycle                             0.00 ms   (result=1)
+CR5 downstream-trace                    0.00 ms   (result=4)
+CR6 withdraw-after-in                   0.00 ms   (result=1)
+CR7 in-out-ratio                        0.70 ms   (result=3)
+CR8 loan-fund-trace                     0.07 ms   (result=124)
+CR9 laundering                          0.39 ms   (result=0)
+CR10 investor-sim                       0.00 ms   (result=56)
+CR11 guarantee-chain                    0.00 ms   (result=302858089)
+CR12 company-transfer                   3.03 ms   (result=0)
+
+===== KUZU (kuzu 0.11.3, kuzu/finbench_queries.py, 7 runs) =====
+DB kuzu/db-finbench-sf10
+seeds: account=4903859243276460390 dst=4790424827662065658 person=26388279077576 card=227995830647273491 loan=279505201629616671 investor=28587302363231
+  CR1 blocked-medium            5.29 ms   (rows=0)
+  CR2 loan-gather              30.42 ms   (rows=3)
+  CR3 shortest-path             5.59 ms   (rows=1)
+  CR4 3-cycle                 302.15 ms   (rows=0)
+  CR5 downstream-trace          1.85 ms   (rows=1)
+  CR6 withdraw-after-in         0.98 ms   (rows=1)
+  CR7 in-out-ratio              2.85 ms   (rows=1)
+  CR8 loan-fund-trace           1.50 ms   (rows=1)
+  CR9 laundering-loan          26.21 ms   (rows=1)
+  CR10 investor-sim             4.36 ms   (rows=20)
+  CR11 guarantee-chain          2.01 ms   (rows=1)
+  CR12 company-transfer        13.94 ms   (rows=0)
