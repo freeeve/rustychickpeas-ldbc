@@ -19,10 +19,12 @@ convention), and rename where a clearer/standard term exists.
   `as_i64`, `get_i64`); the type-free accessor + typed getter is the polars
   `column(name).i64()` shape. `I64Col`/`BoolCol` (+ `get`/`as_slice`) unchanged.
 
-## Rename set 1 — clear rusty wins (do these first)
+## Rename set 1 — clear rusty wins ✅ DONE
 
-Each breaks a Rust convention, not just taste. Apply atomically (core rename +
-client call-sites + verification) like `has_edge`→`has_rel`.
+Applied + verified (core 304 tests, ldbc 113 lib tests, all bins build). Core part:
+commit `cf2d48b`. LDBC call-sites: folded into `d15180b` (the concurrent finbench
+session's commit swept up my staged files — we share one working tree + git index;
+use `git worktree` to isolate next time). Each broke a Rust convention, not taste:
 
 1. **`NodeSet::new(RoaringBitmap)` + `new_bitset(BitVec)` → `From` impls.** `new` is
    the canonical/empty ctor in Rust (`Vec`/`String`/`HashMap`/`RoaringBitmap::new`
