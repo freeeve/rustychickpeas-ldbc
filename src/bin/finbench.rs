@@ -9,10 +9,34 @@ use std::path::Path;
 use rustychickpeas_core::{Direction, GraphSnapshot};
 use rustychickpeas_ldbc::{finbench, harness};
 
+// With `--features alloc-count`, install the counting allocator so `--alloc`
+// reports allocs/bytes per query. Default builds keep the system allocator for
+// pristine timing.
+#[cfg(feature = "alloc-count")]
+#[global_allocator]
+static GLOBAL: rustychickpeas_ldbc::alloc_count::CountingAlloc =
+    rustychickpeas_ldbc::alloc_count::CountingAlloc;
+
 fn main() {
-    let dir = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "data/finbench/raw".to_string());
+    // Optional flags mirror the IC bin: --only <id> (e.g. cr5), --repeat <n>,
+    // --alloc. The first non-flag arg is the raw/ data dir.
+    let (mut only, mut runs_override, mut alloc, mut dir) = (None, 0usize, false, None::<String>);
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--only" => only = it.next().map(|s| s.to_lowercase()),
+            "--repeat" => runs_override = it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
+            "--alloc" => alloc = true,
+            s if !s.starts_with("--") && dir.is_none() => dir = Some(s.to_string()),
+            _ => {}
+        }
+    }
+    harness::set_bench_cfg(harness::BenchCfg {
+        only,
+        runs: runs_override,
+        alloc,
+    });
+    let dir = dir.unwrap_or_else(|| "data/finbench/raw".to_string());
 
     let (g, s) = match finbench::load_finbench(Path::new(&dir)) {
         Ok(v) => v,

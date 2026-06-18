@@ -1,21 +1,40 @@
 FinBench SF10 — 1,103,805 nodes / 8,962,710 edges (data/finbench/raw)
 Median wall-clock per query. See docs/finbench-results.md for caveats.
+Rust numbers are post-optimization (tasks/077 optimize phase).
 
-===== RUST (cargo run --release --bin finbench, 30 runs) =====
-FinBench data/finbench/raw: 1103805 nodes, 8962710 edges in 11449 ms
+===== RUST TIMING (cargo run --release --bin finbench, 30 runs) =====
+FinBench data/finbench/raw: 1103805 nodes, 8962710 edges in ~11400 ms
 seeds: account=237519 cr1=138482 person=539169 owner=539170 card=439164 loan=1092626 investor=440226 cycle=138482 dst=234999
-CR1 blocked-medium                      5.96 ms   (result=605)
+CR1 blocked-medium                      0.95 ms   (result=605)
 CR2 loan-gather                         0.00 ms   (result=2)
-CR3 shortest-path                       0.75 ms   (result=2)
+CR3 shortest-path                       0.60 ms   (result=2)
 CR4 3-cycle                             0.00 ms   (result=1)
 CR5 downstream-trace                    0.00 ms   (result=4)
 CR6 withdraw-after-in                   0.00 ms   (result=1)
-CR7 in-out-ratio                        0.70 ms   (result=3)
-CR8 loan-fund-trace                     0.07 ms   (result=124)
-CR9 laundering                          0.39 ms   (result=0)
+CR7 in-out-ratio                        0.30 ms   (result=3)
+CR8 loan-fund-trace                     0.03 ms   (result=124)
+CR9 laundering                          0.23 ms   (result=0)
 CR10 investor-sim                       0.00 ms   (result=56)
 CR11 guarantee-chain                    0.00 ms   (result=302858089)
-CR12 company-transfer                   3.03 ms   (result=0)
+CR12 company-transfer                   0.00 ms   (result=0)
+
+===== RUST ALLOCATIONS (--features alloc-count --alloc; deterministic) =====
+CR1 blocked-medium                 allocs=        47  bytes=       953068  (result=605)
+CR2 loan-gather                    allocs=        16  bytes=          936  (result=2)
+CR3 shortest-path                  allocs=         0  bytes=            0  (result=2)
+CR4 3-cycle                        allocs=         5  bytes=          152  (result=1)
+CR5 downstream-trace               allocs=        25  bytes=          880  (result=4)
+CR6 withdraw-after-in              allocs=         6  bytes=         1132  (result=1)
+CR7 in-out-ratio                   allocs=        27  bytes=       868456  (result=3)
+CR8 loan-fund-trace                allocs=        55  bytes=        24036  (result=124)
+CR9 laundering                     allocs=        14  bytes=       524288  (result=0)
+CR10 investor-sim                  allocs=         9  bytes=         3208  (result=56)
+CR11 guarantee-chain               allocs=         3  bytes=           92  (result=302858089)
+CR12 company-transfer              allocs=         2  bytes=           80  (result=0)
+
+Baseline (pre-optimization) for reference: CR1 5593 allocs / 1.70 MB / 5.96 ms;
+CR7 28 / 1.08 MB / 0.70 ms; CR8 125 / 31 KB / 0.07 ms; CR9 15 / 663 KB / 0.39 ms;
+CR12 7 / 656 KB / 3.03 ms.
 
 ===== KUZU (kuzu 0.11.3, kuzu/finbench_queries.py, 7 runs) =====
 DB kuzu/db-finbench-sf10

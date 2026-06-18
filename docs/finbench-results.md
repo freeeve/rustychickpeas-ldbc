@@ -17,26 +17,29 @@ on the **same** generated dataset.
 
 | # | Query | Rust (ms) | Kùzu (ms) | Rust rows | Kùzu rows |
 |---|-------|----------:|----------:|----------:|----------:|
-| CR1  | blocked-medium upstream     | 5.96  | 5.29   | 605         | 0  |
+| CR1  | blocked-medium upstream     | 0.95  | 5.29   | 605         | 0  |
 | CR2  | loan-gather (reverse reach) | <0.01 | 30.42  | 2           | 3  |
-| CR3  | shortest transfer path      | 0.75  | 5.59   | 2 (hops)    | 1  |
+| CR3  | shortest transfer path      | 0.60  | 5.59   | 2 (hops)    | 1  |
 | CR4  | time-ordered 3-cycle        | <0.01 | 302.15 | 1           | 0  |
 | CR5  | exact transfer trace        | <0.01 | 1.85   | 4           | 1  |
 | CR6  | withdraw after many-to-one  | <0.01 | 0.98   | 1           | 1  |
-| CR7  | in/out transfer ratio       | 0.70  | 2.85   | 3           | 1  |
-| CR8  | transfer trace after loan   | 0.07  | 1.50   | 124         | 1  |
-| CR9  | laundering with loan        | 0.39  | 26.21  | (3 ratios)  | 1  |
+| CR7  | in/out transfer ratio       | 0.30  | 2.85   | 3           | 1  |
+| CR8  | transfer trace after loan   | 0.03  | 1.50   | 124         | 1  |
+| CR9  | laundering with loan        | 0.23  | 26.21  | (3 ratios)  | 1  |
 | CR10 | investor similarity         | <0.01 | 4.36   | 56          | 20 |
 | CR11 | guarantee-chain exposure    | <0.01 | 2.01   | 1 (sum)     | 1  |
-| CR12 | company-transfer aggregate  | 3.03  | 13.94  | 0           | 0  |
+| CR12 | company-transfer aggregate  | <0.01 | 13.94  | 0           | 0  |
 
-`<0.01` = the median rounded below 10 µs (single-seed CSR traversals).
+`<0.01` = the median rounded below 10 µs (single-seed CSR traversals). Rust
+numbers are **post-optimization** (see the optimization-pass section below for
+the before/after and what changed).
 
-**Summary.** Rust is at or below Kùzu's latency on every query, and 1–4 orders of
-magnitude faster on the four where Kùzu's planner struggles: CR4 (time-ordered
-3-cycle, 302 ms), CR2 (reverse-reachability, 30 ms even after unrolling the
-recursion — see caveats), CR9 (laundering join, 26 ms), CR12 (14 ms). The eight
-others are sub-6 ms on both engines.
+**Summary.** After the optimization pass, Rust is faster than Kùzu on every query
+— including CR1, where it now does 605 real results in 0.95 ms versus Kùzu's
+5.29 ms over 0 — and 1–4 orders of magnitude faster on the four where Kùzu's
+planner struggles: CR4 (time-ordered 3-cycle, 302 ms), CR2 (reverse-reachability,
+30 ms even after unrolling the recursion — see caveats), CR9 (laundering join,
+26 ms), CR12 (14 ms).
 
 ## Read these numbers with the caveats
 
@@ -52,11 +55,10 @@ not a row-for-row correctness oracle. Three things differ between the columns:
    queries are written as aggregates returning a single row (`count(*)`, `sum(...)`),
    so "Kùzu rows = 1" usually means one aggregate row, not one match.
 3. **Two Kùzu queries return 0 rows on their seed** (CR1, CR4): the seed Kùzu
-   picked has no blocked-medium upstream / no qualifying cycle. CR1 in particular
-   makes the Kùzu 5.29 ms *less* work than Rust's 5.96 ms over 605 real results —
-   so CR1 is the one row where the head-to-head is *not* in Rust's favour, and the
-   reason is that Kùzu is doing strictly less. (The Rust driver scans its top-500
-   degree pool for a seed whose CR1 is non-empty, since the pattern is sparse —
+   picked has no blocked-medium upstream / no qualifying cycle, so Kùzu does
+   strictly *less* work there than Rust — keep that in mind for CR1/CR4 even
+   though Rust is now faster on both. (The Rust driver scans its top-500 degree
+   pool for a CR1 seed whose result is non-empty, since the pattern is sparse —
    ~9.8 k of 439 k accounts qualify.)
 
 CR12 returns 0 on **both** engines — confirmed a genuine data property at SF10
@@ -94,11 +96,70 @@ Rust result is a faithful answer, not just fast:
   of source)` upstream rule, `ratio = inflow/loanAmount`; CR9: `ratioRepay=Σe1/Σe2`,
   `ratioDeposit=Σe1/Σe4`, `ratioTransfer=Σe3/Σe4` with the `-1` sentinels). No change.
 
+## Optimization pass
+
+Methodology (per `tasks/077`): allocation-count baseline (deterministic, via the
+`alloc-count` feature's counting allocator + `--alloc`) → wall-clock baseline →
+profile (`samply`) → fix → re-measure both. Allocation counts and bytes are
+load-independent, so they pinpoint per-query waste; the wall-clock confirms it.
+
+| # | time before | time after | allocs before→after | bytes before→after |
+|---|----------:|----------:|:--|:--|
+| CR1  | 5.96 ms | **0.95 ms** | 5593 → **47** | 1.70 MB → 953 KB |
+| CR2  | <0.01   | <0.01       | 33 → 16        | 1944 → 936 B |
+| CR3  | 0.75    | 0.60        | 0 → 0          | 0 |
+| CR4  | <0.01   | <0.01       | 5 → 5          | 152 B |
+| CR5  | <0.01   | <0.01       | 25 → 25        | 880 B |
+| CR6  | <0.01   | <0.01       | 6 → 6          | 1132 B |
+| CR7  | 0.70    | **0.30**    | 28 → 27        | 1.08 MB → 868 KB |
+| CR8  | 0.07    | **0.03**    | 125 → **55**   | 31 KB → 24 KB |
+| CR9  | 0.39    | **0.23**    | 15 → 14        | 663 KB → 524 KB |
+| CR10 | <0.01   | <0.01       | 9 → 9          | 3208 B |
+| CR11 | <0.01   | <0.01       | 3 → 3          | 92 B |
+| CR12 | 3.03    | **<0.01**   | 7 → **2**      | 656 KB → **80 B** |
+
+What changed (all behaviour-preserving — every query returns identical rows):
+
+- **Reused per-node buffers** (CR1, CR2, CR8): the BFS/DFS gathered each node's
+  edges into a freshly-allocated `Vec` per node. Hoisted to one reused buffer
+  that keeps its capacity — this is what collapsed CR1's 5593 allocs to 47.
+- **`select_nth_unstable` instead of full sort** (CR7, CR9, CR12): when a step
+  only truncates-by-amount/time and the kept set is then summed/aggregated
+  (order-independent), an O(n) partial selection replaces the O(n log n) sort,
+  skipped entirely when the limit doesn't bind.
+- **No per-row `String`** (CR1): the result's constant `"Medium"` type was a
+  fresh `String` per row (~605 allocs) → a `&'static str`.
+- **`NodeSet.contains` instead of a materialized `HashSet`** (CR12): the
+  company-ownership check built a `HashSet` of *every* company each call — the
+  label `NodeSet` already answers membership in O(1). That alone is the 656 KB →
+  80 B drop, and most of the 3 ms.
+- **Hoisted property/relationship-type resolution** (CR1): `rel_prop("ts")` /
+  `prop("blocked")` / `relationships(.., "transfer")` each re-resolve their key
+  through the string interner on *every* call. Profiling CR1 pointed here; using
+  the core team's hoistable `rel_col`/`col` readers and a pre-resolved
+  `RelationshipType` cut CR1 from 1.47 → 1.09 ms.
+- **foldhash for the hot sets** (CR1, CR2, CR7, CR8): `hashbrown::HashSet` (the
+  `FastSet` alias) for the dense-`u32` BFS `visited` / distinct-count sets, since
+  std's SipHash dominated once the interner lookups were gone (CR1 1.09 → 0.95 ms,
+  CR7 0.43 → 0.30 ms).
+
+The remaining bytes (CR1 953 KB, CR7 868 KB, CR9 524 KB) are the inherent
+materialization of a high-degree seed's edge list / visited frontier — a handful
+of large allocations, not per-element churn. CR3/4/5/6/10/11 were already at
+their structural floor (0–25 allocs, delegating to core Dijkstra or minimal
+BFS), so they were left as-is.
+
 ## Reproduce
 
 ```bash
 # Rust (loads raw/, runs + times all 12 CRs)
 cargo run --release --bin finbench -- data/finbench/raw
+
+# Per-query allocation counts (deterministic; counting allocator)
+cargo run --release --bin finbench --features alloc-count -- data/finbench/raw --alloc
+
+# CPU profile of one query (tight loop under samply)
+samply record -- target/release/finbench data/finbench/raw --only cr1 --repeat 20000
 
 # Kùzu reference (build the DB once, then time)
 .venv-kuzu/bin/python kuzu/finbench_import.py  data/finbench/raw kuzu/db-finbench-sf10

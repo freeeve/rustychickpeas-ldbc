@@ -16,6 +16,10 @@ use std::time::Instant;
 
 use rustychickpeas_core::{Direction, GraphBuilder, GraphSnapshot, PropertyValue, ValueId};
 
+/// hashbrown's foldhash beats std's SipHash on the dense `u32` node ids these
+/// traversals insert/look-up by the thousand; use it for the hot per-query sets.
+type FastSet<T> = hashbrown::HashSet<T>;
+
 /// Load report, mirroring the BI loader.
 pub struct Stats {
     pub nodes: u64,
@@ -539,43 +543,60 @@ pub fn cr1(
     end_ms: i64,
     truncation_limit: u32,
     truncation_order_asc: bool,
-) -> Vec<(u32, u32, u32, String)> {
+) -> Vec<(u32, u32, u32, &'static str)> {
     let mut results = Vec::new();
-    let mut visited = HashSet::new();
+    // hashbrown's foldhash is much faster than std's SipHash for the dense u32
+    // node ids this BFS inserts by the thousand.
+    let mut visited: FastSet<u32> = FastSet::default();
     visited.insert(account);
     let mut queue: VecDeque<(u32, u32, i64)> = VecDeque::new(); // (node, depth, last_ts)
     queue.push_back((account, 0, i64::MAX));
 
+    // Resolve the hot property columns and relationship types once: otherwise
+    // the `ts` read (per edge), the `blocked` check (per signIn), and each
+    // `relationships(..)` call (per node) all re-resolve their string key
+    // through the interner on every call.
+    let ts_col = g.rel_col("ts").map(|c| c.i64());
+    let blocked_col = g.col("blocked").map(|c| c.bool());
+    let transfer = g.relationship_type_from_str("transfer");
+    let signin = g.relationship_type_from_str("signIn");
+    let edge_ts = |pos: u32| ts_col.as_ref().and_then(|c| c.get(pos)).unwrap_or(i64::MIN);
+
+    // (ts, neighbor) buffer reused across BFS nodes — keeps its capacity so the
+    // per-node edge gather doesn't re-allocate, and reads each edge's ts once.
+    let mut edges: Vec<(i64, u32)> = Vec::new();
     while let Some((node, depth, last_ts)) = queue.pop_front() {
         if depth >= 3 {
             continue;
         }
         // In-window, strictly-ascending (forward) = strictly-decreasing backward.
-        let mut edges: Vec<_> = g
-            .relationships(node, Direction::Incoming, "transfer")
-            .filter(|r| {
-                let ts = rel_ts(g, r.pos);
-                ts >= start_ms && ts <= end_ms && ts < last_ts
-            })
-            .collect();
-        // Truncation on hub vertices: keep the top `truncation_limit` by time.
+        edges.clear();
+        for r in g.relationships(node, Direction::Incoming, transfer) {
+            let ts = edge_ts(r.pos);
+            if ts >= start_ms && ts <= end_ms && ts < last_ts {
+                edges.push((ts, r.neighbor));
+            }
+        }
+        // Order matters beyond truncation: each node is first-claimed in BFS
+        // order and inherits the claiming edge's ts as its `last_ts`, so the
+        // sort fixes which edge wins. The ts key is already materialized, so the
+        // sort is cheap (unlike the old rel_ts-in-comparator). Then truncate.
         if truncation_order_asc {
-            edges.sort_by_key(|r| rel_ts(g, r.pos));
+            edges.sort_unstable_by_key(|&(ts, _)| ts);
         } else {
-            edges.sort_by_key(|r| std::cmp::Reverse(rel_ts(g, r.pos)));
+            edges.sort_unstable_by_key(|&(ts, _)| std::cmp::Reverse(ts));
         }
         edges.truncate(truncation_limit as usize);
 
-        for r in edges {
-            let ts = rel_ts(g, r.pos);
-            if visited.insert(r.neighbor) {
+        for &(ts, neighbor) in &edges {
+            if visited.insert(neighbor) {
                 let dist = depth + 1;
-                for sig in g.relationships(r.neighbor, Direction::Incoming, "signIn") {
-                    if is_blocked(g, sig.neighbor) {
-                        results.push((r.neighbor, dist, sig.neighbor, "Medium".to_string()));
+                for sig in g.relationships(neighbor, Direction::Incoming, signin) {
+                    if blocked_col.as_ref().and_then(|c| c.get(sig.neighbor)) == Some(true) {
+                        results.push((neighbor, dist, sig.neighbor, "Medium"));
                     }
                 }
-                queue.push_back((r.neighbor, dist, ts));
+                queue.push_back((neighbor, dist, ts));
             }
         }
     }
@@ -597,9 +618,13 @@ pub fn cr2(
 ) -> Vec<(u32, f64, f64)> {
     let mut by_acct: HashMap<u32, (f64, f64)> = HashMap::new();
 
+    // Buffers reused across the BFS and the deposit scan so neither re-allocates
+    // per node. `rels` holds (ts, neighbor) so each edge's ts is read once.
+    let mut rels: Vec<(i64, u32)> = Vec::new();
+    let mut loans: FastSet<u32> = FastSet::default();
     for own in g.relationships(person, Direction::Outgoing, "own") {
         let owned = own.neighbor;
-        let mut visited = HashSet::new();
+        let mut visited: FastSet<u32> = FastSet::default();
         visited.insert(owned);
         let mut queue: VecDeque<(u32, u32, i64)> = VecDeque::new();
         queue.push_back((owned, 0, i64::MAX));
@@ -608,28 +633,30 @@ pub fn cr2(
             if depth >= 3 {
                 continue;
             }
-            let mut rels: Vec<_> = g
-                .relationships(node, Direction::Incoming, "transfer")
-                .collect();
+            rels.clear();
+            for r in g.relationships(node, Direction::Incoming, "transfer") {
+                rels.push((rel_ts(g, r.pos), r.neighbor));
+            }
+            // Claim order sets each node's last_ts, so sort in truncation order
+            // before truncating (the ts key is already materialized).
             if truncation_order_asc {
-                rels.sort_by_key(|r| rel_ts(g, r.pos));
+                rels.sort_unstable_by_key(|&(ts, _)| ts);
             } else {
-                rels.sort_by_key(|r| std::cmp::Reverse(rel_ts(g, r.pos)));
+                rels.sort_unstable_by_key(|&(ts, _)| std::cmp::Reverse(ts));
             }
             rels.truncate(truncation_limit as usize);
-            for r in rels {
-                let ts = rel_ts(g, r.pos);
+            for &(ts, neighbor) in &rels {
                 if ts < start_ms || ts > end_ms || ts >= last_ts {
                     continue;
                 }
-                if visited.insert(r.neighbor) {
-                    queue.push_back((r.neighbor, depth + 1, ts));
+                if visited.insert(neighbor) {
+                    queue.push_back((neighbor, depth + 1, ts));
                 }
             }
         }
 
         for &acct in visited.iter().filter(|&&a| a != owned) {
-            let mut loans = HashSet::new();
+            loans.clear();
             let (mut amt, mut bal) = (0.0, 0.0);
             for dep in g.relationships(acct, Direction::Incoming, "deposit") {
                 let ts = rel_ts(g, dep.pos);
@@ -868,15 +895,20 @@ pub fn cr7(
         }
     }
 
-    // Sort by truncation order and apply limit
-    match truncation_order {
-        TruncationOrder::Ascending => in_edges.sort_by_key(|e| e.0),
-        TruncationOrder::Descending => in_edges.sort_by(|a, b| b.0.cmp(&a.0)),
+    // Truncation only binds above the limit; below it the frontier order is
+    // irrelevant to the distinct-count + sum, so pick the top-`limit` by time
+    // with an O(n) partial selection instead of a full O(n log n) sort.
+    if in_edges.len() > truncation_limit as usize {
+        let k = truncation_limit as usize;
+        match truncation_order {
+            TruncationOrder::Ascending => in_edges.select_nth_unstable_by_key(k, |e| e.0),
+            TruncationOrder::Descending => in_edges.select_nth_unstable_by(k, |a, b| b.0.cmp(&a.0)),
+        };
+        in_edges.truncate(k);
     }
-    in_edges.truncate(truncation_limit as usize);
 
     // Aggregate transfer-in: count distinct sources, sum amounts
-    let mut in_src_set = HashSet::new();
+    let mut in_src_set: FastSet<u32> = FastSet::default();
     let mut in_amount = 0.0;
     for (_, amt, neighbor) in &in_edges {
         in_src_set.insert(*neighbor);
@@ -894,15 +926,19 @@ pub fn cr7(
         }
     }
 
-    // Sort by truncation order and apply limit
-    match truncation_order {
-        TruncationOrder::Ascending => out_edges.sort_by_key(|e| e.0),
-        TruncationOrder::Descending => out_edges.sort_by(|a, b| b.0.cmp(&a.0)),
+    if out_edges.len() > truncation_limit as usize {
+        let k = truncation_limit as usize;
+        match truncation_order {
+            TruncationOrder::Ascending => out_edges.select_nth_unstable_by_key(k, |e| e.0),
+            TruncationOrder::Descending => {
+                out_edges.select_nth_unstable_by(k, |a, b| b.0.cmp(&a.0))
+            }
+        };
+        out_edges.truncate(k);
     }
-    out_edges.truncate(truncation_limit as usize);
 
     // Aggregate transfer-out: count distinct destinations, sum amounts
-    let mut out_dst_set = HashSet::new();
+    let mut out_dst_set: FastSet<u32> = FastSet::default();
     let mut out_amount = 0.0;
     for (_, amt, neighbor) in &out_edges {
         out_dst_set.insert(*neighbor);
@@ -952,9 +988,12 @@ pub fn cr8(
     // Results: dstId -> (total_inflow, min_distance_from_loan)
     let mut results: HashMap<u32, (f64, u32)> = HashMap::new();
 
+    // (amt, neighbor) buffer reused across the BFS so the per-node edge gather
+    // doesn't re-allocate and reads each edge's amount once.
+    let mut edges: Vec<(f64, u32)> = Vec::new();
     // For each deposited account, trace transfers/withdraws up to distance 3
     for (start_account, deposit_amt) in deposit_edges {
-        let mut visited: HashSet<u32> = HashSet::new();
+        let mut visited: FastSet<u32> = FastSet::default();
         visited.insert(start_account);
 
         let mut queue: VecDeque<(u32, u32, f64)> = VecDeque::new();
@@ -985,42 +1024,36 @@ pub fn cr8(
                 .map(|r| rel_amt(g, r.pos))
                 .sum();
 
-            // Collect outgoing transfer and withdraw edges within time window
-            let mut edges: Vec<_> = g
+            // Collect outgoing transfer + withdraw edges in window as (amt,
+            // neighbor) into the reused buffer, reading each amount once.
+            edges.clear();
+            for r in g
                 .relationships(node, Direction::Outgoing, "transfer")
                 .chain(g.relationships(node, Direction::Outgoing, "withdraw"))
-                .filter(|r| {
-                    let ts = rel_ts(g, r.pos);
-                    (start_ms..=end_ms).contains(&ts)
-                })
-                .collect();
-
-            // Sort edges by amount according to truncation_order
-            if truncation_order == "DESC" {
-                edges.sort_by(|a, b| {
-                    rel_amt(g, b.pos)
-                        .partial_cmp(&rel_amt(g, a.pos))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-            } else {
-                edges.sort_by(|a, b| {
-                    rel_amt(g, a.pos)
-                        .partial_cmp(&rel_amt(g, b.pos))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+            {
+                let ts = rel_ts(g, r.pos);
+                if (start_ms..=end_ms).contains(&ts) {
+                    edges.push((rel_amt(g, r.pos), r.neighbor));
+                }
             }
 
-            // Apply truncation limit (max edges per step)
+            // Sort by amount in truncation order — claim order decides which
+            // edge first reaches (so sets the inflow/distance of) each node.
+            if truncation_order == "DESC" {
+                edges.sort_unstable_by(|a, b| {
+                    b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            } else {
+                edges.sort_unstable_by(|a, b| {
+                    a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
             edges.truncate(truncation_limit as usize);
 
             // Process edges: only follow if amount > threshold * upstream_total
-            for edge in edges {
-                let edge_amt = rel_amt(g, edge.pos);
-
-                if edge_amt > threshold * upstream_total {
-                    if visited.insert(edge.neighbor) {
-                        queue.push_back((edge.neighbor, dist + 1, edge_amt));
-                    }
+            for &(edge_amt, neighbor) in &edges {
+                if edge_amt > threshold * upstream_total && visited.insert(neighbor) {
+                    queue.push_back((neighbor, dist + 1, edge_amt));
                 }
             }
         }
@@ -1112,12 +1145,17 @@ pub fn cr9(
         }
     }
 
-    // Helper: apply truncation (sort by timestamp, then limit)
+    // Truncation keeps the top-`limit` edges by time; the ratios sum the kept
+    // edges, so their order within the kept set is irrelevant — select the
+    // top-k in O(n), and skip the work entirely when the limit doesn't bind.
     fn apply_truncation(edges: &mut Vec<(i64, f64)>, limit: usize, asc: bool) {
+        if edges.len() <= limit {
+            return;
+        }
         if asc {
-            edges.sort_by_key(|e| e.0);
+            edges.select_nth_unstable_by_key(limit, |e| e.0);
         } else {
-            edges.sort_by(|a, b| b.0.cmp(&a.0));
+            edges.select_nth_unstable_by(limit, |a, b| b.0.cmp(&a.0));
         }
         edges.truncate(limit);
     }
@@ -1158,19 +1196,6 @@ pub fn cr9(
     };
 
     (ratio_repay, ratio_deposit, ratio_transfer)
-}
-
-fn apply_truncation(edges: &mut Vec<(i64, f64)>, limit: usize, asc: bool) {
-    if asc {
-        edges.sort_by_key(|e| e.0);
-    } else {
-        edges.sort_by(|a, b| b.0.cmp(&a.0));
-    }
-    edges.truncate(limit);
-}
-
-fn round_3dp(x: f64) -> f32 {
-    ((x * 1000.0).round() / 1000.0) as f32
 }
 
 // ===== CR10 =====
@@ -1220,11 +1245,12 @@ pub fn cr12(
 ) -> Vec<(u32, f64)> {
     let mut company_account_amounts: HashMap<u32, f64> = HashMap::new();
 
-    // Pre-compute set of company nodes for O(1) ownership checks.
-    let companies: HashSet<u32> = g
-        .nodes_with_label("Company")
-        .map(|ns| ns.iter().collect())
-        .unwrap_or_default();
+    // Company nodes already form a NodeSet with O(1) `contains` — use it directly
+    // instead of materializing a HashSet of every company each call.
+    let companies = match g.nodes_with_label("Company") {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
 
     // Step 1: Find all accounts owned by the person.
     let mut person_accounts: Vec<u32> = g
@@ -1239,35 +1265,37 @@ pub fn cr12(
     }
 
     // Step 2: From each person account, find transfers to company-owned accounts.
+    // The (neighbor, amt) buffer is reused across accounts to keep its capacity.
+    let mut transfers: Vec<(u32, f64)> = Vec::new();
     for &person_account in &person_accounts {
-        // Collect outgoing transfer edges within the time window [start_ms, end_ms].
-        let mut transfers: Vec<(u32, f64)> = Vec::new();
+        transfers.clear();
         for rel in g.relationships(person_account, Direction::Outgoing, "transfer") {
             let ts = rel_ts(g, rel.pos);
             if ts >= start_ms && ts <= end_ms {
-                let amt = rel_amt(g, rel.pos);
-                transfers.push((rel.neighbor, amt));
+                transfers.push((rel.neighbor, rel_amt(g, rel.pos)));
             }
         }
 
-        // Sort by amount per truncation_order, then apply truncation limit.
-        match truncation_order {
-            TruncationOrder::Descending => {
-                transfers.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            }
-            TruncationOrder::Ascending => {
-                transfers.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            }
-        }
+        // The HashMap aggregate and final sort are order-independent, so only
+        // sort when truncation actually binds — and then by O(n) partial select.
         if transfers.len() > truncation_limit as usize {
-            transfers.truncate(truncation_limit as usize);
+            let k = truncation_limit as usize;
+            match truncation_order {
+                TruncationOrder::Descending => {
+                    transfers.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
+                }
+                TruncationOrder::Ascending => {
+                    transfers.select_nth_unstable_by(k, |a, b| a.1.partial_cmp(&b.1).unwrap());
+                }
+            };
+            transfers.truncate(k);
         }
 
         // Step 3: Verify each transfer target is company-owned and aggregate amounts.
-        for (target_account, amt) in transfers {
+        for &(target_account, amt) in &transfers {
             let is_company_owned = g
                 .relationships(target_account, Direction::Incoming, "own")
-                .any(|rel| companies.contains(&rel.neighbor));
+                .any(|rel| companies.contains(rel.neighbor));
 
             if is_company_owned {
                 *company_account_amounts.entry(target_account).or_insert(0.0) += amt;
