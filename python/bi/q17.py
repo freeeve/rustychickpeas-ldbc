@@ -72,15 +72,22 @@ def q17_information_propagation(g, tag_name: str, delta_hours: int):
         ensure(p2)
         ensure(p3)
 
+    # Index m1 by its forum so each candidate scans only the m1 entries whose forum
+    # both p2 and p3 belong to (fp2 & fp3), not the whole m1 list.
+    m1_by_forum = {}
+    for p1, f1, ms1 in m1_list:
+        m1_by_forum.setdefault(f1, []).append((p1, ms1))
+
     counts = {}  # person1 -> set of distinct message2
     for p2, p3, msg2, f2, ms2 in cand:
         if p2 == p3:
             continue
-        fp2, fp3 = pm[p2], pm[p3]
-        for p1, f1, ms1 in m1_list:
-            if (f1 != f2 and ms2 > ms1 + delta_ms
-                    and f1 in fp2 and f1 in fp3 and f2 not in pm[p1]):
-                counts.setdefault(p1, set()).add(msg2)
+        for f1 in pm[p2] & pm[p3]:
+            if f1 == f2:
+                continue
+            for p1, ms1 in m1_by_forum.get(f1, ()):
+                if ms2 > ms1 + delta_ms and f2 not in pm[p1]:
+                    counts.setdefault(p1, set()).add(msg2)
 
     rows = [(g.get_property(p, "id"), len(m)) for p, m in counts.items()]
     rows.sort(key=lambda r: (-r[1], r[0]))
