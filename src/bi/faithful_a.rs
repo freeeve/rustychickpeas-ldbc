@@ -118,17 +118,11 @@ pub(crate) fn q2_tag_evolution(
     };
 
     use hashbrown::{HashMap as FastMap, HashSet as FastSet};
-    // Tags of that class.
-    let mut qualifying: FastSet<u32> = FastSet::new();
-    if let Some(tags) = g.nodes_with_label("Tag") {
-        for t in tags.iter() {
-            if g.neighbors_by_type(t, Direction::Outgoing, "hasType")
-                .any(|n| n == target)
-            {
-                qualifying.insert(t);
-            }
-        }
-    }
+    // Tags of that class = the target TagClass's incoming hasType neighbors — one
+    // traversal instead of scanning every Tag and checking its outgoing hasType.
+    let qualifying: FastSet<u32> = g
+        .neighbors_by_type(target, Direction::Incoming, "hasType")
+        .collect();
 
     let (w1_lo, w1_hi) = (date0_day, date0_day + 100);
     let (w2_lo, w2_hi) = (date0_day + 100, date0_day + 200);
