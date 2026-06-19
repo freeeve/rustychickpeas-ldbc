@@ -15,9 +15,13 @@ import heapq
 from rustychickpeas import Direction
 
 
+_NO_NEIGHBOR = 0xFFFFFFFF  # neighbor_via sentinel for "no such neighbor"
+
+
 def _build_weights(g, start_day, end_day):
     posts = set(g.nodes_with_label("Post"))
     roots = memoryview(g.roots_via("replyOf", Direction.Outgoing))  # message -> thread root
+    creators = memoryview(g.neighbor_via("hasCreator", Direction.Incoming))  # message -> creator
     forum_fday = {}   # thread root -> its forum's fday (None if no forum)
 
     def fday_of_root(root):
@@ -33,9 +37,9 @@ def _build_weights(g, start_day, end_day):
         parent = g.first_neighbor(c, Direction.Outgoing, "replyOf")
         if parent is None:
             continue
-        cc = g.first_neighbor(c, Direction.Incoming, "hasCreator")
-        pc = g.first_neighbor(parent, Direction.Incoming, "hasCreator")
-        if cc is None or pc is None or cc == pc:
+        cc = creators[c]
+        pc = creators[parent]
+        if cc == _NO_NEIGHBOR or pc == _NO_NEIGHBOR or cc == pc:
             continue
         fday = fday_of_root(roots[c])
         if fday is not None and start_day <= fday <= end_day:
