@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16, q18, q19, q20
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q18, q19, q20
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -553,3 +553,29 @@ def test_q20_recruitment():
     studyat = q20.build_studyat(g)
     wm = q20.build_study_weight_map(g, studyat)
     assert q20.q20_recruitment(g, "Co", 66, wm) == [(1, 3.0), (2, 6.0)]
+
+
+def test_q15_weighted_path():
+    # p1(id14) knows p2(id16). p1's comment replies to p2's Post; that post's forum
+    # was created in-window -> interaction weight 1.0 (a Post). Edge weight = 1/(1+1)
+    # = 0.5, so the p1->p2 path cost is 0.5.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Forum"), (1, "Person"), (2, "Person"), (3, "Post"), (4, "Comment")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "fday", 150)
+    b.set_prop(1, "id", 14)
+    b.set_prop(2, "id", 16)
+    edges = [
+        (1, 2, "knows"), (2, 1, "knows"),
+        (0, 3, "containerOf"),               # forum contains the post
+        (2, 3, "hasCreator"),                # p2 made the post
+        (1, 4, "hasCreator"), (4, 3, "replyOf"),  # p1's comment replies to it
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q15.q15_weighted_path(g, 14, 16, 100, 200) == 0.5
+    # Unreachable target -> -1.
+    assert q15.q15_weighted_path(g, 14, 999, 100, 200) == -1.0
