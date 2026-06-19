@@ -248,7 +248,7 @@ def load_bi_graph(snapshot_path: str):
             # knows is loaded below with its creationDate (kd) edge property.
             (f"{static}/Organisation", _ref("id", "Organisation"), _ref("LocationPlaceId", "Place"), "orgPlace"),
             (f"{dynamic}/Person_workAt_Company", _ref("PersonId", "Person"), _ref("CompanyId", "Company"), "workAt"),
-            (f"{dynamic}/Person_studyAt_University", _ref("PersonId", "Person"), _ref("UniversityId", "University"), "studyAt"),
+            # studyAt is loaded below with its classYear (cy) edge property.
         ]
         total = 0
         for entity_dir, start_ref, end_ref, rel_type in edges:
@@ -276,6 +276,12 @@ def load_bi_graph(snapshot_path: str):
             Rel("knows", Ref("Person1Id", "Person"), Ref("Person2Id", "Person"), props=[Prop("kd", "kd", int)]),
             Rel("knows", Ref("Person2Id", "Person"), Ref("Person1Id", "Person"), props=[Prop("kd", "kd", int)]),
         ]))
+
+        # studyAt carrying classYear as the cy edge property (epoch year), for Q20.
+        total += _load_rels_multi(b, f"{dynamic}/Person_studyAt_University", [
+            Rel("studyAt", Ref("PersonId", "Person"), Ref("UniversityId", "University"),
+                props=[Prop("cy", "classYear", int)]),
+        ])
         s["edges"] = total
 
     return b.finalize(), s

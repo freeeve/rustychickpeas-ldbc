@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16, q18, q19
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16, q18, q19, q20
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -528,3 +528,28 @@ def test_q19_interaction_path():
     interaction = q19.build_interaction_map(g)
     assert interaction == {(2, 4): 2, (3, 4): 1}
     assert q19.q19_interaction_path(g, 100, 200, interaction) == [(1, 2, 1.5)]
+
+
+def test_q20_recruitment():
+    # e1,e2 work at Co. Both and target p2 studied at Uni: e1@2010 vs p2@2012 -> diff
+    # 2 -> weight 3; e2@2007 vs p2@2012 -> diff 5 -> weight 6. Direct knows edges, so
+    # e1 reaches p2 at 3.0, e2 at 6.0.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Company"), (1, "University"), (2, "Person"), (3, "Person"), (4, "Person")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "Co")
+    b.set_prop(2, "id", 1)
+    b.set_prop(3, "id", 2)
+    b.set_prop(4, "id", 66)
+    for u, v, rel in [(2, 0, "workAt"), (3, 0, "workAt"),
+                      (2, 4, "knows"), (4, 2, "knows"), (3, 4, "knows"), (4, 3, "knows")]:
+        b.add_relationship(u, v, rel)
+    for person, year in [(2, 2010), (3, 2007), (4, 2012)]:
+        b.add_relationship(person, 1, "studyAt")
+        b.set_relationship_prop_i64(person, 1, "studyAt", "cy", year)
+    g = b.finalize()
+
+    studyat = q20.build_studyat(g)
+    wm = q20.build_study_weight_map(g, studyat)
+    assert q20.q20_recruitment(g, "Co", 66, wm) == [(1, 3.0), (2, 6.0)]
