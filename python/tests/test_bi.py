@@ -249,22 +249,25 @@ def test_q9_thread_initiators():
     # Window [100,200]. P1's Post A (150): tree A,C1(160),C3(120) counted, C2(250)
     # pruned -> 3 msgs; P1's Post B(250) is out of window. P2's Post D(110): tree
     # D, C5(130) counted, C4(90) before window (not counted but traversed) -> 2.
+    # Contiguous node ids (the real loader assigns 0-based contiguous ids, which
+    # roots_via/bfs_distances index by): P1=0, P2=1, A=2, C1=3, C2=4, C3=5, B=6,
+    # D=7, C4=8, C5=9.
     b = GraphSnapshotBuilder()
     nodes = [
-        (1, "Person"), (2, "Person"),
-        (5, "Post"), (6, "Comment"), (7, "Comment"), (8, "Comment"),
-        (9, "Post"), (10, "Post"), (11, "Comment"), (12, "Comment"),
+        (0, "Person"), (1, "Person"),
+        (2, "Post"), (3, "Comment"), (4, "Comment"), (5, "Comment"),
+        (6, "Post"), (7, "Post"), (8, "Comment"), (9, "Comment"),
     ]
     for nid, label in nodes:
         b.add_node([label], node_id=nid)
-    b.set_prop(1, "id", 1)
-    b.set_prop(2, "id", 2)
-    for nid, day in [(5, 150), (6, 160), (7, 250), (8, 120), (9, 250), (10, 110), (11, 90), (12, 130)]:
+    b.set_prop(0, "id", 1)
+    b.set_prop(1, "id", 2)
+    for nid, day in [(2, 150), (3, 160), (4, 250), (5, 120), (6, 250), (7, 110), (8, 90), (9, 130)]:
         b.set_prop(nid, "day", day)
     edges = [
-        (1, 5, "hasCreator"), (1, 9, "hasCreator"), (2, 10, "hasCreator"),
-        (6, 5, "replyOf"), (7, 6, "replyOf"), (8, 5, "replyOf"),  # A's tree
-        (11, 10, "replyOf"), (12, 11, "replyOf"),                 # D's tree
+        (0, 2, "hasCreator"), (0, 6, "hasCreator"), (1, 7, "hasCreator"),
+        (3, 2, "replyOf"), (4, 3, "replyOf"), (5, 2, "replyOf"),  # A's tree
+        (8, 7, "replyOf"), (9, 8, "replyOf"),                     # D's tree
     ]
     for u, v, rel in edges:
         b.add_relationship(u, v, rel)
