@@ -60,33 +60,33 @@ def q17_information_propagation(g, tag_name: str, delta_hours: int):
             if p2 is not None and p3 is not None and f2 is not None:
                 cand.append((p2, p3, msg2, f2, g.get_property(msg2, "ms") or 0))
 
-    pm = {}  # person -> set of forums they belong to
-
-    def ensure(p):
-        if p not in pm:
-            pm[p] = set(g.neighbor_ids(p, Direction.Incoming, ["hasMember"]))
-
-    for p1, _, _ in m1_list:
-        ensure(p1)
-    for p2, p3, _, _, _ in cand:
-        ensure(p2)
-        ensure(p3)
+    # Forum membership, built from the FORUM side. A person's incoming hasMember is
+    # buried among their (knows-heavy) incoming edges, but each forum in play has few
+    # outgoing hasMember edges -> build forum->members for the forums that appear in
+    # m1/cand and invert. Only relevant-forum memberships are needed: the join only
+    # ever tests f1 (from m1) and f2 (from cand).
+    relevant = {f1 for _, f1, _ in m1_list} | {f2 for _, _, _, f2, _ in cand}
+    pm = {}  # person -> set of relevant forums they belong to
+    for f in relevant:
+        for p in g.neighbor_ids(f, Direction.Outgoing, ["hasMember"]):
+            pm.setdefault(p, set()).add(f)
 
     # Index m1 by its forum so each candidate scans only the m1 entries whose forum
-    # both p2 and p3 belong to (fp2 & fp3), not the whole m1 list.
+    # both p2 and p3 belong to (pm[p2] & pm[p3]), not the whole m1 list.
     m1_by_forum = {}
     for p1, f1, ms1 in m1_list:
         m1_by_forum.setdefault(f1, []).append((p1, ms1))
 
+    _EMPTY = frozenset()
     counts = {}  # person1 -> set of distinct message2
     for p2, p3, msg2, f2, ms2 in cand:
         if p2 == p3:
             continue
-        for f1 in pm[p2] & pm[p3]:
+        for f1 in pm.get(p2, _EMPTY) & pm.get(p3, _EMPTY):
             if f1 == f2:
                 continue
             for p1, ms1 in m1_by_forum.get(f1, ()):
-                if ms2 > ms1 + delta_ms and f2 not in pm[p1]:
+                if ms2 > ms1 + delta_ms and f2 not in pm.get(p1, _EMPTY):
                     counts.setdefault(p1, set()).add(msg2)
 
     rows = [(g.get_property(p, "id"), len(m)) for p, m in counts.items()]
