@@ -86,6 +86,32 @@ def _normalize_forums(entity_dir: str, out_path: str) -> int:
     return n
 
 
+def _normalize_persons(entity_dir: str, out_path: str) -> int:
+    """Write ``id,pday,pym`` for persons, deriving pday (creation day) and pym
+    (creation year*12+month) from creationDate, for BI Q13's zombie test. Returns
+    the row count."""
+    n = 0
+    with open(out_path, "w", newline="", encoding="utf-8") as out:
+        w = csv.writer(out)
+        w.writerow(["id", "pday", "pym"])
+        date_cache = {}
+        for ext_id, cdate in iter_rows(entity_dir, ["id", "creationDate"]):
+            prefix = cdate[:10]
+            pd = date_cache.get(prefix)
+            if pd is None:
+                parsed = props.parse_date(cdate)
+                if parsed is not None:
+                    year, day = parsed
+                    month = int(cdate[5:7]) if cdate[5:7].isdigit() else 1
+                    pd = (day, year * 12 + month)
+                else:
+                    pd = (0, 0)
+                date_cache[prefix] = pd
+            w.writerow([ext_id, pd[0], pd[1]])
+            n += 1
+    return n
+
+
 def _normalize_knows(entity_dir: str, out_path: str) -> int:
     """Write ``Person1Id,Person2Id,kd`` for knows edges, deriving kd (creation day)
     from creationDate so BI Q11 can date-filter knows edges. Returns the row count."""
@@ -186,7 +212,9 @@ def load_bi_graph(snapshot_path: str):
         # --- NODES, in src/loader.rs order so internal ids align ---
         s["tagclasses"] = _load_nodes(b, f"{static}/TagClass", property_columns=["id", "name"], default_label="TagClass")
         s["tags"] = _load_nodes(b, f"{static}/Tag", property_columns=["id", "name"], default_label="Tag")
-        s["persons"] = _load_nodes(b, f"{dynamic}/Person", property_columns=["id"], default_label="Person")
+        person_csv = os.path.join(tmp, "Person.csv")
+        s["persons"] = _normalize_persons(f"{dynamic}/Person", person_csv)
+        b.load_nodes_from_csv(person_csv, property_columns=["id", "pday", "pym"], default_label="Person")
         # Place/Organisation get a super-label so id-refs that span their subtypes
         # (City/Country/Continent, Company/University) resolve.
         s["places"] = _load_nodes(b, f"{static}/Place", property_columns=["id", "name"], label_columns=["type"], default_label="Place")

@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -371,3 +371,35 @@ def test_q12_message_counts():
     g = b.finalize()
 
     assert q12.q12_message_counts(g, 100, 20, ["en"]) == [(2, 1), (0, 1)]
+
+
+def test_q13_zombies():
+    # end_day=1000, end_ym=24. Z1,Z2 created before end_day with few messages ->
+    # zombies; NZ has 5 messages (>= 2 months) -> not; Late created after end_day.
+    # Z1's message is liked by Z2 (zombie) and NZ -> zlc=1, tlc=2 (score .5); Z2 has
+    # no messages -> (0,0).
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Country"), (1, "City"), (2, "Person"), (3, "Person"),
+             (4, "Person"), (5, "Person"), (6, "Post")]
+    nodes += [(n, "Post") for n in range(7, 12)]  # NZ's 5 messages
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "X")
+    for nid, ext, pday, pym in [(2, 1, 500, 12), (3, 2, 500, 12), (4, 3, 500, 23), (5, 4, 1500, 12)]:
+        b.set_prop(nid, "id", ext)
+        b.set_prop(nid, "pday", pday)
+        b.set_prop(nid, "pym", pym)
+    for nid in [6] + list(range(7, 12)):
+        b.set_prop(nid, "day", 600)
+    edges = [
+        (1, 0, "isPartOf"),
+        (2, 1, "isLocatedIn"), (3, 1, "isLocatedIn"), (4, 1, "isLocatedIn"), (5, 1, "isLocatedIn"),
+        (2, 6, "hasCreator"),                       # Z1 created M_z1
+        (3, 6, "likes"), (4, 6, "likes"),           # Z2 (zombie) + NZ like M_z1
+    ]
+    edges += [(4, n, "hasCreator") for n in range(7, 12)]  # NZ created 5 messages
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q13.q13_zombies(g, "X", 1000, 24) == [(1, 1, 2), (2, 0, 0)]
