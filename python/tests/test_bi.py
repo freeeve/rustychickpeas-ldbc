@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16, q18
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -469,3 +469,32 @@ def test_q16_fake_news():
     assert sorted((g.get_property(p, "id"), c) for p, c in ra.items()) == [(1, 2), (2, 1), (4, 1), (5, 1)]
     rb = q16.q16_param_result(g, "B", 200, 1)
     assert q16.q16_fake_news(g, ra, rb) == [(1, 2, 1)]
+
+
+def test_q18_friend_recommendation():
+    # P1,P2,P3 interested in T. M1,M2 are mutual friends. P1-P2 share {M1,M2} (=2);
+    # P2-P3 share {M1} (=1). P1-P3 are directly known, so that pair is excluded.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Tag"), (1, "Person"), (2, "Person"), (3, "Person"),
+             (4, "Person"), (5, "Person")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "T")
+    for nid, ext in [(1, 1), (2, 2), (3, 3)]:
+        b.set_prop(nid, "id", ext)
+
+    def knows(u, v):
+        b.add_relationship(u, v, "knows")
+        b.add_relationship(v, u, "knows")
+
+    for p in (1, 2, 3):
+        b.add_relationship(p, 0, "hasInterest")
+    knows(1, 4)  # P1-M1
+    knows(1, 5)  # P1-M2
+    knows(4, 2)  # M1-P2
+    knows(5, 2)  # M2-P2
+    knows(4, 3)  # M1-P3
+    knows(1, 3)  # P1-P3 directly known
+    g = b.finalize()
+
+    assert q18.q18_friend_recommendation(g, "T") == [(1, 2, 2), (2, 1, 2), (2, 3, 1), (3, 2, 1)]
