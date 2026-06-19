@@ -17,23 +17,8 @@ from rustychickpeas import Direction
 
 def _build_weights(g, start_day, end_day):
     posts = set(g.nodes_with_label("Post"))
-    roots = {}        # message -> thread root
+    roots = memoryview(g.roots_via("replyOf", Direction.Outgoing))  # message -> thread root
     forum_fday = {}   # thread root -> its forum's fday (None if no forum)
-
-    def root_of(m):
-        path = []
-        cur = m
-        while cur not in roots:
-            parent = g.first_neighbor(cur, Direction.Outgoing, "replyOf")
-            if parent is None:
-                roots[cur] = cur
-                break
-            path.append(cur)
-            cur = parent
-        r = roots[cur]
-        for n in path:
-            roots[n] = r
-        return r
 
     def fday_of_root(root):
         if root in forum_fday:
@@ -52,7 +37,7 @@ def _build_weights(g, start_day, end_day):
         pc = g.first_neighbor(parent, Direction.Incoming, "hasCreator")
         if cc is None or pc is None or cc == pc:
             continue
-        fday = fday_of_root(root_of(c))
+        fday = fday_of_root(roots[c])
         if fday is not None and start_day <= fday <= end_day:
             contrib = 1.0 if parent in posts else 0.5
             key = (cc, pc) if cc < pc else (pc, cc)
