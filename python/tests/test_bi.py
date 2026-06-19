@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4
+from bi import q1, q3, q4, q5
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -138,3 +138,30 @@ def test_q4_top_creators():
     assert top_ids == [10]
     # Post(P3), C1(P1), C2(P2) each authored one message -> all count 1, id asc.
     assert rows == [(1, 1), (2, 1), (3, 1)]
+
+
+def test_q5_active_posters():
+    # Tag T on two messages, both created by P1; M1 has 2 likes + 1 reply, M2 has
+    # 1 like. P1 aggregates msgs=2, replies=1, likes=3 -> score 2 + 2 + 30 = 34.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Tag"), (1, "Person"), (2, "Person"), (3, "Person"), (4, "Person"),
+        (5, "Post"), (6, "Comment"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "T")
+    for nid, ext in [(1, 1), (2, 2), (3, 3), (4, 4)]:
+        b.set_prop(nid, "id", ext)
+    edges = [
+        (5, 0, "hasTag"), (6, 0, "hasTag"),
+        (1, 5, "hasCreator"), (1, 6, "hasCreator"),  # P1 created both
+        (6, 5, "replyOf"),                            # M2 replies to M1
+        (2, 5, "likes"), (3, 5, "likes"),             # M1: 2 likes
+        (4, 6, "likes"),                              # M2: 1 like
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q5.q5_active_posters(g, "T") == [(1, 2, 1, 3, 34)]
