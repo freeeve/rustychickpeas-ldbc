@@ -46,7 +46,9 @@ def _specs(g, ctx):
     """Each spec: (id, description, run_fn, parity_fn). parity_fn(result) -> bool."""
     return [
         ("Q1", "posting summary",
-         lambda: q1.q1_posting_summary(g, days_from_civil(2011, 12, 1)),
+         # native = the core aggregate kernel (GIL released); loop/arrow variants
+         # stay in q1.py as readable references + a loop==arrow==native parity check.
+         lambda: q1.q1_posting_summary_native(g, days_from_civil(2011, 12, 1)),
          lambda r: _rows(r[0]) == _ref("q1.rust.json")),
         ("Q2", "tag evolution",
          lambda: q2.q2_tag_evolution_native(g, days_from_civil(2012, 6, 1), "MusicalArtist"),
