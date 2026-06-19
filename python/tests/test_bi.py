@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q18, q19, q20
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -579,3 +579,33 @@ def test_q15_weighted_path():
     assert q15.q15_weighted_path(g, 14, 16, 100, 200) == 0.5
     # Unreachable target -> -1.
     assert q15.q15_weighted_path(g, 14, 999, 100, 200) == -1.0
+
+
+def test_q17_information_propagation():
+    # m1 (by p1, in F1, tagged) and msg2 (by p3, in F2, tagged); p2's tagged comment
+    # replies to msg2. p2,p3 are F1 members; p1 is not an F2 member; msg2 is >1h after
+    # m1. So p1 "received" msg2 -> one message.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Tag"), (1, "Forum"), (2, "Forum"), (3, "Person"), (4, "Person"),
+             (5, "Person"), (6, "Post"), (7, "Post"), (8, "Comment")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "T")
+    b.set_prop(3, "id", 1)
+    b.set_prop(4, "id", 2)
+    b.set_prop(5, "id", 3)
+    b.set_prop(6, "ms", 1000)
+    b.set_prop(7, "ms", 10_000_000)
+    b.set_prop(8, "ms", 10_000_001)
+    edges = [
+        (6, 0, "hasTag"), (7, 0, "hasTag"), (8, 0, "hasTag"),
+        (1, 6, "containerOf"), (2, 7, "containerOf"),
+        (3, 6, "hasCreator"), (5, 7, "hasCreator"), (4, 8, "hasCreator"),
+        (8, 7, "replyOf"),
+        (1, 4, "hasMember"), (1, 5, "hasMember"),  # p2, p3 are F1 members
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q17.q17_information_propagation(g, "T", 1) == [(1, 1)]

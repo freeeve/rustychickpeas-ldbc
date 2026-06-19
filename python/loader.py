@@ -40,7 +40,7 @@ def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False)
     Returns the row count.
     """
     src = ["id", "creationDate", "content", "length"] + (["language"] if with_lang else [])
-    header = ["id", "year", "day", "len", "content"] + (["lang"] if with_lang else [])
+    header = ["id", "year", "day", "len", "content"] + (["lang"] if with_lang else []) + ["ms"]
     n = 0
     with open(out_path, "w", newline="", encoding="utf-8") as out:
         w = csv.writer(out)
@@ -57,10 +57,19 @@ def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False)
                 yd = parsed if parsed is not None else (0, 0)
                 date_cache[prefix] = yd
             year, day = yd
+            # Full epoch-ms timestamp (Q17 compares messages by sub-day time); the
+            # day part is memoized, only the time-of-day is parsed per row.
+            try:
+                ms = (day * 86_400_000 + int(cdate[11:13]) * 3_600_000
+                      + int(cdate[14:16]) * 60_000 + int(cdate[17:19]) * 1_000
+                      + (int(cdate[20:23]) if len(cdate) >= 23 and cdate[19] == "." else 0))
+            except (ValueError, IndexError):
+                ms = 0
             ln = int(length) if length else 0
             out_row = [ext_id, year, day, ln, 1 if content else 0]
             if with_lang:
                 out_row.append(row[4])
+            out_row.append(ms)
             w.writerow(out_row)
             n += 1
     return n
@@ -224,10 +233,10 @@ def load_bi_graph(snapshot_path: str):
 
         post_csv = os.path.join(tmp, "Post.csv")
         s["posts"] = _normalize_messages(f"{dynamic}/Post", post_csv, with_lang=True)
-        b.load_nodes_from_csv(post_csv, property_columns=["id", "year", "day", "len", "content", "lang"], default_label="Post")
+        b.load_nodes_from_csv(post_csv, property_columns=["id", "year", "day", "len", "content", "lang", "ms"], default_label="Post")
         comment_csv = os.path.join(tmp, "Comment.csv")
         s["comments"] = _normalize_messages(f"{dynamic}/Comment", comment_csv)
-        b.load_nodes_from_csv(comment_csv, property_columns=["id", "year", "day", "len", "content"], default_label="Comment")
+        b.load_nodes_from_csv(comment_csv, property_columns=["id", "year", "day", "len", "content", "ms"], default_label="Comment")
 
         s["orgs"] = _load_nodes(b, f"{static}/Organisation", property_columns=["id", "name"], label_columns=["type"], default_label="Organisation")
 
