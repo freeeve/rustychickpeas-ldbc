@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -333,3 +333,41 @@ def test_q11_friend_triangles():
     g = b.finalize()
 
     assert q11.q11_friend_triangles(g, "X", 100, 200) == 2
+
+
+def test_q12_message_counts():
+    # Window day>100, len<20, content, root-lang in {en}. A creates P1(en) + C1
+    # (reply to P1) -> 2 qualifying. P2(fr) and its reply, plus out-of-filter posts,
+    # don't count. B qualifies for nothing. Histogram: one person with 2, one with 0.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Post"), (1, "Post"), (2, "Comment"), (3, "Comment"),
+        (4, "Post"), (5, "Post"), (6, "Post"), (7, "Person"), (8, "Person"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    # (day, content, len, lang) per message
+    msgs = {
+        0: (150, 1, 10, "en"), 1: (150, 1, 10, "fr"),
+        2: (160, 1, 5, None), 3: (160, 1, 5, None),
+        4: (50, 1, 10, "en"),    # before window
+        5: (150, 0, 10, "en"),   # no content
+        6: (150, 1, 25, "en"),   # too long
+    }
+    for nid, (day, content, length, lang) in msgs.items():
+        b.set_prop(nid, "day", day)
+        b.set_prop(nid, "content", content)
+        b.set_prop(nid, "len", length)
+        if lang is not None:
+            b.set_prop(nid, "lang", lang)
+    edges = [
+        (2, 0, "replyOf"), (3, 1, "replyOf"),
+        (7, 0, "hasCreator"), (7, 2, "hasCreator"),   # A created P1, C1
+        (8, 1, "hasCreator"), (8, 3, "hasCreator"),   # B created P2, C2
+        (8, 4, "hasCreator"), (8, 5, "hasCreator"), (8, 6, "hasCreator"),
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q12.q12_message_counts(g, 100, 20, ["en"]) == [(2, 1), (0, 1)]
