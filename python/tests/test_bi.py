@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -403,3 +403,32 @@ def test_q13_zombies():
     g = b.finalize()
 
     assert q13.q13_zombies(g, "X", 1000, 24) == [(1, 1, 2), (2, 0, 0)]
+
+
+def test_q14_international_dialog():
+    # p1 (CityA, country C1) knows p2 (country C2). p1 replied to p2 (+4) and likes
+    # p2's message (+10) -> score 14. p2 didn't reciprocate.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Country"), (1, "Country"), (2, "City"), (3, "City"),
+             (4, "Person"), (5, "Person"), (6, "Post"), (7, "Comment")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "C1")
+    b.set_prop(1, "name", "C2")
+    b.set_prop(2, "name", "CityA")
+    b.set_prop(3, "name", "CityB")
+    b.set_prop(4, "id", 1)
+    b.set_prop(5, "id", 2)
+    edges = [
+        (2, 0, "isPartOf"), (3, 1, "isPartOf"),
+        (4, 2, "isLocatedIn"), (5, 3, "isLocatedIn"),
+        (4, 5, "knows"), (5, 4, "knows"),
+        (5, 6, "hasCreator"),               # p2 created M2
+        (4, 7, "hasCreator"), (7, 6, "replyOf"),  # p1's comment replies to M2 (+4)
+        (4, 6, "likes"),                    # p1 likes M2 (+10)
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q14.q14_international_dialog(g, "C1", "C2") == [(1, 2, "CityA", 14)]
