@@ -8,6 +8,7 @@ Usage:
 
 import json
 import os
+import statistics
 import sys
 import time
 
@@ -142,13 +143,18 @@ def main():
     print(f"Precompute (Q19 interaction map + Q20 cohort weights) in {setup_s:.1f}s\n")
     ctx = {"interaction": interaction, "study_wm": study_wm}
 
-    print(f"{'Query':<6}{'Description':<26}{'Result':>11}{'Time':>11}  Parity")
-    print("-" * 66)
+    runs = int(os.environ.get("LDBC_RUNS", "5"))
+    print(f"{'Query':<6}{'Description':<26}{'Result':>11}{'Time':>13}  Parity")
+    print("-" * 68)
     passed = checked = 0
     for qid, label, run_fn, parity_fn in _specs(g, ctx):
-        t = time.perf_counter()
         result = run_fn()
-        dt = (time.perf_counter() - t) * 1000
+        times = []
+        for _ in range(runs):
+            t = time.perf_counter()
+            run_fn()
+            times.append((time.perf_counter() - t) * 1000.0)
+        dt = statistics.median(times)
         try:
             ok = parity_fn(result)
             status = "ok" if ok else "FAIL"
@@ -156,11 +162,11 @@ def main():
             passed += bool(ok)
         except FileNotFoundError:
             status = "n/a"
-        print(f"{qid:<6}{label:<26}{_summary(qid, result):>11}{dt:>9.1f}ms  {status}")
+        print(f"{qid:<6}{label:<26}{_summary(qid, result):>11}{dt:>11.1f}ms  {status}")
 
-    print("-" * 66)
+    print("-" * 68)
     print(f"{passed}/{checked} queries match the Rust reference  "
-          f"(load {load_s:.1f}s + precompute {setup_s:.1f}s)")
+          f"(median of {runs}; load {load_s:.1f}s + precompute {setup_s:.1f}s)")
 
 
 if __name__ == "__main__":
