@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -432,3 +432,40 @@ def test_q14_international_dialog():
     g = b.finalize()
 
     assert q14.q14_international_dialog(g, "C1", "C2") == [(1, 2, "CityA", 14)]
+
+
+def test_q16_fake_news():
+    # Tag A on day 100: P1(x2),P2,P3,P4,P5 all posted. max_knows=1. P3 knows P4 and
+    # P5 (both same-day posters) -> excluded; P1,P2,P4,P5 pass. Tag B on day 200:
+    # only P1. Intersection -> P1 with (countA=2, countB=1).
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Tag"), (1, "Tag")]
+    nodes += [(n, "Person") for n in range(2, 7)]       # P1..P5 = nodes 2..6
+    nodes += [(n, "Post") for n in range(7, 14)]        # 7..12 tag-A, 13 tag-B
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "A")
+    b.set_prop(1, "name", "B")
+    for nid, ext in [(2, 1), (3, 2), (4, 3), (5, 4), (6, 5)]:
+        b.set_prop(nid, "id", ext)
+    for nid in range(7, 13):
+        b.set_prop(nid, "day", 100)
+    b.set_prop(13, "day", 200)
+    edges = [
+        (7, 0, "hasTag"), (8, 0, "hasTag"), (9, 0, "hasTag"),
+        (10, 0, "hasTag"), (11, 0, "hasTag"), (12, 0, "hasTag"), (13, 1, "hasTag"),
+        (2, 7, "hasCreator"), (2, 8, "hasCreator"),  # P1 made two tag-A messages
+        (3, 9, "hasCreator"), (4, 10, "hasCreator"),
+        (5, 11, "hasCreator"), (6, 12, "hasCreator"), (2, 13, "hasCreator"),
+        (2, 3, "knows"), (3, 2, "knows"),            # P1-P2
+        (4, 5, "knows"), (5, 4, "knows"),            # P3-P4
+        (4, 6, "knows"), (6, 4, "knows"),            # P3-P5
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    ra = q16.q16_param_result(g, "A", 100, 1)
+    assert sorted((g.get_property(p, "id"), c) for p, c in ra.items()) == [(1, 2), (2, 1), (4, 1), (5, 1)]
+    rb = q16.q16_param_result(g, "B", 200, 1)
+    assert q16.q16_fake_news(g, ra, rb) == [(1, 2, 1)]
