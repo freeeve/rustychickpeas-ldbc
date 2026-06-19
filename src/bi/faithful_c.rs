@@ -399,34 +399,45 @@ pub(crate) fn q17_information_propagation(
             }
         }
     }
+    // Forum membership built from the FORUM side: each forum in play has few outgoing
+    // hasMember edges, where a person's incoming hasMember is buried among their
+    // knows-heavy incoming edges. Only relevant-forum memberships are needed — the
+    // join only ever tests f1 (from m1) and f2 (from cand).
+    let relevant: HashSet<u32> = m1_list
+        .iter()
+        .map(|&(_, f, _)| f)
+        .chain(cand.iter().map(|&(_, _, _, f, _)| f))
+        .collect();
     let mut pm: HashMap<u32, HashSet<u32>> = HashMap::new();
-    let ensure = |g: &GraphSnapshot, p: u32, pm: &mut HashMap<u32, HashSet<u32>>| {
-        pm.entry(p).or_insert_with(|| {
-            g.neighbors_by_type(p, Direction::Incoming, &["hasMember"])
-                .collect()
-        });
-    };
-    for &(p1, _, _) in &m1_list {
-        ensure(g, p1, &mut pm);
+    for &f in &relevant {
+        for p in g.neighbors_by_type(f, Direction::Outgoing, &["hasMember"]) {
+            pm.entry(p).or_default().insert(f);
+        }
     }
-    for &(p2, p3, _, _, _) in &cand {
-        ensure(g, p2, &mut pm);
-        ensure(g, p3, &mut pm);
+    // Index m1 by forum so each candidate scans only the m1 entries whose forum both
+    // p2 and p3 belong to (fp2 ∩ fp3), not the whole m1 list.
+    let mut m1_by_forum: HashMap<u32, Vec<(u32, i64)>> = HashMap::new();
+    for &(p1, f1, ms1) in &m1_list {
+        m1_by_forum.entry(f1).or_default().push((p1, ms1));
     }
+    let empty: HashSet<u32> = HashSet::new();
     let mut counts: HashMap<u32, HashSet<u32>> = HashMap::new();
     for &(p2, p3, msg2, f2, ms2) in &cand {
         if p2 == p3 {
             continue;
         }
-        let (fp2, fp3) = (&pm[&p2], &pm[&p3]);
-        for &(p1, f1, ms1) in &m1_list {
-            if f1 != f2
-                && ms2 > ms1 + delta_ms
-                && fp2.contains(&f1)
-                && fp3.contains(&f1)
-                && !pm[&p1].contains(&f2)
-            {
-                counts.entry(p1).or_default().insert(msg2);
+        let (fp2, fp3) = (pm.get(&p2).unwrap_or(&empty), pm.get(&p3).unwrap_or(&empty));
+        for &f1 in fp2.intersection(fp3) {
+            if f1 == f2 {
+                continue;
+            }
+            let Some(entries) = m1_by_forum.get(&f1) else {
+                continue;
+            };
+            for &(p1, ms1) in entries {
+                if ms2 > ms1 + delta_ms && !pm.get(&p1).unwrap_or(&empty).contains(&f2) {
+                    counts.entry(p1).or_default().insert(msg2);
+                }
             }
         }
     }
