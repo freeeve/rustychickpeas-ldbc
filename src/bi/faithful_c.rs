@@ -194,54 +194,36 @@ pub(crate) fn q3_popular_topics(
 /// columns are deterministic from the id, so the cross-check uses id + count).
 pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i64)>, Vec<i64>) {
     use hashbrown::{HashMap as FastMap, HashSet as FastSet};
-    // Resolve the relationship types once and reuse them across the traversal.
-    // The string-based, Vec-returning neighbors_by_type allocated a HashSet + Vec
-    // on every call (~74% of this query's time); the zero-alloc *_of_type
-    // accessors below match the type by an integer compare instead.
-    let (Some(t_member), Some(t_loc), Some(t_part), Some(t_cont), Some(t_creator), Some(t_reply)) = (
+    // Relationship types Step 2 reuses across the reply-tree walk (resolved once,
+    // so the traversal matches by an integer compare, not a string lookup).
+    let (Some(t_member), Some(t_cont), Some(t_creator), Some(t_reply)) = (
         g.relationship_type_from_str("hasMember"),
-        g.relationship_type_from_str("isLocatedIn"),
-        g.relationship_type_from_str("isPartOf"),
         g.relationship_type_from_str("containerOf"),
         g.relationship_type_from_str("hasCreator"),
         g.relationship_type_from_str("replyOf"),
     ) else {
         return (Vec::new(), Vec::new());
     };
-    let person_country = |p: u32| -> Option<u32> {
-        let city = g.first_neighbor(p, Direction::Outgoing, t_loc)?;
-        g.first_neighbor(city, Direction::Outgoing, t_part)
+    // Step 1: top-100 forums by their largest single-country membership. A forum's
+    // place is set by its biggest (country, forum) cohort, so rank forums by that
+    // max directly — the country id only ever tie-breaks pairs of the same forum.
+    let forums: Vec<u32> = match g.nodes_with_label("Forum") {
+        Some(fs) => fs
+            .iter()
+            .filter(|&f| g.prop(f, "fday").i64_or(0) > after_day)
+            .collect(),
+        None => Vec::new(),
     };
-    // Step 1: top-100 forums by (country, forum) member count.
-    let mut cf: FastMap<(u32, u32), i64> = FastMap::new();
-    if let Some(forums) = g.nodes_with_label("Forum") {
-        for forum in forums.iter() {
-            if g.prop(forum, "fday").i64_or(0) <= after_day {
-                continue;
-            }
-            for m in g.neighbors_by_type(forum, Direction::Outgoing, t_member) {
-                if let Some(country) = person_country(m) {
-                    *cf.entry((country, forum)).or_insert(0) += 1;
-                }
-            }
-        }
-    }
-    // Precompute (flid, lid) sort keys so the comparator does no property reads.
-    let mut ranked: Vec<(i64, i64, i64, u32)> = cf
-        .iter()
-        .map(|(&(c, f), &n)| (n, g.prop(f, "flid").i64_or(0), g.prop(c, "lid").i64_or(0), f))
+    let top_forums: Vec<u32> = g
+        .neighbor_groups(&forums, "hasMember", Direction::Outgoing)
+        .project(&[
+            (Direction::Outgoing, "isLocatedIn"),
+            (Direction::Outgoing, "isPartOf"),
+        ])
+        .top_by_size(100, Some("flid"))
+        .into_iter()
+        .map(|(f, _)| f)
         .collect();
-    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-    let mut top_forums: Vec<u32> = Vec::new();
-    let mut seen_f: FastSet<u32> = FastSet::new();
-    for (_, _, _, f) in ranked {
-        if seen_f.insert(f) {
-            top_forums.push(f);
-            if top_forums.len() == 100 {
-                break;
-            }
-        }
-    }
     // Step 2: members of top forums, ranked by their messages in those forums.
     let mut members: FastSet<u32> = FastSet::new();
     for &f in &top_forums {

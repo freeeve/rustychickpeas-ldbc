@@ -7,9 +7,10 @@ reply-trees. Reports ``(person_id, message_count)`` top-100, plus the sorted
 forum ids (the cross-check uses person id + count and the forum-id set). Ids are
 the LDBC external ids (the ``id`` property).
 
-First cut on existing primitives: ``follow`` for person->city->country (memoized
-per member), ``neighborhood`` for each post's reply-tree, and ``first_neighbor``
-to attribute each message to its creator.
+Step 1 is the native ``neighbor_groups(...).project(...).top_by_size(...)`` builder
+(the forums whose members form the largest single-country cohort). Step 2 uses
+``neighborhood`` for each post's reply-tree and ``first_neighbor`` to attribute
+each message to its creator.
 """
 
 from rustychickpeas import Direction
@@ -20,30 +21,16 @@ _TO_COUNTRY = [(Direction.Outgoing, "isLocatedIn"), (Direction.Outgoing, "isPart
 
 
 def q4_top_creators(g, after_day: int):
-    # Step 1: count members per (country, forum) for forums created after the cutoff.
-    cf = {}  # (country, forum) -> member count
-    country_of = {}  # person -> country node (memoized; a member joins many forums)
-    for forum in g.nodes_with_label("Forum"):
-        if (g.get_property(forum, "fday") or 0) <= after_day:
-            continue
-        for m in g.neighbor_ids(forum, Direction.Outgoing, ["hasMember"]):
-            if m not in country_of:
-                country_of[m] = g.follow(m, _TO_COUNTRY)
-            country = country_of[m]
-            if country is not None:
-                key = (country, forum)
-                cf[key] = cf.get(key, 0) + 1
-
-    # Rank forums by their single largest country membership, then forum id. A
-    # forum's place is set by its best (country, forum) pair, so collapse to that
-    # max and sort the forums directly instead of sorting every pair (the country
-    # id only ever tie-breaks pairs of the *same* forum, so it can't reorder forums).
-    best = {}  # forum -> max member count in any one country
-    for (_country, forum), n in cf.items():
-        if n > best.get(forum, 0):
-            best[forum] = n
-    fid = {f: g.get_property(f, "id") for f in best}
-    top_forums = sorted(best, key=lambda f: (-best[f], fid[f]))[:100]
+    # Step 1: the top-100 forums (created after the cutoff) by their largest
+    # single-country membership. A forum's place is set by its biggest cohort, so
+    # rank by that max, ties by forum id ("id") — matches ranking over every
+    # (country, forum) pair, since the country id only tie-breaks same-forum pairs.
+    forums = [f for f in g.nodes_with_label("Forum")
+              if (g.get_property(f, "fday") or 0) > after_day]
+    top = (g.neighbor_groups(forums, "hasMember", Direction.Outgoing)
+             .project(_TO_COUNTRY)
+             .top_by_size(100, tie="id"))
+    top_forums = [f for f, _ in top]
 
     # Step 2: members of the top forums, ranked by the messages they created in
     # those forums' post reply-trees.
@@ -64,5 +51,5 @@ def q4_top_creators(g, after_day: int):
         ((g.get_property(p, "id"), msg_count.get(p, 0)) for p in members),
         key=lambda r: (-r[1], r[0]),
     )[:100]
-    top_ids = sorted(fid[f] for f in top_forums)
+    top_ids = sorted(g.get_property(f, "id") for f in top_forums)
     return rows, top_ids
