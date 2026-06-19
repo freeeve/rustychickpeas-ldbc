@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6
+from bi import q1, q3, q4, q5, q6, q7
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -192,3 +192,30 @@ def test_q6_authoritative():
     g = b.finalize()
 
     assert q6.q6_authoritative(g, "T") == [(1, 3)]
+
+
+def test_q7_related_topics():
+    # Comments reply to M1 (tagged T). C1 carries U,V; C3 carries U; C2 carries U,T
+    # (so C2 is skipped — it carries the target). Distinct comments per other tag:
+    # U -> {C1, C3} = 2, V -> {C1} = 1.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Tag"), (1, "Tag"), (2, "Tag"),
+        (5, "Post"), (6, "Comment"), (7, "Comment"), (8, "Comment"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "T")
+    b.set_prop(1, "name", "U")
+    b.set_prop(2, "name", "V")
+    edges = [
+        (5, 0, "hasTag"),
+        (6, 5, "replyOf"), (6, 1, "hasTag"), (6, 2, "hasTag"),  # C1 -> U, V
+        (7, 5, "replyOf"), (7, 1, "hasTag"), (7, 0, "hasTag"),  # C2 -> U, T (skipped)
+        (8, 5, "replyOf"), (8, 1, "hasTag"),                    # C3 -> U
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q7.q7_related_topics(g, "T") == [("U", 2), ("V", 1)]
