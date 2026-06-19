@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -303,3 +303,33 @@ def test_q10_experts():
     g = b.finalize()
 
     assert q10.q10_experts(g, 10, "X", "TC", 1, 2) == [(1, "Tg", 1), (2, "Tg", 1)]
+
+
+def test_q11_friend_triangles():
+    # A,B,C,E in country X; D out of country. In-window edges form triangles ABC
+    # and ABE; C-E is out of window (250), so ACE/BCE don't count -> 2 triangles.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Country"), (1, "City"), (2, "Person"), (3, "Person"),
+             (4, "Person"), (5, "Person"), (6, "Person")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "X")
+    b.add_relationship(1, 0, "isPartOf")
+    for p in (2, 3, 4, 6):  # A,B,C,E in country; D(5) is not located in the city
+        b.add_relationship(p, 1, "isLocatedIn")
+
+    def knows(u, v, kd):
+        for s, t in ((u, v), (v, u)):
+            b.add_relationship(s, t, "knows")
+            b.set_relationship_prop_i64(s, t, "knows", "kd", kd)
+
+    knows(2, 3, 150)  # A-B
+    knows(3, 4, 160)  # B-C
+    knows(2, 4, 170)  # A-C  -> triangle ABC
+    knows(2, 6, 150)  # A-E
+    knows(3, 6, 160)  # B-E  -> triangle ABE
+    knows(4, 6, 250)  # C-E out of window (blocks ACE/BCE)
+    knows(2, 5, 150)  # A-D, D out of country (ignored)
+    g = b.finalize()
+
+    assert q11.q11_friend_triangles(g, "X", 100, 200) == 2

@@ -16,7 +16,7 @@ import gzip
 import os
 import tempfile
 
-from rustychickpeas import GraphSnapshotBuilder, Ref, Rel
+from rustychickpeas import GraphSnapshotBuilder, Ref, Rel, Prop
 
 import props
 
@@ -82,6 +82,26 @@ def _normalize_forums(entity_dir: str, out_path: str) -> int:
                 day = parsed[1] if parsed is not None else 0
                 date_cache[prefix] = day
             w.writerow([ext_id, title, day])
+            n += 1
+    return n
+
+
+def _normalize_knows(entity_dir: str, out_path: str) -> int:
+    """Write ``Person1Id,Person2Id,kd`` for knows edges, deriving kd (creation day)
+    from creationDate so BI Q11 can date-filter knows edges. Returns the row count."""
+    n = 0
+    with open(out_path, "w", newline="", encoding="utf-8") as out:
+        w = csv.writer(out)
+        w.writerow(["Person1Id", "Person2Id", "kd"])
+        date_cache = {}
+        for cdate, p1, p2 in iter_rows(entity_dir, ["creationDate", "Person1Id", "Person2Id"]):
+            prefix = cdate[:10]
+            day = date_cache.get(prefix)
+            if day is None:
+                parsed = props.parse_date(cdate)
+                day = parsed[1] if parsed is not None else 0
+                date_cache[prefix] = day
+            w.writerow([p1, p2, day])
             n += 1
     return n
 
@@ -197,9 +217,7 @@ def load_bi_graph(snapshot_path: str):
             (f"{dynamic}/Person_hasInterest_Tag", _ref("personId", "Person"), _ref("interestId", "Tag"), "hasInterest"),
             (f"{dynamic}/Person_likes_Post", _ref("PersonId", "Person"), _ref("PostId", "Post"), "likes"),
             (f"{dynamic}/Person_likes_Comment", _ref("PersonId", "Person"), _ref("CommentId", "Comment"), "likes"),
-            # knows is undirected — load both directions.
-            (f"{dynamic}/Person_knows_Person", _ref("Person1Id", "Person"), _ref("Person2Id", "Person"), "knows"),
-            (f"{dynamic}/Person_knows_Person", _ref("Person2Id", "Person"), _ref("Person1Id", "Person"), "knows"),
+            # knows is loaded below with its creationDate (kd) edge property.
             (f"{static}/Organisation", _ref("id", "Organisation"), _ref("LocationPlaceId", "Place"), "orgPlace"),
             (f"{dynamic}/Person_workAt_Company", _ref("PersonId", "Person"), _ref("CompanyId", "Company"), "workAt"),
             (f"{dynamic}/Person_studyAt_University", _ref("PersonId", "Person"), _ref("UniversityId", "University"), "studyAt"),
@@ -221,6 +239,15 @@ def load_bi_graph(snapshot_path: str):
             Rel("replyOf", Ref("id", "Comment"), Ref("ParentPostId", "Post")),
             Rel("replyOf", Ref("id", "Comment"), Ref("ParentCommentId", "Comment")),
         ])
+
+        # knows (undirected -> both directions) carrying its creationDate as the kd
+        # edge property (epoch day), so Q11 can date-filter knows edges.
+        knows_csv = os.path.join(tmp, "knows.csv")
+        _normalize_knows(f"{dynamic}/Person_knows_Person", knows_csv)
+        total += sum(b.load_relationships_from_csv_multi(knows_csv, [
+            Rel("knows", Ref("Person1Id", "Person"), Ref("Person2Id", "Person"), props=[Prop("kd", "kd", int)]),
+            Rel("knows", Ref("Person2Id", "Person"), Ref("Person1Id", "Person"), props=[Prop("kd", "kd", int)]),
+        ]))
         s["edges"] = total
 
     return b.finalize(), s
