@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3
+from bi import q1, q3, q4
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -101,3 +101,40 @@ def test_q3_popular_topics():
     rows = q3.q3_popular_topics(g, "X", "TC")
     # forum 10, moderator 1, both post(4) and comment(5) class-tagged -> count 2.
     assert rows == [(10, "F", 1, 2)]
+
+
+def test_q4_top_creators():
+    # F1 (after cutoff) has members in two countries; its post reply-tree is
+    # authored by those members. F2 (before cutoff) is excluded, so its lone
+    # member must not appear.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Country"), (1, "Country"), (2, "City"), (3, "City"),
+        (4, "Person"), (5, "Person"), (6, "Person"), (7, "Person"),
+        (8, "Forum"), (9, "Forum"),
+        (10, "Post"), (11, "Comment"), (12, "Comment"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    for nid, ext in [(0, 100), (1, 200), (4, 1), (5, 2), (6, 3), (7, 4), (8, 10), (9, 11)]:
+        b.set_prop(nid, "id", ext)
+    b.set_prop(8, "fday", 200)  # F1 after cutoff (100)
+    b.set_prop(9, "fday", 50)   # F2 before cutoff -> excluded
+    edges = [
+        (2, 0, "isPartOf"), (3, 1, "isPartOf"),
+        (4, 2, "isLocatedIn"), (5, 2, "isLocatedIn"),
+        (6, 3, "isLocatedIn"), (7, 3, "isLocatedIn"),
+        (8, 4, "hasMember"), (8, 5, "hasMember"), (8, 6, "hasMember"),
+        (9, 7, "hasMember"),  # F2's only member (forum excluded)
+        (8, 10, "containerOf"),
+        (11, 10, "replyOf"), (12, 11, "replyOf"),
+        (6, 10, "hasCreator"), (4, 11, "hasCreator"), (5, 12, "hasCreator"),
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    rows, top_ids = q4.q4_top_creators(g, after_day=100)
+    assert top_ids == [10]
+    # Post(P3), C1(P1), C2(P2) each authored one message -> all count 1, id asc.
+    assert rows == [(1, 1), (2, 1), (3, 1)]

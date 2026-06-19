@@ -66,6 +66,26 @@ def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False)
     return n
 
 
+def _normalize_forums(entity_dir: str, out_path: str) -> int:
+    """Write ``id,title,fday`` for forums, deriving fday (creation day) from
+    creationDate so BI Q4's forum-age filter has it. Returns the row count."""
+    n = 0
+    with open(out_path, "w", newline="", encoding="utf-8") as out:
+        w = csv.writer(out)
+        w.writerow(["id", "title", "fday"])
+        date_cache = {}
+        for ext_id, title, cdate in iter_rows(entity_dir, ["id", "title", "creationDate"]):
+            prefix = cdate[:10]
+            day = date_cache.get(prefix)
+            if day is None:
+                parsed = props.parse_date(cdate)
+                day = parsed[1] if parsed is not None else 0
+                date_cache[prefix] = day
+            w.writerow([ext_id, title, day])
+            n += 1
+    return n
+
+
 def load_messages(snapshot_path: str):
     """Build a snapshot containing Post + Comment message nodes (BI Q1's inputs).
 
@@ -150,7 +170,9 @@ def load_bi_graph(snapshot_path: str):
         # Place/Organisation get a super-label so id-refs that span their subtypes
         # (City/Country/Continent, Company/University) resolve.
         s["places"] = _load_nodes(b, f"{static}/Place", property_columns=["id", "name"], label_columns=["type"], default_label="Place")
-        s["forums"] = _load_nodes(b, f"{dynamic}/Forum", property_columns=["id", "title"], default_label="Forum")
+        forum_csv = os.path.join(tmp, "Forum.csv")
+        s["forums"] = _normalize_forums(f"{dynamic}/Forum", forum_csv)
+        b.load_nodes_from_csv(forum_csv, property_columns=["id", "title", "fday"], default_label="Forum")
 
         post_csv = os.path.join(tmp, "Post.csv")
         s["posts"] = _normalize_messages(f"{dynamic}/Post", post_csv, with_lang=True)
