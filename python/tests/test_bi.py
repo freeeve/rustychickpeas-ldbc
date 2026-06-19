@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8
+from bi import q1, q3, q4, q5, q6, q7, q8, q9
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -243,3 +243,31 @@ def test_q8_central_person():
     g = b.finalize()
 
     assert q8.q8_central_person(g, "T", 100, 200) == [(1, 100, 1), (2, 1, 100)]
+
+
+def test_q9_thread_initiators():
+    # Window [100,200]. P1's Post A (150): tree A,C1(160),C3(120) counted, C2(250)
+    # pruned -> 3 msgs; P1's Post B(250) is out of window. P2's Post D(110): tree
+    # D, C5(130) counted, C4(90) before window (not counted but traversed) -> 2.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (1, "Person"), (2, "Person"),
+        (5, "Post"), (6, "Comment"), (7, "Comment"), (8, "Comment"),
+        (9, "Post"), (10, "Post"), (11, "Comment"), (12, "Comment"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(1, "id", 1)
+    b.set_prop(2, "id", 2)
+    for nid, day in [(5, 150), (6, 160), (7, 250), (8, 120), (9, 250), (10, 110), (11, 90), (12, 130)]:
+        b.set_prop(nid, "day", day)
+    edges = [
+        (1, 5, "hasCreator"), (1, 9, "hasCreator"), (2, 10, "hasCreator"),
+        (6, 5, "replyOf"), (7, 6, "replyOf"), (8, 5, "replyOf"),  # A's tree
+        (11, 10, "replyOf"), (12, 11, "replyOf"),                 # D's tree
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q9.q9_thread_initiators(g, 100, 200) == [(1, 1, 3), (2, 1, 2)]
