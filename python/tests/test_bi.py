@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16, q18
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q16, q18, q19
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -498,3 +498,33 @@ def test_q18_friend_recommendation():
     g = b.finalize()
 
     assert q18.q18_friend_recommendation(g, "T") == [(1, 2, 2), (2, 1, 2), (2, 3, 1), (3, 2, 1)]
+
+
+def test_q19_interaction_path():
+    # p1(City1) -knows- x -knows- p2(City2). p1<->x interacted twice (weight 0.5),
+    # x<->p2 once (weight 1.0). Shortest p1->p2 = 0.5 + 1.0 = 1.5.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "City"), (1, "City"), (2, "Person"), (3, "Person"), (4, "Person"),
+             (5, "Post"), (6, "Post"), (7, "Comment"), (8, "Comment"), (9, "Comment")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "id", 100)
+    b.set_prop(1, "id", 200)
+    b.set_prop(2, "id", 1)
+    b.set_prop(3, "id", 2)
+    b.set_prop(4, "id", 3)
+    edges = [
+        (2, 0, "isLocatedIn"), (3, 1, "isLocatedIn"),
+        (2, 4, "knows"), (4, 2, "knows"), (4, 3, "knows"), (3, 4, "knows"),
+        (4, 5, "hasCreator"), (3, 6, "hasCreator"),   # x made Mx, p2 made Mp2
+        (2, 7, "hasCreator"), (2, 8, "hasCreator"), (4, 9, "hasCreator"),
+        (7, 5, "replyOf"), (8, 5, "replyOf"),         # p1 replied to x twice
+        (9, 6, "replyOf"),                            # x replied to p2 once
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    interaction = q19.build_interaction_map(g)
+    assert interaction == {(2, 4): 2, (3, 4): 1}
+    assert q19.q19_interaction_path(g, 100, 200, interaction) == [(1, 2, 1.5)]
