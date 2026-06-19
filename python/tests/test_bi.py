@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7, q8, q9
+from bi import q1, q3, q4, q5, q6, q7, q8, q9, q10
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -271,3 +271,35 @@ def test_q9_thread_initiators():
     g = b.finalize()
 
     assert q9.q9_thread_initiators(g, 100, 200) == [(1, 1, 3), (2, 1, 2)]
+
+
+def test_q10_experts():
+    # S(id10) knows A(id1) at dist1, A knows B(id2) at dist2. A and B live in
+    # country X and each made a message tagged with Tg (class TC). Experts in
+    # [1,2] hops -> A, B; one tagged message each.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Person"), (1, "Person"), (2, "Person"),
+        (3, "Country"), (4, "City"), (5, "TagClass"), (6, "Tag"),
+        (7, "Post"), (8, "Post"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "id", 10)
+    b.set_prop(1, "id", 1)
+    b.set_prop(2, "id", 2)
+    b.set_prop(3, "name", "X")
+    b.set_prop(5, "name", "TC")
+    b.set_prop(6, "name", "Tg")
+    edges = [
+        (0, 1, "knows"), (1, 0, "knows"), (1, 2, "knows"), (2, 1, "knows"),
+        (4, 3, "isPartOf"), (1, 4, "isLocatedIn"), (2, 4, "isLocatedIn"),
+        (6, 5, "hasType"),
+        (1, 7, "hasCreator"), (2, 8, "hasCreator"),
+        (7, 6, "hasTag"), (8, 6, "hasTag"),
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q10.q10_experts(g, 10, "X", "TC", 1, 2) == [(1, "Tg", 1), (2, "Tg", 1)]
