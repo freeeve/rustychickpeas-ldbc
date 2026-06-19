@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5
+from bi import q1, q3, q4, q5, q6
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -165,3 +165,30 @@ def test_q5_active_posters():
     g = b.finalize()
 
     assert q5.q5_active_posters(g, "T") == [(1, 2, 1, 3, 34)]
+
+
+def test_q6_authoritative():
+    # P1's tagged message M1 is liked by L1 and L2. L1's own message has 2 likes,
+    # L2's own message has 1 like -> P1 score = 2 + 1 = 3.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Tag"), (1, "Person"), (2, "Person"), (3, "Person"),
+        (5, "Post"), (6, "Post"), (7, "Post"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "T")
+    for nid, ext in [(1, 1), (2, 2), (3, 3)]:
+        b.set_prop(nid, "id", ext)
+    edges = [
+        (5, 0, "hasTag"), (1, 5, "hasCreator"),       # P1 created tagged M1
+        (2, 5, "likes"), (3, 5, "likes"),             # L1, L2 liked M1
+        (2, 6, "hasCreator"), (3, 7, "hasCreator"),   # L1 created M_a, L2 created M_b
+        (1, 6, "likes"), (3, 6, "likes"),             # M_a: 2 likes
+        (1, 7, "likes"),                              # M_b: 1 like
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q6.q6_authoritative(g, "T") == [(1, 3)]
