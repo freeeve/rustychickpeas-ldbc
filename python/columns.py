@@ -25,3 +25,17 @@ def arrow(g, key):
         return None
     # py_buffer wraps the column's buffer zero-copy; from_buffers with no null bitmap.
     return pa.Array.from_buffers(_ARROW_TYPE[col.dtype], len(col), [None, pa.py_buffer(col)])
+
+
+def i64_reader(g, key):
+    """An O(1) per-node reader for a dense i64 column via the buffer protocol (a
+    `memoryview` indexed by node id — C-speed, no per-node call), falling back to
+    `get_property` when the column isn't dense/bufferable (e.g. tiny test graphs)."""
+    col = g.column(key)
+    if col is not None:
+        try:
+            mv = memoryview(col)
+            return lambda n: mv[n]
+        except (TypeError, ValueError):
+            pass
+    return lambda n: g.get_property(n, key) or 0

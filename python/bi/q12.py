@@ -12,25 +12,14 @@ walk up the replyOf chain.
 
 from rustychickpeas import Direction
 
-
-def _i64_reader(g, key):
-    """O(1) reader for a dense i64 column via the buffer protocol, falling back to
-    per-node ``get_property`` when the column isn't dense/bufferable."""
-    col = g.column(key)
-    if col is not None:
-        try:
-            mv = memoryview(col)
-            return lambda m: mv[m]
-        except (TypeError, ValueError):
-            pass
-    return lambda m: g.get_property(m, key) or 0
+import columns
 
 
 def q12_message_counts(g, min_day, len_thr, langs):
     langs = set(langs)
-    day_at = _i64_reader(g, "day")
-    len_at = _i64_reader(g, "len")
-    content_at = _i64_reader(g, "content")
+    day_at = columns.i64_reader(g, "day")
+    len_at = columns.i64_reader(g, "len")
+    content_at = columns.i64_reader(g, "content")
 
     roots = {}  # message -> thread root (terminal of its replyOf chain)
 

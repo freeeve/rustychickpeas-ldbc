@@ -7,18 +7,24 @@ message count (person id ascending on ties). Reports
 
 Existing primitives: scan Posts in the window, attribute each to its creator,
 and DFS the reply tree pruning any node past ``end_day`` (replies are later than
-their parent, so the whole subtree is later).
+their parent, so the whole subtree is later). The day filter reads the dense
+``day`` column through the buffer protocol (O(1) per node, no per-node call) so
+the ~1.1M-Post scan doesn't pay a property lookup each step.
 """
 
 from rustychickpeas import Direction
 
+import columns
+
 
 def q9_thread_initiators(g, start_day: int, end_day: int):
+    day_at = columns.i64_reader(g, "day")
     per_person = {}  # person -> [threads, messages]
-    for post in g.nodes_with_label("Post"):
-        pd = g.get_property(post, "day") or 0
-        if pd < start_day or pd > end_day:
-            continue
+    # Fetch the window's Posts straight from the day index (one exact-value lookup
+    # per day) rather than scanning all ~1.1M Posts.
+    window_posts = (p for d in range(start_day, end_day + 1)
+                    for p in g.nodes_with_property("Post", "day", d))
+    for post in window_posts:
         creator = g.first_neighbor(post, Direction.Incoming, "hasCreator")
         if creator is None:
             continue
@@ -27,7 +33,7 @@ def q9_thread_initiators(g, start_day: int, end_day: int):
         stack = [post]
         while stack:
             n = stack.pop()
-            d = g.get_property(n, "day") or 0
+            d = day_at(n)
             if d > end_day:
                 continue
             if d >= start_day:
