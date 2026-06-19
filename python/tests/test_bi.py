@@ -5,7 +5,7 @@ import os
 
 import props
 import loader
-from bi import q1, q3, q4, q5, q6, q7
+from bi import q1, q3, q4, q5, q6, q7, q8
 from rustychickpeas import GraphSnapshotBuilder
 
 
@@ -219,3 +219,27 @@ def test_q7_related_topics():
     g = b.finalize()
 
     assert q7.q7_related_topics(g, "T") == [("U", 2), ("V", 1)]
+
+
+def test_q8_central_person():
+    # P1 interested in T (base 100); P2 made one in-window tagged message (base 1).
+    # P1<->P2 are friends, so friendsScore(P1)=1, friendsScore(P2)=100; both total
+    # 101, so the tie breaks by id ascending.
+    b = GraphSnapshotBuilder()
+    nodes = [(0, "Tag"), (1, "Person"), (2, "Person"), (3, "Person"), (5, "Post")]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "T")
+    for nid, ext in [(1, 1), (2, 2), (3, 3)]:
+        b.set_prop(nid, "id", ext)
+    b.set_prop(5, "day", 150)
+    edges = [
+        (1, 0, "hasInterest"),                    # P1 interested in T
+        (5, 0, "hasTag"), (2, 5, "hasCreator"),   # P2's tagged message
+        (1, 2, "knows"), (2, 1, "knows"),         # P1 <-> P2
+    ]
+    for u, v, rel in edges:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    assert q8.q8_central_person(g, "T", 100, 200) == [(1, 100, 1), (2, 1, 100)]
