@@ -16,7 +16,7 @@ import gzip
 import os
 import tempfile
 
-from rustychickpeas import GraphSnapshotBuilder
+from rustychickpeas import GraphSnapshotBuilder, Ref, Rel
 
 import props
 
@@ -34,24 +34,34 @@ def iter_rows(entity_dir: str, cols):
                 yield [row[i] for i in idx]
 
 
-def _normalize_messages(entity_dir: str, out_path: str) -> int:
-    """Write ``id,year,day,len,content`` for one message label (Post/Comment).
-
-    ``content`` is stored as 0/1 (the queries only need "has content", and the
-    Python column reader exports dense i64 columns). Returns the row count.
+def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False) -> int:
+    """Write ``id,year,day,len,content`` (+ ``lang`` for Post) for one message
+    label, deriving year/day from creationDate. ``content`` is stored as 0/1.
+    Returns the row count.
     """
+    src = ["id", "creationDate", "content", "length"] + (["language"] if with_lang else [])
+    header = ["id", "year", "day", "len", "content"] + (["lang"] if with_lang else [])
     n = 0
     with open(out_path, "w", newline="", encoding="utf-8") as out:
         w = csv.writer(out)
-        w.writerow(["id", "year", "day", "len", "content"])
-        for ext_id, cdate, content, length in iter_rows(
-            entity_dir, ["id", "creationDate", "content", "length"]
-        ):
-            parsed = props.parse_date(cdate)
-            year, day = parsed if parsed is not None else (0, 0)
+        w.writerow(header)
+        date_cache = {}
+        for row in iter_rows(entity_dir, src):
+            ext_id, cdate, content, length = row[0], row[1], row[2], row[3]
+            # Many messages share a calendar day; memoize the day math on the
+            # YYYY-MM-DD prefix (~1-2k distinct days vs millions of rows).
+            prefix = cdate[:10]
+            yd = date_cache.get(prefix)
+            if yd is None:
+                parsed = props.parse_date(cdate)
+                yd = parsed if parsed is not None else (0, 0)
+                date_cache[prefix] = yd
+            year, day = yd
             ln = int(length) if length else 0
-            has_content = 1 if content else 0
-            w.writerow([ext_id, year, day, ln, has_content])
+            out_row = [ext_id, year, day, ln, 1 if content else 0]
+            if with_lang:
+                out_row.append(row[4])
+            w.writerow(out_row)
             n += 1
     return n
 
@@ -80,75 +90,115 @@ def load_messages(snapshot_path: str):
     return builder.finalize(), stats
 
 
-def _write_csv(entity_dir: str, out_path: str, cols) -> int:
-    """Concatenate ``cols`` (in order) from a partitioned LDBC entity dir into one
-    comma-CSV (header = ``cols``). Returns the row count."""
+def _load_nodes(builder, entity_dir: str, **kwargs) -> int:
+    """Load every ``part-*.csv.gz`` in ``entity_dir`` as nodes (pipe-delimited,
+    straight off the raw files). Returns the node count."""
     n = 0
-    with open(out_path, "w", newline="", encoding="utf-8") as out:
-        w = csv.writer(out)
-        w.writerow(cols)
-        for row in iter_rows(entity_dir, cols):
-            w.writerow(row)
-            n += 1
+    for path in sorted(glob.glob(os.path.join(entity_dir, "part-*.csv.gz"))):
+        n += len(builder.load_nodes_from_csv(path, delimiter="|", **kwargs))
+    return n
+
+
+def _load_edges(builder, entity_dir: str, start_ref, end_ref, rel_type: str) -> int:
+    """Load every ``part-*.csv.gz`` in ``entity_dir`` as relationships, resolving
+    endpoints by the property refs (empty FK cells are skipped). Returns the count."""
+    n = 0
+    for path in sorted(glob.glob(os.path.join(entity_dir, "part-*.csv.gz"))):
+        n += len(
+            builder.load_relationships_from_csv(
+                path, start_ref, end_ref, fixed_rel_type=rel_type, delimiter="|"
+            )
+        )
+    return n
+
+
+def _ref(column: str, label: str) -> dict:
+    """A property-ref endpoint: resolve the FK ``column`` to a node of ``label``
+    by its ``id`` property."""
+    return {"column": column, "property_key": "id", "label": label}
+
+
+def _load_rels_multi(builder, entity_dir: str, rels) -> int:
+    """Load several relationship types from each ``part-*.csv.gz`` in ``entity_dir``
+    in one pass per part (one read, shared node indexes). Returns the total count."""
+    n = 0
+    for path in sorted(glob.glob(os.path.join(entity_dir, "part-*.csv.gz"))):
+        n += sum(builder.load_relationships_from_csv_multi(path, rels, delimiter="|"))
     return n
 
 
 def load_bi_graph(snapshot_path: str):
-    """Build the BI subgraph used by Q1/Q2: Post/Comment message nodes, Tag and
-    TagClass nodes, and the ``hasType`` (Tag->TagClass) and ``hasTag``
-    (Message->Tag) edges. Nodes carry their external LDBC id as the ``id``
-    property; edges are resolved by that property (see the property-ref CSV
-    loader). Returns ``(snapshot, stats)``.
+    """Build the full LDBC SNB BI graph (mirrors src/loader.rs): all entities and
+    edges, so query timings are comparable to the Rust bench. Nodes are loaded in
+    the same order as the Rust loader (so internal ids align) and carry their
+    external LDBC id as the ``id`` property; edges resolve by that property.
+
+    Node props beyond what the ported queries read are kept minimal (id + name);
+    edge properties (join dates, weights) are not loaded yet. Returns
+    ``(snapshot, stats)``.
     """
     dynamic = os.path.join(snapshot_path, "dynamic")
     static = os.path.join(snapshot_path, "static")
-    builder = GraphSnapshotBuilder(capacity_nodes=4_000_000, capacity_rels=16_000_000)
-    stats = {}
+    b = GraphSnapshotBuilder(capacity_nodes=4_000_000, capacity_rels=24_000_000)
+    s = {}
 
     with tempfile.TemporaryDirectory() as tmp:
-        # --- nodes (all before any edges, so property refs resolve) ---
-        for label in ("Post", "Comment"):
-            norm = os.path.join(tmp, f"{label}.csv")
-            stats[label.lower() + "s"] = _normalize_messages(os.path.join(dynamic, label), norm)
-            builder.load_nodes_from_csv(
-                norm, property_columns=["id", "year", "day", "len", "content"], default_label=label
-            )
+        # --- NODES, in src/loader.rs order so internal ids align ---
+        s["tagclasses"] = _load_nodes(b, f"{static}/TagClass", property_columns=["id", "name"], default_label="TagClass")
+        s["tags"] = _load_nodes(b, f"{static}/Tag", property_columns=["id", "name"], default_label="Tag")
+        s["persons"] = _load_nodes(b, f"{dynamic}/Person", property_columns=["id"], default_label="Person")
+        # Place/Organisation get a super-label so id-refs that span their subtypes
+        # (City/Country/Continent, Company/University) resolve.
+        s["places"] = _load_nodes(b, f"{static}/Place", property_columns=["id", "name"], label_columns=["type"], default_label="Place")
+        s["forums"] = _load_nodes(b, f"{dynamic}/Forum", property_columns=["id", "title"], default_label="Forum")
 
-        tagclass_csv = os.path.join(tmp, "TagClass.csv")
-        stats["tagclasses"] = _write_csv(os.path.join(static, "TagClass"), tagclass_csv, ["id", "name"])
-        builder.load_nodes_from_csv(
-            tagclass_csv, property_columns=["id", "name"], default_label="TagClass"
-        )
+        post_csv = os.path.join(tmp, "Post.csv")
+        s["posts"] = _normalize_messages(f"{dynamic}/Post", post_csv, with_lang=True)
+        b.load_nodes_from_csv(post_csv, property_columns=["id", "year", "day", "len", "content", "lang"], default_label="Post")
+        comment_csv = os.path.join(tmp, "Comment.csv")
+        s["comments"] = _normalize_messages(f"{dynamic}/Comment", comment_csv)
+        b.load_nodes_from_csv(comment_csv, property_columns=["id", "year", "day", "len", "content"], default_label="Comment")
 
-        # Tag file keeps TypeTagClassId for the hasType edge below.
-        tag_csv = os.path.join(tmp, "Tag.csv")
-        stats["tags"] = _write_csv(
-            os.path.join(static, "Tag"), tag_csv, ["id", "name", "TypeTagClassId"]
-        )
-        builder.load_nodes_from_csv(tag_csv, property_columns=["id", "name"], default_label="Tag")
+        s["orgs"] = _load_nodes(b, f"{static}/Organisation", property_columns=["id", "name"], label_columns=["type"], default_label="Organisation")
 
-        # --- edges (resolved by the "id" property) ---
-        builder.load_relationships_from_csv(
-            tag_csv,
-            {"column": "id", "property_key": "id", "label": "Tag"},
-            {"column": "TypeTagClassId", "property_key": "id", "label": "TagClass"},
-            fixed_rel_type="hasType",
-        )
+        # --- EDGES (resolved by the "id" property; loaded off the raw gz) ---
+        # Single-rel-per-file edges.
+        edges = [
+            (f"{static}/TagClass", _ref("id", "TagClass"), _ref("SubclassOfTagClassId", "TagClass"), "isSubclassOf"),
+            (f"{static}/Tag", _ref("id", "Tag"), _ref("TypeTagClassId", "TagClass"), "hasType"),
+            (f"{static}/Place", _ref("id", "Place"), _ref("PartOfPlaceId", "Place"), "isPartOf"),
+            (f"{dynamic}/Person", _ref("id", "Person"), _ref("LocationCityId", "City"), "isLocatedIn"),
+            (f"{dynamic}/Forum", _ref("id", "Forum"), _ref("ModeratorPersonId", "Person"), "hasModerator"),
+            (f"{dynamic}/Forum_hasMember_Person", _ref("ForumId", "Forum"), _ref("PersonId", "Person"), "hasMember"),
+            (f"{dynamic}/Post_hasTag_Tag", _ref("PostId", "Post"), _ref("TagId", "Tag"), "hasTag"),
+            (f"{dynamic}/Comment_hasTag_Tag", _ref("CommentId", "Comment"), _ref("TagId", "Tag"), "hasTag"),
+            (f"{dynamic}/Person_hasInterest_Tag", _ref("personId", "Person"), _ref("interestId", "Tag"), "hasInterest"),
+            (f"{dynamic}/Person_likes_Post", _ref("PersonId", "Person"), _ref("PostId", "Post"), "likes"),
+            (f"{dynamic}/Person_likes_Comment", _ref("PersonId", "Person"), _ref("CommentId", "Comment"), "likes"),
+            # knows is undirected — load both directions.
+            (f"{dynamic}/Person_knows_Person", _ref("Person1Id", "Person"), _ref("Person2Id", "Person"), "knows"),
+            (f"{dynamic}/Person_knows_Person", _ref("Person2Id", "Person"), _ref("Person1Id", "Person"), "knows"),
+            (f"{static}/Organisation", _ref("id", "Organisation"), _ref("LocationPlaceId", "Place"), "orgPlace"),
+            (f"{dynamic}/Person_workAt_Company", _ref("PersonId", "Person"), _ref("CompanyId", "Company"), "workAt"),
+            (f"{dynamic}/Person_studyAt_University", _ref("PersonId", "Person"), _ref("UniversityId", "University"), "studyAt"),
+        ]
+        total = 0
+        for entity_dir, start_ref, end_ref, rel_type in edges:
+            total += _load_edges(b, entity_dir, start_ref, end_ref, rel_type)
 
-        hastag = 0
-        for entity, id_col, src in (
-            ("Post_hasTag_Tag", "PostId", "Post"),
-            ("Comment_hasTag_Tag", "CommentId", "Comment"),
-        ):
-            edge_csv = os.path.join(tmp, f"{entity}.csv")
-            _write_csv(os.path.join(dynamic, entity), edge_csv, [id_col, "TagId"])
-            pairs = builder.load_relationships_from_csv(
-                edge_csv,
-                {"column": id_col, "property_key": "id", "label": src},
-                {"column": "TagId", "property_key": "id", "label": "Tag"},
-                fixed_rel_type="hasTag",
-            )
-            hastag += len(pairs)
-        stats["hastag_edges"] = hastag
+        # Merged-FK message files: several rels per file, one pass each.
+        total += _load_rels_multi(b, f"{dynamic}/Post", [
+            Rel("hasCreator", Ref("CreatorPersonId", "Person"), Ref("id", "Post")),
+            Rel("containerOf", Ref("ContainerForumId", "Forum"), Ref("id", "Post")),
+            Rel("msgCountry", Ref("id", "Post"), Ref("LocationCountryId", "Country")),
+        ])
+        total += _load_rels_multi(b, f"{dynamic}/Comment", [
+            Rel("hasCreator", Ref("CreatorPersonId", "Person"), Ref("id", "Comment")),
+            Rel("msgCountry", Ref("id", "Comment"), Ref("LocationCountryId", "Country")),
+            # replyOf parent is a Post or a Comment — both refs in one pass; empty cells skip.
+            Rel("replyOf", Ref("id", "Comment"), Ref("ParentPostId", "Post")),
+            Rel("replyOf", Ref("id", "Comment"), Ref("ParentCommentId", "Comment")),
+        ])
+        s["edges"] = total
 
-    return builder.finalize(), stats
+    return b.finalize(), s

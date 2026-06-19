@@ -5,7 +5,8 @@ import os
 
 import props
 import loader
-from bi import q1
+from bi import q1, q3
+from rustychickpeas import GraphSnapshotBuilder
 
 
 def test_days_from_civil_known_values():
@@ -72,3 +73,31 @@ def test_q1_posting_summary(tmp_path):
     assert (rows_arrow, total_arrow) == (rows, total)
     rows_native, total_native = q1.q1_posting_summary_native(g, cutoff)
     assert (rows_native, total_native) == (rows, total)
+
+
+def test_q3_popular_topics():
+    # country <- city <- person (moderator) <- forum -> post <- comment(replyOf);
+    # post & comment both carry a tag of the class.
+    b = GraphSnapshotBuilder()
+    nodes = [
+        (0, "Country"), (1, "City"), (2, "Person"), (3, "Forum"),
+        (4, "Post"), (5, "Comment"), (6, "TagClass"), (7, "Tag"),
+    ]
+    for nid, label in nodes:
+        b.add_node([label], node_id=nid)
+    b.set_prop(0, "name", "X")
+    b.set_prop(6, "name", "TC")
+    b.set_prop(3, "id", 10)
+    b.set_prop(3, "title", "F")
+    b.set_prop(2, "id", 1)
+    for u, v, rel in [
+        (1, 0, "isPartOf"), (2, 1, "isLocatedIn"), (3, 2, "hasModerator"),
+        (3, 4, "containerOf"), (5, 4, "replyOf"), (7, 6, "hasType"),
+        (4, 7, "hasTag"), (5, 7, "hasTag"),
+    ]:
+        b.add_relationship(u, v, rel)
+    g = b.finalize()
+
+    rows = q3.q3_popular_topics(g, "X", "TC")
+    # forum 10, moderator 1, both post(4) and comment(5) class-tagged -> count 2.
+    assert rows == [(10, "F", 1, 2)]
