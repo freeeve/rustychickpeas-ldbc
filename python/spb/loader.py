@@ -148,17 +148,39 @@ def _read_literal(s, i):
     return ("lit", value, datatype, lang), i
 
 
+def _node_term(tok):
+    """Parse a subject/predicate token (an <iri> or _:blank — no internal spaces)."""
+    if tok.startswith("<") and tok.endswith(">"):
+        return ("iri", _unescape_iri(tok[1:-1]))
+    if tok.startswith("_:"):
+        return ("blank", tok[2:])
+    return None
+
+
 def parse_line(line):
-    """Parse one N-Triples line into (subject, predicate, object) terms, or None."""
+    """Parse one N-Triples line into (subject, predicate, object) terms, or None.
+
+    Fast path: subject and predicate are space-free (`<iri>` / `_:blank`), so split
+    off the first two tokens and treat the rest (minus the trailing ` .`) as the
+    object — which may be an IRI, blank, or a literal (with internal spaces)."""
     line = line.strip()
-    if not line or line.startswith("#"):
+    if not line or line[0] == "#":
         return None
-    s, i = _read_term(line, 0)
-    p, i = _read_term(line, i)
-    o, i = _read_term(line, i)
-    if s is None or p is None or o is None:
+    if line.endswith("."):
+        line = line[:-1].rstrip()
+    parts = line.split(" ", 2)
+    if len(parts) < 3:
         return None
-    if s[0] not in ("iri", "blank") or p[0] != "iri":
+    s = _node_term(parts[0])
+    p = _node_term(parts[1])
+    if s is None or p is None or p[0] != "iri":
+        return None
+    obj = parts[2]
+    if obj.startswith('"'):
+        o, _ = _read_literal(obj, 0)
+    else:
+        o = _node_term(obj.rstrip())
+    if o is None:
         return None
     return s, p, o
 
