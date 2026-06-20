@@ -7,6 +7,10 @@ mutual-friend count (then p1 id, then p2 id ascending). Reports
 
 Existing primitives: for each interested p1 and each friend m, every interested
 p2 known by m (distinct from p1 and not directly known by p1) shares m as a mutual.
+Only interested p2 ever count, so each mutual friend m is collapsed once to its
+interested friends (``knows(m) ∩ interested``) — memoized, so a popular m is scanned
+once instead of once per interested person who knows it, and the inner walk ranges
+over only the interested neighbors.
 """
 
 from rustychickpeas import Direction
@@ -18,12 +22,22 @@ def q18_friend_recommendation(g, tag_name: str):
         return []
 
     interested = set(g.neighbor_ids(tag, Direction.Incoming, ["hasInterest"]))
+
+    interested_friends = {}  # m -> knows(m) ∩ interested, computed once per m
+
+    def if_of(m):
+        s = interested_friends.get(m)
+        if s is None:
+            s = set(g.neighbor_ids(m, Direction.Outgoing, ["knows"])) & interested
+            interested_friends[m] = s
+        return s
+
     mutual = {}  # (p1, p2) -> set of mutual friends
     for p1 in interested:
         p1_knows = set(g.neighbor_ids(p1, Direction.Outgoing, ["knows"]))
         for m in p1_knows:
-            for p2 in g.neighbor_ids(m, Direction.Outgoing, ["knows"]):
-                if p2 != p1 and p2 in interested and p2 not in p1_knows:
+            for p2 in if_of(m):
+                if p2 != p1 and p2 not in p1_knows:
                     mutual.setdefault((p1, p2), set()).add(m)
 
     rows = [
