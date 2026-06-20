@@ -106,7 +106,7 @@ def main():
 
     tmp = tempfile.mkdtemp()
     n_cw, n_feat, n_men = project(EXTRACT, tmp)
-    print(f"Projected: {n_cw} CreativeWorks, {n_feat} Features, {n_men} mentions edges")
+    print(f"Projected: {n_cw} CreativeWorks, {n_feat} Features, {n_men} mentions rels")
 
     conn = kuzu.Connection(kuzu.Database(os.path.join(tmp, "db")))
     try:

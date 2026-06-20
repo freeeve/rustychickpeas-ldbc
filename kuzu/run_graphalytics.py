@@ -77,7 +77,7 @@ def main():
     load_s = time.perf_counter() - t
     nrows = conn.execute("MATCH (n:N) RETURN count(n)").get_next()[0]
     erows = conn.execute("MATCH ()-[e:E]->() RETURN count(e)").get_next()[0]
-    print(f"Kùzu loaded {NAME}: {nrows} nodes, {erows} edges  [COPY {load_s:.2f}s]")
+    print(f"Kùzu loaded {NAME}: {nrows} nodes, {erows} rels  [COPY {load_s:.2f}s]")
 
     t = time.perf_counter()
     conn.execute("CALL project_graph('G', ['N'], ['E'])")

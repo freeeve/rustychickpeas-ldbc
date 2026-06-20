@@ -5,8 +5,8 @@ reference (tasks/078).
 FinBench CSV is pipe-delimited with a free-text `comment` column (prose that can
 contain quotes/commas), so each file is trimmed to just the columns the queries
 need — read with QUOTE_NONE and only the early columns, which sit before any
-prose — then COPYed into a minimal schema matching the Rust loader's node/edge
-set (so node/edge counts line up).
+prose — then COPYed into a minimal schema matching the Rust loader's node/rel
+set (so node/rel counts line up).
 
     .venv-kuzu/bin/python kuzu/finbench_import.py [raw_dir] [db_path]
 """
@@ -100,7 +100,7 @@ def main():
             n_edges += rows
             print(f"  rel  {table}: {rows}")
 
-    print(f"Kùzu FinBench loaded: {n_nodes} nodes, {n_edges} edges -> {DBPATH} [{time.time() - t0:.1f}s]")
+    print(f"Kùzu FinBench loaded: {n_nodes} nodes, {n_edges} rels -> {DBPATH} [{time.time() - t0:.1f}s]")
 
 
 if __name__ == "__main__":

@@ -198,8 +198,8 @@ def preprocess():
         for (p, c, wf) in rows("dynamic/Person_workAt_Company", ["PersonId", "CompanyId", "workFrom"]):
             w.writerow([p, c, wf])
 
-    # --- Derived weighted edge tables for the weighted-SP queries (Q19/Q20).
-    # These replace the per-edge weight closures rust's dijkstra uses: an edge
+    # --- Derived weighted rel tables for the weighted-SP queries (Q19/Q20).
+    # These replace the per-rel weight closures rust's dijkstra uses: an rel
     # exists only where two people both know each other AND interacted / shared a
     # university, with the derived weight. knows is read once and reused.
     knows_pairs = [(int(a), int(b))
@@ -232,7 +232,7 @@ def preprocess():
                 w.writerow([a, b, wt])
                 w.writerow([b, a, wt])  # both directions (knows is undirected)
 
-    # IC14: every knows edge weighted 1/(interactions+1) (cf. rust IC14).
+    # IC14: every knows rel weighted 1/(interactions+1) (cf. rust IC14).
     with open(f"{IMPORT}/ic14weight.csv", "w", newline="") as out:
         w = csv.writer(out, delimiter="|")
         w.writerow(["from", "to", "w"])
@@ -526,7 +526,7 @@ def q13_zids():
 
 
 def q13_likes():
-    # HARNESS-REDUCED: one row per (zombie, like-edge); the harness computes zlc
+    # HARNESS-REDUCED: one row per (zombie, like-rel); the harness computes zlc
     # (liker in the zombie set) and tlc (liker active). The earlier optimized form
     # used `liker.id IN zids` inside an aggregate where zids isn't a grouping key,
     # so Kùzu evaluated it empty -> zlc was always 0 (only surfaced at SF10).

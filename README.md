@@ -57,25 +57,25 @@ parquet/object_store dependency tree resolves to versions known to build.
 | **Q7 — Related topics** | for a tag, count distinct comments (replying to messages with that tag) by the *other* tags they carry | `hasTag`, `replyOf` |
 | **Q8 — Central person** | score persons by tag interest (×100) + tagged messages in a window, plus their friends' scores | `hasInterest`, `hasTag`, `hasCreator`, `knows` |
 | **Q9 — Thread initiators** | per person, count posts in a window and the messages in those posts' reply trees | `hasCreator`, `replyOf` tree, message dates |
-| **Q11 — Friend triangles** | count triangles in the `knows` graph among a country's persons, with every edge created in a date window | location hierarchy, `knows` + **edge `creationDate`** |
+| **Q11 — Friend triangles** | count triangles in the `knows` graph among a country's persons, with every rel created in a date window | location hierarchy, `knows` + **rel `creationDate`** |
 | **Q13 — Zombies** | low-activity persons in a country, scored by share of likes coming from other zombies | location, person `creationDate`, `hasCreator`, `likes` |
 | **Q12 — Message counts** | per person, count messages (content, length<thr, after date) whose root post's language is in a set; histogram persons by that count | `replyOf*0..`, `hasCreator`, post `language` |
-| **Q19 — Interaction path** | weighted shortest path between people in two cities; edge weight = 1/(reply interactions) | location, `knows`, derived interaction weights, **dijkstra** |
-| **Q20 — Recruitment** | weighted shortest path from a company's employees to a target person; edge weight = university-cohort closeness | `workAt`, `studyAt` (`classYear`), `knows`, **dijkstra** |
+| **Q19 — Interaction path** | weighted shortest path between people in two cities; rel weight = 1/(reply interactions) | location, `knows`, derived interaction weights, **dijkstra** |
+| **Q20 — Recruitment** | weighted shortest path from a company's employees to a target person; rel weight = university-cohort closeness | `workAt`, `studyAt` (`classYear`), `knows`, **dijkstra** |
 
 The table lists the first 12; **all 20 BI queries now run** (Q3/Q4/Q10/Q14–Q18
 landed after this table was written), plus the 5 simplified patterns. Q8, Q11, Q19,
 Q20 are **rustychickpeas-only** in the head-to-head for now (Q8 uses Neo4j pattern
 comprehensions; Q11/Q19/Q20 need more of the schema loaded on the Kùzu side).
 
-**These queries drove two core features.** Q11 filters `knows` edges by their
-`creationDate` — per-edge property access *during traversal*, which the neighbor
+**These queries drove two core features.** Q11 filters `knows` rels by their
+`creationDate` — per-rel property access *during traversal*, which the neighbor
 accessors couldn't do (they return node ids, not the CSR position
 `rel_prop` needs). That gap was closed upstream by
 `GraphSnapshot::relationships(node, direction, type) -> RelationshipRef { …, pos }`.
 Q19/Q20 are weighted shortest paths, which drove
 `GraphSnapshot::dijkstra(source, …, weight) -> ShortestPaths` — the weight closure
-reads the derived/edge-property cost via `rel.pos`, so it composes directly with
+reads the derived/rel-property cost via `rel.pos`, so it composes directly with
 the relationship accessor. Exactly the kind of missing capability this exercise
 was meant to surface and fix.
 
@@ -93,7 +93,7 @@ under the IC head-to-head and `results/sf1-results.txt`).
 Apple M3 Max, rustc 1.96.0, median of 5 runs after warmup.
 
 The loaded subgraph: **2,887,110 nodes** (10,295 persons · 1,121,226 posts ·
-1,739,438 comments · 16,080 tags · 71 tagclasses) and **6,042,860 edges**
+1,739,438 comments · 16,080 tags · 71 tagclasses) and **6,042,860 rels**
 (`hasCreator`/`hasTag`/`hasInterest`/`hasType`), built from gzipped CSV with
 message properties in **~3 s**.
 
@@ -130,7 +130,7 @@ This is the honest state of play:
   next concrete step (see below).
 
 What's already defensible to state: rustychickpeas ingests 2.9 M nodes + 6 M
-edges from CSV in ~3 s single-threaded, and runs the real Q1/Q2 (no optimizer)
+rels from CSV in ~3 s single-threaded, and runs the real Q1/Q2 (no optimizer)
 in tens-to-hundreds of ms on SF1.
 
 ## Local head-to-head (Kùzu) — `kuzu/run.py`
@@ -207,7 +207,7 @@ vs query-engine overhead), while Kùzu's vectorized engine takes the native
 shortest paths (IC13/IC14) and the heavy multi-hop aggregation (IC5). IC10's gap
 is genuinely inherent (the 2-hop foaf expansion), not bad Cypher. The loader-backed half (IC1/IC3/IC5/IC7/IC10/IC11/IC12, IS1, IC14) is
 cross-checked against a faithful import extended with the matching
-edges/properties — additive, so BI stays 20/20 identical on the rebuilt
+rels/properties — additive, so BI stays 20/20 identical on the rebuilt
 `db-sf1-faithful`. Only IS4 (content text, kept out of the shared faithful import
 to keep BI loads lean) is not cross-checked. Full numbers: `results/ic-sf1.txt`.
 
@@ -219,7 +219,7 @@ not a shape check. All six algorithms validate green, and the runner reports
 **deterministic allocation counts** — the reliable signal, since wall-clock is
 noisy on a shared box.
 
-Real-scale, **wiki-Talk** (2.39 M nodes, 5.02 M edges), Apple M3 Max:
+Real-scale, **wiki-Talk** (2.39 M nodes, 5.02 M rels), Apple M3 Max:
 
 | Algorithm | Time | Allocations | Validation |
 |-----------|-----:|------------:|------------|
@@ -239,7 +239,7 @@ single-threaded laptop numbers, but the PASS/FAIL column is real validation.
 ## SPB (Semantic Publishing) — `cargo run --release --bin spb_parity`
 
 SPB is RDF/SPARQL natively; we parse the N-Triples serialization, map it to a
-property graph (IRI object → edge, literal → property, `rdf:type` → label), and
+property graph (IRI object → rel, literal → property, `rdf:type` → label), and
 hand-translate the SPARQL templates into Rust traversals — no triple store, no
 reasoner. The full-text (`full_text_search`) and geo queries run off two core
 indexes (an inverted index + a KD-tree) that this family drove into
@@ -264,7 +264,7 @@ independent SPARQL engine, not a shape check.
 
 Transaction-network schema (Account / `transfer` / `withdraw` / loan) with the 12
 Transaction Complex Reads (TCR1–TCR12) — fraud-tracing-shape temporal-path and
-fund-cycle queries that lean on the edge-`creationDate`-during-traversal capability
+fund-cycle queries that lean on the rel-`creationDate`-during-traversal capability
 Q11 drove. All 12 are implemented and benchmarked head-to-head against Kùzu on
 SF10; numbers, validation, and methodology live in
 [`docs/finbench-results.md`](docs/finbench-results.md).
