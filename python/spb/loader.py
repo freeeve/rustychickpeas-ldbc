@@ -323,6 +323,9 @@ def _load_ntriples(paths):
                 b.set_prop(subj, key, _literal_value(o))
                 stats["literals"] += 1
 
+    # uri -> node id (free from uri_of) so queries can resolve param uris without a
+    # label-free property lookup (the binding only exposes node_with_label_property).
+    stats["uri_to_node"] = {uri: nid for nid, uri in uri_of.items()}
     return b.finalize(), stats
 
 
