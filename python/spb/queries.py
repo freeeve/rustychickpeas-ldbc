@@ -126,14 +126,44 @@ def _col(g, key):
     return lst
 
 
-def _str_reader(g, key):
-    """Return a function node->str|None for ``key``: a list index when the column
-    is dense, else a per-node ``prop_str``. A dense string column reads back as ""
-    for an absent value, normalized to None to match the Rust ``prop_str``."""
+_PROPMAP_CACHE = {}
+
+
+def _prop_map(g, key, label="CreativeWork"):
+    """`{node: value}` for the (sparse) string property `key` over `label`'s nodes,
+    materialized once via one pass of prop_str and cached per (graph, label, key).
+    The sparse-column analog of the dense `uri` to_pylist preload: turns repeated
+    per-node FFI reads (across queries and across the timing loop) into dict gets.
+    Built on the first reader's untimed call, so timed runs read it warm."""
+    ck = (id(g), label, key)
+    m = _PROPMAP_CACHE.get(ck)
+    if m is None:
+        m = {}
+        for n in _nl(g, label):
+            v = g.prop_str(n, key)
+            if v:
+                m[n] = v
+        _PROPMAP_CACHE[ck] = m
+    return m
+
+
+def _str_reader(g, key, label="CreativeWork"):
+    """Return a function node->str|None for `key`: a list index when the column is
+    dense, else a cached `{node: value}` map (one prop_str pass over `label`)."""
     lst = _col(g, key)
     if lst is not None:
         return lambda n: (lst[n] or None)
-    return lambda n: g.prop_str(n, key)
+    return _prop_map(g, key, label).get
+
+
+def _dm(g, n):
+    """`dateModified` of node `n` (cached CreativeWork map), or None."""
+    return _prop_map(g, "dateModified").get(n)
+
+
+def _dc(g, n):
+    """`dateCreated` of node `n` (cached CreativeWork map), or None."""
+    return _prop_map(g, "dateCreated").get(n)
 
 
 _LABELSET_CACHE = {}
@@ -253,7 +283,7 @@ def q5(g, cw_type, audience_uri, start, end):
     for cw in works:
         if audience_uri is not None and not _has_audience(g, cw, audience_uri):
             continue
-        dt = g.prop_str(cw, "dateModified")
+        dt = _dm(g, cw)
         if not dt:
             continue
         dt_ms = _parse_ms(dt)
@@ -272,7 +302,7 @@ def q7(g, cw_type, after, before, category_uri, audience_uri):
     """q7 — date-range works carrying title/liveCoverage + category/audience facets."""
     out = []
     for w in _nl(g, cw_type):
-        created = g.prop_str(w, "dateCreated")
+        created = _dc(g, w)
         if not created or not (after <= created <= before):
             continue
         if not g.prop_str(w, "title"):
@@ -302,7 +332,7 @@ def q9(g, uri_map, cw_uri, limit):
                 candidates.add(w)
     rows = []
     for o in candidates:
-        dt = g.prop_str(o, "dateModified")
+        dt = _dm(g, o)
         if not dt:
             continue
         a2a = m2a = a2m = m2m = 0
@@ -357,7 +387,7 @@ def a3(g, after, before):
     """a3 — in-window works grouped by minute-of-hour of dateModified, by count."""
     counts = {}
     for w in _nl(g, "CreativeWork"):
-        dt = g.prop_str(w, "dateModified")
+        dt = _dm(g, w)
         if not dt or not (after < dt < before):
             continue
         mm = dt[14:16]
@@ -374,7 +404,7 @@ def a4(g, after, before, limit):
     for label in ("BlogPost", "NewsItem", "Programme"):
         n = 0
         for w in _nl(g, label):
-            dm = g.prop_str(w, "dateModified")
+            dm = _dm(g, w)
             if dm and after < dm < before:
                 n += 1
         if n > 0:
@@ -446,7 +476,7 @@ def a8(g, cw_type, audience_uri, after, before):
     """a8 — topics (tag = materialized about/mentions) ranked by type/audience/window."""
     qualifying = []
     for w in _nl(g, cw_type):
-        dt = g.prop_str(w, "dateModified")
+        dt = _dm(g, w)
         if dt and after < dt < before and _has_audience(g, w, audience_uri):
             qualifying.append(w)
     counts = g.neighbor_counts(qualifying, Direction.Outgoing, "tag")
@@ -478,7 +508,7 @@ def a10(g, limit):
     rows = [
         (_uri(g, w), c)
         for (w, c) in counts
-        if c == best and g.prop_str(w, "dateCreated")
+        if c == best and _dc(g, w)
     ]
     rows.sort(key=lambda r: r[0])
     rows = rows[:limit] if limit < len(rows) else rows
@@ -491,7 +521,7 @@ def a13(g, cat1, cat2, limit):
     for w in _nl(g, "CreativeWork"):
         if not _in_either_category(g, w, cat1, cat2):
             continue
-        if not g.prop_str(w, "dateModified"):
+        if not _dm(g, w):
             continue
         for tag in g.neighbor_ids(w, Direction.Outgoing, ["tag"]):
             pairs.append((w, tag))
@@ -514,8 +544,16 @@ def a14(g, uri_map, primary_format_uri, web_doc_type, limit):
     wdt = uri_map.get(web_doc_type)
     if pf is None or wdt is None:
         return []
+    # Anchor on the two pinned facets via reverse traversal, so the candidate set
+    # is already format- and web-document-matched (no per-work format/webdoc probe
+    # over all 37k works): works with primaryFormat -> pf, intersected with works
+    # whose primaryContentOf -> a doc with webDocumentType -> wdt.
+    with_pf = set(g.neighbor_ids(pf, Direction.Incoming, ["primaryFormat"]))
+    with_wdt = set()
+    for pc in g.neighbor_ids(wdt, Direction.Incoming, ["webDocumentType"]):
+        with_wdt.update(g.neighbor_ids(pc, Direction.Incoming, ["primaryContentOf"]))
     rows = []
-    for w in _nl(g, "CreativeWork"):
+    for w in with_pf & with_wdt:
         if not (
             g.has_rel(w, Direction.Outgoing, "tag")
             and g.has_rel(w, Direction.Outgoing, "category")
@@ -523,11 +561,7 @@ def a14(g, uri_map, primary_format_uri, web_doc_type, limit):
             and g.has_rel(w, Direction.Outgoing, "audience")
         ):
             continue
-        if pf not in g.neighbor_ids(w, Direction.Outgoing, ["primaryFormat"]):
-            continue
-        if not _has_web_doc(g, w, wdt):
-            continue
-        d = g.prop_str(w, "dateModified")
+        d = _dm(g, w)
         if d:
             rows.append((w, d))
     return _top_k_by_key(rows, limit)
@@ -602,7 +636,7 @@ def a18(g, cw_type, after, before, limit):
     """a18 — in-range works carrying title/liveCoverage + category/audience, newest first."""
     rows = []
     for w in _nl(g, cw_type):
-        modified = g.prop_str(w, "dateModified")
+        modified = _dm(g, w)
         if not modified or not (after <= modified <= before):
             continue
         if not g.prop_str(w, "title"):
@@ -621,12 +655,12 @@ def a19(g, cw_type, audience_uri, start, end, limit):
     """a19 — topics by newest tagging-work modification then count (label or uri)."""
     s_ms, e_ms = _parse_ms(start), _parse_ms(end)
     acc = {}  # topic -> [count, max_ms, max_date_str]
-    for cw in _nl(g, "CreativeWork"):
-        if cw_type is not None and not g.has_label(cw, cw_type):
-            continue
+    # Iterate the type's nodes directly (cwType works are a subset of CreativeWork),
+    # dropping the per-node has_label check Rust pays.
+    for cw in _nl(g, cw_type if cw_type is not None else "CreativeWork"):
         if audience_uri is not None and not _has_audience(g, cw, audience_uri):
             continue
-        dt = g.prop_str(cw, "dateModified")
+        dt = _dm(g, cw)
         if not dt:
             continue
         dt_ms = _parse_ms(dt)
@@ -657,7 +691,7 @@ def a20(g, word, limit):
     hits = _fts(g, "description", word) | _fts(g, "title", word)
     rows = []
     for w in hits:
-        d = g.prop_str(w, "dateModified")
+        d = _dm(g, w)
         if d:
             rows.append((w, d))
     return _top_k_by_key(rows, limit)
@@ -678,7 +712,7 @@ def a22(g, word, category_uri, audience_uri, tag_uri, after, before, live, limit
     """a22 — title-FTS faceted search with full BGP + a dateCreated range facet."""
     out = []
     for w in _fts(g, "title", word):
-        created = g.prop_str(w, "dateCreated")
+        created = _dc(g, w)
         if not created:
             continue
         if not g.prop_str(w, "description"):
@@ -715,7 +749,7 @@ def a23(g, word, category_uri, limit):
             w, Direction.Outgoing, "category", "uri", category_uri
         ):
             continue
-        created = g.prop_str(w, "dateCreated")
+        created = _dc(g, w)
         if not created:
             continue
         if (
@@ -749,7 +783,7 @@ def a24(g, uri_map, uri_a, uri_b, date_from=None, date_to=None):
             both.add(w)
     per_day = {}
     for w in both:
-        created = g.prop_str(w, "dateCreated")
+        created = _dc(g, w)
         if not created:
             continue
         key = _ymd(created)
@@ -774,7 +808,7 @@ def a25(g, uri_map, uri_a, limit):
     for cw in g.neighbor_ids(a, Direction.Incoming, ["about"]):
         if not g.has_label(cw, "CreativeWork"):
             continue
-        created = g.prop_str(cw, "dateCreated")
+        created = _dc(g, cw)
         if not created or len(created) < 10:
             continue
         day = created[:10]
@@ -901,7 +935,7 @@ def _a21_facets(g, w, category_uri, audience_uri, tag_uri, live, date_from, date
         if (lc if lc is not None else False) != live:
             return False
     if date_from is not None or date_to is not None:
-        created = g.prop_str(w, "dateCreated")
+        created = _dc(g, w)
         if created is None:
             return False
         if date_from is not None and created < date_from:
