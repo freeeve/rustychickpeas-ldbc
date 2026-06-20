@@ -1,7 +1,7 @@
 """Tests for the Python LDBC Interactive (IC/IS) queries on tiny synthetic data."""
 
 from ic import (
-    is1, is2, is3, is5, is6, is7,
+    is1, is2, is3, is4, is5, is6, is7,
     ic1, ic2, ic3, ic4, ic5, ic6, ic7, ic8, ic9, ic10, ic11, ic12, ic13, ic14,
 )
 from rustychickpeas import Direction, GraphSnapshotBuilder
@@ -296,3 +296,14 @@ def test_ic7_recent_likers():
     b.add_relationship(3, 2, "likes"); b.set_relationship_prop_i64(3, 2, "likes", "ld", 2000)
     g = b.finalize()
     assert ic7.ic7_recent_likers(g, 0) == [(3, 2000, 2, True), (1, 1000, 2, False)]
+
+
+def test_is4_message_content():
+    b = GraphSnapshotBuilder()
+    b.add_node(["Post"], node_id=0)
+    b.set_prop(0, "ms", 12345)
+    b.set_prop(0, "ctext", "hello world")
+    b.add_node(["Comment"], node_id=1)  # no ctext -> None
+    g = b.finalize()
+    assert is4.is4_message_content(g, 0) == (12345, "hello world")
+    assert is4.is4_message_content(g, 1) is None

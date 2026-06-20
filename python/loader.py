@@ -34,20 +34,29 @@ def iter_rows(entity_dir: str, cols):
                 yield [row[i] for i in idx]
 
 
-def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False) -> int:
-    """Write ``id,year,day,len,content`` (+ ``lang`` for Post) for one message
-    label, deriving year/day from creationDate. ``content`` is stored as 0/1.
-    Returns the row count.
+def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False,
+                        with_ctext: bool = False) -> int:
+    """Write ``id,year,day,len,content`` (+ ``lang`` for Post) for one message label,
+    deriving year/day from creationDate. ``content`` is stored as 0/1. With
+    ``with_ctext`` a ``ctext`` column carries the message text (IS4): the content, or
+    a Post's imageFile when content is empty. Returns the row count.
     """
-    src = ["id", "creationDate", "content", "length"] + (["language"] if with_lang else [])
+    src = ["id", "creationDate", "content", "length"]
+    if with_lang:
+        src.append("language")
+    if with_ctext and with_lang:  # Posts carry an imageFile fallback
+        src.append("imageFile")
     header = ["id", "year", "day", "len", "content"] + (["lang"] if with_lang else []) + ["ms"]
+    if with_ctext:
+        header.append("ctext")
     n = 0
     with open(out_path, "w", newline="", encoding="utf-8") as out:
         w = csv.writer(out)
         w.writerow(header)
         date_cache = {}
         for row in iter_rows(entity_dir, src):
-            ext_id, cdate, content, length = row[0], row[1], row[2], row[3]
+            d = dict(zip(src, row))
+            ext_id, cdate, content, length = d["id"], d["creationDate"], d["content"], d["length"]
             # Many messages share a calendar day; memoize the day math on the
             # YYYY-MM-DD prefix (~1-2k distinct days vs millions of rows).
             prefix = cdate[:10]
@@ -68,8 +77,10 @@ def _normalize_messages(entity_dir: str, out_path: str, with_lang: bool = False)
             ln = int(length) if length else 0
             out_row = [ext_id, year, day, ln, 1 if content else 0]
             if with_lang:
-                out_row.append(row[4])
+                out_row.append(d["language"])
             out_row.append(ms)
+            if with_ctext:
+                out_row.append(content if content else d.get("imageFile", ""))
             w.writerow(out_row)
             n += 1
     return n
@@ -253,7 +264,7 @@ def _load_rels_multi(builder, entity_dir: str, rels) -> int:
     return n
 
 
-def load_bi_graph(snapshot_path: str):
+def load_bi_graph(snapshot_path: str, with_content_text: bool = False):
     """Build the full LDBC SNB BI graph (mirrors src/loader.rs): all entities and
     rels, so query timings are comparable to the Rust bench. Nodes are loaded in
     the same order as the Rust loader (so internal ids align) and carry their
@@ -282,12 +293,15 @@ def load_bi_graph(snapshot_path: str):
         s["forums"] = _normalize_forums(f"{dynamic}/Forum", forum_csv)
         b.load_nodes_from_csv(forum_csv, property_columns=["id", "title", "fday"], default_label="Forum")
 
+        ctext = ["ctext"] if with_content_text else []
         post_csv = os.path.join(tmp, "Post.csv")
-        s["posts"] = _normalize_messages(f"{dynamic}/Post", post_csv, with_lang=True)
-        b.load_nodes_from_csv(post_csv, property_columns=["id", "year", "day", "len", "content", "lang", "ms"], default_label="Post")
+        s["posts"] = _normalize_messages(f"{dynamic}/Post", post_csv, with_lang=True,
+                                         with_ctext=with_content_text)
+        b.load_nodes_from_csv(post_csv, property_columns=["id", "year", "day", "len", "content", "lang", "ms"] + ctext, default_label="Post")
         comment_csv = os.path.join(tmp, "Comment.csv")
-        s["comments"] = _normalize_messages(f"{dynamic}/Comment", comment_csv)
-        b.load_nodes_from_csv(comment_csv, property_columns=["id", "year", "day", "len", "content", "ms"], default_label="Comment")
+        s["comments"] = _normalize_messages(f"{dynamic}/Comment", comment_csv,
+                                            with_ctext=with_content_text)
+        b.load_nodes_from_csv(comment_csv, property_columns=["id", "year", "day", "len", "content", "ms"] + ctext, default_label="Comment")
 
         s["orgs"] = _load_nodes(b, f"{static}/Organisation", property_columns=["id", "name"], label_columns=["type"], default_label="Organisation")
 
