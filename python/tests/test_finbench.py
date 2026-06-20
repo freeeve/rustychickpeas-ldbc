@@ -56,6 +56,26 @@ def _fixture():
     return b.finalize()
 
 
+NO_TRUNC = 100
+
+
+def test_cr1_blocked_medium_upstream():
+    g = _fixture()
+    # Reverse from A_HUB: A_MID(300) -> A_UP(200) -> A_F3(50); A_UP is signed in by
+    # the blocked medium M0 at distance 2.
+    assert fb.cr1(g, A_HUB, WMIN, WMAX, NO_TRUNC, False) == [(A_UP, 2, M0, "Medium")]
+    # No transfer is in [1000, 2000], so the reverse trace can't start.
+    assert fb.cr1(g, A_HUB, 1000, 2000, NO_TRUNC, False) == []
+
+
+def test_cr2_loan_gather():
+    g = _fixture()
+    # P0 owns A_HUB; reverse trace reaches {A_MID, A_UP, A_F3}; only A_UP has an
+    # incoming deposit (from L0: amount 7000, balance 3000).
+    r = fb.cr2(g, P0, WMIN, WMAX, NO_TRUNC, False)
+    assert r == [(A_UP, 7000.0, 3000.0)]
+
+
 def test_cr3_shortest_transfer_path():
     g = _fixture()
     # A_HUB -> A_F1 -> A_F2 -> A_F3 is the only forward route: 3 hops.
@@ -68,6 +88,60 @@ def test_cr4_three_cycle():
     g = _fixture()
     # A_F1 -> A_F2 -> A_F3 -> A_F1 with strictly increasing ts (150<160<170).
     assert fb.transfer_cycles(g, A_F1, 1000.0, 1000) == [[A_F1, A_F2, A_F3]]
+
+
+def test_cr5_exact_transfer_trace():
+    g = _fixture()
+    # P0 owns A_HUB; ascending-ts forward traces: [hub,f1], [hub,f1,f2],
+    # [hub,f1,f2,f3]. Sorted by length descending.
+    paths = fb.cr5(g, P0, WMIN, WMAX, NO_TRUNC, "desc")
+    assert len(paths) == 3
+    assert paths[0] == [A_HUB, A_F1, A_F2, A_F3]
+
+
+def test_cr6_withdraw_after_many_to_one():
+    g = _fixture()
+    # Card A_F2 withdraws 1500 (last ts 200); its only in-window incoming transfer
+    # before that is from A_F1 (2000).
+    assert fb.cr6(g, A_F2, 0.0, 0.0, WMIN, WMAX, NO_TRUNC, "desc") == [(A_F1, 2000.0, 1500.0)]
+
+
+def test_cr7_in_out_ratio():
+    g = _fixture()
+    # A_F1 in: A_HUB(500) + A_F3(2000) = 2 sources, 2500; out: A_F2(2000) = 1 dest.
+    # ratio 2500/2000 = 1.25.
+    assert fb.cr7(g, A_F1, 0.0, WMIN, WMAX, NO_TRUNC, False) == (2, 1, 1.25)
+    # Limit 1, descending: keep the newest incoming (A_F3 @170, 2000) -> 2000/2000 = 1.0.
+    assert fb.cr7(g, A_F1, 0.0, WMIN, WMAX, 1, False) == (1, 1, 1.0)
+
+
+def test_cr8_transfer_trace_after_loan():
+    g = _fixture()
+    # L0 deposits A_UP (d1); A_UP -> A_MID (d2) -> A_HUB (d3).
+    r = fb.cr8(g, L0, 0.0, WMIN, WMAX, NO_TRUNC, "DESC")
+    dist = {did: d for (did, _ratio, d) in r}
+    assert dist == {A_UP: 1, A_MID: 2, A_HUB: 3}
+
+
+def test_cr9_laundering_ratios():
+    g = _fixture()
+    # A_UP: repay 300, deposit-in 1000, transfer-out 800, transfer-in 400.
+    repay, deposit, transfer = fb.cr9(g, A_UP, 0.0, WMIN, WMAX, 100, False)
+    assert abs(repay - 0.3) < 1e-6      # 300/1000
+    assert abs(deposit - 0.75) < 1e-6   # 300/400
+    assert abs(transfer - 2.0) < 1e-6   # 800/400
+
+
+def test_cr10_investor_similarity():
+    g = _fixture()
+    # P0 and P1 both invest in C0; P0's only co-investor is P1, sharing 1 company.
+    assert fb.cr10(g, P0, WMIN, WMAX) == [(P1, 1)]
+
+
+def test_cr12_company_transfer():
+    g = _fixture()
+    # P1 owns A_P; A_P transfers 900 to A_C, which Company C0 owns.
+    assert fb.cr12(g, P1, WMIN, WMAX, NO_TRUNC, False) == [(A_C, 900.0)]
 
 
 def test_cr11_guarantee_exposure():
