@@ -1,11 +1,11 @@
 """IC14 — weighted shortest-path cost between two persons over ``knows``, where
-each edge costs ``1 / (reply_interactions + 1)`` (more interaction = cheaper).
+each rel costs ``1 / (reply_interactions + 1)`` (more interaction = cheaper).
 Returns the path cost, or ``None`` if unreachable.
 
 The interaction weights are the same one-mode projection as BI Q19 (``fold_via``
 of ``replyOf`` through each message's creator); a native single-source ``dijkstra``
-with ``base=1`` (every edge traversable) and an early-exit ``target`` reads them
-without a per-edge Python callback.
+with ``base=1`` (every rel traversable) and an early-exit ``target`` reads them
+without a per-rel Python callback.
 """
 
 from rustychickpeas import Direction

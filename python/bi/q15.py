@@ -1,12 +1,12 @@
 """BI Q15 — weighted interaction path.
 
-Weighted shortest path over the knows graph where each edge weight is 1/(w+1) and
+Weighted shortest path over the knows graph where each rel weight is 1/(w+1) and
 w sums reply interactions between the two people whose thread root-post forum was
 created in [start_day, end_day] (1.0 if a Post is replied to, else 0.5). Returns the
 path cost, or -1 if unreachable.
 
 The interaction weights are built once over comments (memoized thread roots + per-
-root forum), then a heap Dijkstra runs over the full knows graph (every edge
+root forum), then a heap Dijkstra runs over the full knows graph (every rel
 traversable, weight 1/(w+1)).
 """
 

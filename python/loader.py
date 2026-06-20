@@ -124,8 +124,8 @@ def _normalize_persons(entity_dir: str, out_path: str) -> int:
 
 
 def _normalize_knows(entity_dir: str, out_path: str) -> int:
-    """Write ``Person1Id,Person2Id,kd`` for knows edges, deriving kd (creation day)
-    from creationDate so BI Q11 can date-filter knows edges. Returns the row count."""
+    """Write ``Person1Id,Person2Id,kd`` for knows rels, deriving kd (creation day)
+    from creationDate so BI Q11 can date-filter knows rels. Returns the row count."""
     n = 0
     with open(out_path, "w", newline="", encoding="utf-8") as out:
         w = csv.writer(out)
@@ -176,7 +176,7 @@ def _load_nodes(builder, entity_dir: str, **kwargs) -> int:
     return n
 
 
-def _load_edges(builder, entity_dir: str, start_ref, end_ref, rel_type: str) -> int:
+def _load_rels(builder, entity_dir: str, start_ref, end_ref, rel_type: str) -> int:
     """Load every ``part-*.csv.gz`` in ``entity_dir`` as relationships, resolving
     endpoints by the property refs (empty FK cells are skipped). Returns the count."""
     n = 0
@@ -206,12 +206,12 @@ def _load_rels_multi(builder, entity_dir: str, rels) -> int:
 
 def load_bi_graph(snapshot_path: str):
     """Build the full LDBC SNB BI graph (mirrors src/loader.rs): all entities and
-    edges, so query timings are comparable to the Rust bench. Nodes are loaded in
+    rels, so query timings are comparable to the Rust bench. Nodes are loaded in
     the same order as the Rust loader (so internal ids align) and carry their
-    external LDBC id as the ``id`` property; edges resolve by that property.
+    external LDBC id as the ``id`` property; rels resolve by that property.
 
     Node props beyond what the ported queries read are kept minimal (id + name);
-    edge properties (join dates, weights) are not loaded yet. Returns
+    rel properties (join dates, weights) are not loaded yet. Returns
     ``(snapshot, stats)``.
     """
     dynamic = os.path.join(snapshot_path, "dynamic")
@@ -242,9 +242,9 @@ def load_bi_graph(snapshot_path: str):
 
         s["orgs"] = _load_nodes(b, f"{static}/Organisation", property_columns=["id", "name"], label_columns=["type"], default_label="Organisation")
 
-        # --- EDGES (resolved by the "id" property; loaded off the raw gz) ---
-        # Single-rel-per-file edges.
-        edges = [
+        # --- RELS (resolved by the "id" property; loaded off the raw gz) ---
+        # Single-rel-per-file rels.
+        rels = [
             (f"{static}/TagClass", _ref("id", "TagClass"), _ref("SubclassOfTagClassId", "TagClass"), "isSubclassOf"),
             (f"{static}/Tag", _ref("id", "Tag"), _ref("TypeTagClassId", "TagClass"), "hasType"),
             (f"{static}/Place", _ref("id", "Place"), _ref("PartOfPlaceId", "Place"), "isPartOf"),
@@ -256,14 +256,14 @@ def load_bi_graph(snapshot_path: str):
             (f"{dynamic}/Person_hasInterest_Tag", _ref("personId", "Person"), _ref("interestId", "Tag"), "hasInterest"),
             (f"{dynamic}/Person_likes_Post", _ref("PersonId", "Person"), _ref("PostId", "Post"), "likes"),
             (f"{dynamic}/Person_likes_Comment", _ref("PersonId", "Person"), _ref("CommentId", "Comment"), "likes"),
-            # knows is loaded below with its creationDate (kd) edge property.
+            # knows is loaded below with its creationDate (kd) rel property.
             (f"{static}/Organisation", _ref("id", "Organisation"), _ref("LocationPlaceId", "Place"), "orgPlace"),
             (f"{dynamic}/Person_workAt_Company", _ref("PersonId", "Person"), _ref("CompanyId", "Company"), "workAt"),
-            # studyAt is loaded below with its classYear (cy) edge property.
+            # studyAt is loaded below with its classYear (cy) rel property.
         ]
         total = 0
-        for entity_dir, start_ref, end_ref, rel_type in edges:
-            total += _load_edges(b, entity_dir, start_ref, end_ref, rel_type)
+        for entity_dir, start_ref, end_ref, rel_type in rels:
+            total += _load_rels(b, entity_dir, start_ref, end_ref, rel_type)
 
         # Merged-FK message files: several rels per file, one pass each.
         total += _load_rels_multi(b, f"{dynamic}/Post", [
@@ -280,7 +280,7 @@ def load_bi_graph(snapshot_path: str):
         ])
 
         # knows (undirected -> both directions) carrying its creationDate as the kd
-        # edge property (epoch day), so Q11 can date-filter knows edges.
+        # rel property (epoch day), so Q11 can date-filter knows rels.
         knows_csv = os.path.join(tmp, "knows.csv")
         _normalize_knows(f"{dynamic}/Person_knows_Person", knows_csv)
         total += sum(b.load_relationships_from_csv_multi(knows_csv, [
@@ -288,11 +288,11 @@ def load_bi_graph(snapshot_path: str):
             Rel("knows", Ref("Person2Id", "Person"), Ref("Person1Id", "Person"), props=[Prop("kd", "kd", int)]),
         ]))
 
-        # studyAt carrying classYear as the cy edge property (epoch year), for Q20.
+        # studyAt carrying classYear as the cy rel property (epoch year), for Q20.
         total += _load_rels_multi(b, f"{dynamic}/Person_studyAt_University", [
             Rel("studyAt", Ref("PersonId", "Person"), Ref("UniversityId", "University"),
                 props=[Prop("cy", "classYear", int)]),
         ])
-        s["edges"] = total
+        s["rels"] = total
 
     return b.finalize(), s

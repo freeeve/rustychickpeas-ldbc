@@ -120,7 +120,7 @@ def test_q4_top_creators():
         b.set_prop(nid, "id", ext)
     b.set_prop(8, "fday", 200)  # F1 after cutoff (100)
     b.set_prop(9, "fday", 50)   # F2 before cutoff -> excluded
-    edges = [
+    rels = [
         (2, 0, "isPartOf"), (3, 1, "isPartOf"),
         (4, 2, "isLocatedIn"), (5, 2, "isLocatedIn"),
         (6, 3, "isLocatedIn"), (7, 3, "isLocatedIn"),
@@ -130,7 +130,7 @@ def test_q4_top_creators():
         (11, 10, "replyOf"), (12, 11, "replyOf"),
         (6, 10, "hasCreator"), (4, 11, "hasCreator"), (5, 12, "hasCreator"),
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -153,14 +153,14 @@ def test_q5_active_posters():
     b.set_prop(0, "name", "T")
     for nid, ext in [(1, 1), (2, 2), (3, 3), (4, 4)]:
         b.set_prop(nid, "id", ext)
-    edges = [
+    rels = [
         (5, 0, "hasTag"), (6, 0, "hasTag"),
         (1, 5, "hasCreator"), (1, 6, "hasCreator"),  # P1 created both
         (6, 5, "replyOf"),                            # M2 replies to M1
         (2, 5, "likes"), (3, 5, "likes"),             # M1: 2 likes
         (4, 6, "likes"),                              # M2: 1 like
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -180,14 +180,14 @@ def test_q6_authoritative():
     b.set_prop(0, "name", "T")
     for nid, ext in [(1, 1), (2, 2), (3, 3)]:
         b.set_prop(nid, "id", ext)
-    edges = [
+    rels = [
         (5, 0, "hasTag"), (1, 5, "hasCreator"),       # P1 created tagged M1
         (2, 5, "likes"), (3, 5, "likes"),             # L1, L2 liked M1
         (2, 6, "hasCreator"), (3, 7, "hasCreator"),   # L1 created M_a, L2 created M_b
         (1, 6, "likes"), (3, 6, "likes"),             # M_a: 2 likes
         (1, 7, "likes"),                              # M_b: 1 like
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -208,13 +208,13 @@ def test_q7_related_topics():
     b.set_prop(0, "name", "T")
     b.set_prop(1, "name", "U")
     b.set_prop(2, "name", "V")
-    edges = [
+    rels = [
         (5, 0, "hasTag"),
         (6, 5, "replyOf"), (6, 1, "hasTag"), (6, 2, "hasTag"),  # C1 -> U, V
         (7, 5, "replyOf"), (7, 1, "hasTag"), (7, 0, "hasTag"),  # C2 -> U, T (skipped)
         (8, 5, "replyOf"), (8, 1, "hasTag"),                    # C3 -> U
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -233,12 +233,12 @@ def test_q8_central_person():
     for nid, ext in [(1, 1), (2, 2), (3, 3)]:
         b.set_prop(nid, "id", ext)
     b.set_prop(5, "day", 150)
-    edges = [
+    rels = [
         (1, 0, "hasInterest"),                    # P1 interested in T
         (5, 0, "hasTag"), (2, 5, "hasCreator"),   # P2's tagged message
         (1, 2, "knows"), (2, 1, "knows"),         # P1 <-> P2
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -264,12 +264,12 @@ def test_q9_thread_initiators():
     b.set_prop(1, "id", 2)
     for nid, day in [(2, 150), (3, 160), (4, 250), (5, 120), (6, 250), (7, 110), (8, 90), (9, 130)]:
         b.set_prop(nid, "day", day)
-    edges = [
+    rels = [
         (0, 2, "hasCreator"), (0, 6, "hasCreator"), (1, 7, "hasCreator"),
         (3, 2, "replyOf"), (4, 3, "replyOf"), (5, 2, "replyOf"),  # A's tree
         (8, 7, "replyOf"), (9, 8, "replyOf"),                     # D's tree
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -294,14 +294,14 @@ def test_q10_experts():
     b.set_prop(3, "name", "X")
     b.set_prop(5, "name", "TC")
     b.set_prop(6, "name", "Tg")
-    edges = [
+    rels = [
         (0, 1, "knows"), (1, 0, "knows"), (1, 2, "knows"), (2, 1, "knows"),
         (4, 3, "isPartOf"), (1, 4, "isLocatedIn"), (2, 4, "isLocatedIn"),
         (6, 5, "hasType"),
         (1, 7, "hasCreator"), (2, 8, "hasCreator"),
         (7, 6, "hasTag"), (8, 6, "hasTag"),
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -309,7 +309,7 @@ def test_q10_experts():
 
 
 def test_q11_friend_triangles():
-    # A,B,C,E in country X; D out of country. In-window edges form triangles ABC
+    # A,B,C,E in country X; D out of country. In-window rels form triangles ABC
     # and ABE; C-E is out of window (250), so ACE/BCE don't count -> 2 triangles.
     b = GraphSnapshotBuilder()
     nodes = [(0, "Country"), (1, "City"), (2, "Person"), (3, "Person"),
@@ -363,13 +363,13 @@ def test_q12_message_counts():
         b.set_prop(nid, "len", length)
         if lang is not None:
             b.set_prop(nid, "lang", lang)
-    edges = [
+    rels = [
         (2, 0, "replyOf"), (3, 1, "replyOf"),
         (7, 0, "hasCreator"), (7, 2, "hasCreator"),   # A created P1, C1
         (8, 1, "hasCreator"), (8, 3, "hasCreator"),   # B created P2, C2
         (8, 4, "hasCreator"), (8, 5, "hasCreator"), (8, 6, "hasCreator"),
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -394,14 +394,14 @@ def test_q13_zombies():
         b.set_prop(nid, "pym", pym)
     for nid in [6] + list(range(7, 12)):
         b.set_prop(nid, "day", 600)
-    edges = [
+    rels = [
         (1, 0, "isPartOf"),
         (2, 1, "isLocatedIn"), (3, 1, "isLocatedIn"), (4, 1, "isLocatedIn"), (5, 1, "isLocatedIn"),
         (2, 6, "hasCreator"),                       # Z1 created M_z1
         (3, 6, "likes"), (4, 6, "likes"),           # Z2 (zombie) + NZ like M_z1
     ]
-    edges += [(4, n, "hasCreator") for n in range(7, 12)]  # NZ created 5 messages
-    for u, v, rel in edges:
+    rels += [(4, n, "hasCreator") for n in range(7, 12)]  # NZ created 5 messages
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -422,7 +422,7 @@ def test_q14_international_dialog():
     b.set_prop(3, "name", "CityB")
     b.set_prop(4, "id", 1)
     b.set_prop(5, "id", 2)
-    edges = [
+    rels = [
         (2, 0, "isPartOf"), (3, 1, "isPartOf"),
         (4, 2, "isLocatedIn"), (5, 3, "isLocatedIn"),
         (4, 5, "knows"), (5, 4, "knows"),
@@ -430,7 +430,7 @@ def test_q14_international_dialog():
         (4, 7, "hasCreator"), (7, 6, "replyOf"),  # p1's comment replies to M2 (+4)
         (4, 6, "likes"),                    # p1 likes M2 (+10)
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -454,7 +454,7 @@ def test_q16_fake_news():
     for nid in range(7, 13):
         b.set_prop(nid, "day", 100)
     b.set_prop(13, "day", 200)
-    edges = [
+    rels = [
         (7, 0, "hasTag"), (8, 0, "hasTag"), (9, 0, "hasTag"),
         (10, 0, "hasTag"), (11, 0, "hasTag"), (12, 0, "hasTag"), (13, 1, "hasTag"),
         (2, 7, "hasCreator"), (2, 8, "hasCreator"),  # P1 made two tag-A messages
@@ -464,7 +464,7 @@ def test_q16_fake_news():
         (4, 5, "knows"), (5, 4, "knows"),            # P3-P4
         (4, 6, "knows"), (6, 4, "knows"),            # P3-P5
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -516,7 +516,7 @@ def test_q19_interaction_path():
     b.set_prop(2, "id", 1)
     b.set_prop(3, "id", 2)
     b.set_prop(4, "id", 3)
-    edges = [
+    rels = [
         (2, 0, "isLocatedIn"), (3, 1, "isLocatedIn"),
         (2, 4, "knows"), (4, 2, "knows"), (4, 3, "knows"), (3, 4, "knows"),
         (4, 5, "hasCreator"), (3, 6, "hasCreator"),   # x made Mx, p2 made Mp2
@@ -524,7 +524,7 @@ def test_q19_interaction_path():
         (7, 5, "replyOf"), (8, 5, "replyOf"),         # p1 replied to x twice
         (9, 6, "replyOf"),                            # x replied to p2 once
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -535,7 +535,7 @@ def test_q19_interaction_path():
 
 def test_q20_recruitment():
     # e1,e2 work at Co. Both and target p2 studied at Uni: e1@2010 vs p2@2012 -> diff
-    # 2 -> weight 3; e2@2007 vs p2@2012 -> diff 5 -> weight 6. Direct knows edges, so
+    # 2 -> weight 3; e2@2007 vs p2@2012 -> diff 5 -> weight 6. Direct knows rels, so
     # e1 reaches p2 at 3.0, e2 at 6.0.
     b = GraphSnapshotBuilder()
     nodes = [(0, "Company"), (1, "University"), (2, "Person"), (3, "Person"), (4, "Person")]
@@ -560,7 +560,7 @@ def test_q20_recruitment():
 
 def test_q15_weighted_path():
     # p1(id14) knows p2(id16). p1's comment replies to p2's Post; that post's forum
-    # was created in-window -> interaction weight 1.0 (a Post). Edge weight = 1/(1+1)
+    # was created in-window -> interaction weight 1.0 (a Post). Rel weight = 1/(1+1)
     # = 0.5, so the p1->p2 path cost is 0.5.
     b = GraphSnapshotBuilder()
     nodes = [(0, "Forum"), (1, "Person"), (2, "Person"), (3, "Post"), (4, "Comment")]
@@ -569,13 +569,13 @@ def test_q15_weighted_path():
     b.set_prop(0, "fday", 150)
     b.set_prop(1, "id", 14)
     b.set_prop(2, "id", 16)
-    edges = [
+    rels = [
         (1, 2, "knows"), (2, 1, "knows"),
         (0, 3, "containerOf"),               # forum contains the post
         (2, 3, "hasCreator"),                # p2 made the post
         (1, 4, "hasCreator"), (4, 3, "replyOf"),  # p1's comment replies to it
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 
@@ -600,14 +600,14 @@ def test_q17_information_propagation():
     b.set_prop(6, "ms", 1000)
     b.set_prop(7, "ms", 10_000_000)
     b.set_prop(8, "ms", 10_000_001)
-    edges = [
+    rels = [
         (6, 0, "hasTag"), (7, 0, "hasTag"), (8, 0, "hasTag"),
         (1, 6, "containerOf"), (2, 7, "containerOf"),
         (3, 6, "hasCreator"), (5, 7, "hasCreator"), (4, 8, "hasCreator"),
         (8, 7, "replyOf"),
         (1, 4, "hasMember"), (1, 5, "hasMember"),  # p2, p3 are F1 members
     ]
-    for u, v, rel in edges:
+    for u, v, rel in rels:
         b.add_relationship(u, v, rel)
     g = b.finalize()
 

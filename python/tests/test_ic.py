@@ -80,8 +80,8 @@ def test_ic13_shortest_path():
 def test_ic14_weighted_path():
     g = _social()
     interaction = ic14.build_interaction(g)
-    # one reply interaction between creators 1 and 2 -> edge (1,2) cost 1/(1+1)=0.5;
-    # edge (0,1) has no interaction -> 1/(0+1)=1.0. Path 0-1-2 = 1.5.
+    # one reply interaction between creators 1 and 2 -> rel (1,2) cost 1/(1+1)=0.5;
+    # rel (0,1) has no interaction -> 1/(0+1)=1.0. Path 0-1-2 = 1.5.
     assert ic14.ic14_weighted_path(g, 0, 2, interaction) == 1.5
 
 

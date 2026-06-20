@@ -61,8 +61,8 @@ def q17_information_propagation(g, tag_name: str, delta_hours: int):
                 cand.append((p2, p3, msg2, f2, g.get_property(msg2, "ms") or 0))
 
     # Forum membership, built from the FORUM side. A person's incoming hasMember is
-    # buried among their (knows-heavy) incoming edges, but each forum in play has few
-    # outgoing hasMember edges -> build forum->members for the forums that appear in
+    # buried among their (knows-heavy) incoming rels, but each forum in play has few
+    # outgoing hasMember rels -> build forum->members for the forums that appear in
     # m1/cand and invert. Only relevant-forum memberships are needed: the join only
     # ever tests f1 (from m1) and f2 (from cand).
     relevant = {f1 for _, f1, _ in m1_list} | {f2 for _, _, _, f2, _ in cand}

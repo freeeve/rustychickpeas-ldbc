@@ -1,7 +1,7 @@
 """BI Q20 — recruitment.
 
 From each employee of a company, the shortest weighted path on the knows graph to
-a target person, where edge weight is the closeness of the two people's university
+a target person, where rel weight is the closeness of the two people's university
 cohorts (min |classYear difference| + 1); return the 20 employees with the smallest
 path weight. Reports ``(person_id, dist)``.
 
@@ -50,7 +50,7 @@ def build_study_weight_map(g, studyat):
 
 
 def _dijkstra(g, src, weight_map, target):
-    """Shortest weighted distance from src to target over knows edges weighted by
+    """Shortest weighted distance from src to target over knows rels weighted by
     weight_map (untraversable where absent); target early-exit. None if unreachable."""
     dist = {src: 0.0}
     pq = [(0.0, src)]
