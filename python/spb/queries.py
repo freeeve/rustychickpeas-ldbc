@@ -158,7 +158,12 @@ _FTS_CACHE = {}
 
 def _fts(g, key, word, label="CreativeWork"):
     """Node set of ``label`` whose ``key`` text contains the single token ``word``
-    (core ``full_text_search`` semantics). Cached per (graph, label, key, word)."""
+    (core ``full_text_search`` semantics). Uses the native inverted index when the
+    binding exposes it (re-run fresh, like Rust — the index is warm after the first
+    call); else falls back to a cached Python token scan."""
+    fts = getattr(g, "full_text_search", None)
+    if fts is not None:
+        return set(fts(label, key, word))
     ck = (id(g), label, key, word)
     hit = _FTS_CACHE.get(ck)
     if hit is not None:
@@ -379,38 +384,47 @@ def a4(g, after, before, limit):
     return [[k, n] for k, n in rows]
 
 
-def a5(g, entity_label, cat1, cat2, limit):
-    """a5 — about-things of an entity type ranked by works in either category."""
+def a5(g, uri_map, entity_label, cat1, cat2, limit):
+    """a5 — about-things of an entity type ranked by works in either category.
+    Flipped to native: category nodes -> incoming works (the works in those two
+    categories), then the native ``neighbor_counts`` histogram over their ``about``
+    targets, kept to the entity-type set."""
     entities = _label_set(g, entity_label)
-    counts = {}
-    for w in _nl(g, "CreativeWork"):
-        if not _in_either_category(g, w, cat1, cat2):
-            continue
-        for about in g.neighbor_ids(w, Direction.Outgoing, ["about"]):
-            if about in entities:
-                counts[about] = counts.get(about, 0) + 1
+    cworks = _label_set(g, "CreativeWork")
+    works = set()
+    for cu in (cat1, cat2):
+        cn = uri_map.get(cu)
+        if cn is not None:
+            works.update(g.neighbor_ids(cn, Direction.Incoming, ["category"]))
+    works &= cworks
+    counts = g.neighbor_counts(list(works), Direction.Outgoing, "about")
+    counts = {t: c for t, c in counts.items() if t in entities}
     ranked = _top_k_pairs(counts, limit)  # (node, count): count desc, node asc
     return [[_uri(g, a), n] for a, n in ranked]
 
 
-def a6(g, live_coverage, audience_uri, limit):
-    """a6 — about-entity types ranked over live/audience works (incl. Thing)."""
-    type_sets = []
-    for ty in ("Company", "Event", "Thing"):
-        s = _label_set(g, ty)
-        if s:
-            type_sets.append((ty, s))
+def a6(g, uri_map, live_coverage, audience_uri, limit):
+    """a6 — about-entity types ranked over live/audience works (incl. Thing).
+    Flipped to native: audience node -> incoming works (filtered to the
+    liveCoverage flag), the native ``neighbor_counts`` over their ``about`` targets,
+    then each target's count fanned out to every entity-type bucket it carries."""
+    type_sets = [(ty, _label_set(g, ty)) for ty in ("Company", "Event", "Thing")]
+    type_sets = [(ty, s) for ty, s in type_sets if s]
+    cworks = _label_set(g, "CreativeWork")
+    aud = uri_map.get(audience_uri)
+    works = []
+    if aud is not None:
+        for w in g.neighbor_ids(aud, Direction.Incoming, ["audience"]):
+            if w in cworks:
+                lc = g.get_property(w, "liveCoverage")
+                if (lc if lc is not None else False) == live_coverage:
+                    works.append(w)
+    target_counts = g.neighbor_counts(works, Direction.Outgoing, "about")
     counts = {}
-    for w in _nl(g, "CreativeWork"):
-        lc = g.get_property(w, "liveCoverage")
-        if (lc if lc is not None else False) != live_coverage:
-            continue
-        if not _has_audience(g, w, audience_uri):
-            continue
-        for about in g.neighbor_ids(w, Direction.Outgoing, ["about"]):
-            for ty, s in type_sets:
-                if about in s:
-                    counts[ty] = counts.get(ty, 0) + 1
+    for t, c in target_counts.items():
+        for ty, s in type_sets:
+            if t in s:
+                counts[ty] = counts.get(ty, 0) + c
     rows = sorted(counts.items(), key=lambda r: (-r[1], r[0]))
     rows = rows[:limit] if limit < len(rows) else rows
     return [[k, n] for k, n in rows]
@@ -554,11 +568,23 @@ def a16(g, word, limit):
 
 
 def a17(g, lat, lon, deviation):
-    """a17 — works mentioning a Feature in the lat/long box, carrying dateModified."""
+    """a17 — works mentioning a Feature in the lat/long box, carrying dateModified.
+    Uses the native geo k-d tree (`geo_within_bbox`) when exposed; else a bbox scan
+    over every Feature."""
+    cworks = _label_set(g, "CreativeWork")
+    dm = _str_reader(g, "dateModified")
+    works = set()
+    geo = getattr(g, "geo_within_bbox", None)
+    if geo is not None:
+        features = geo("Feature", "lat", "long", lat - deviation, lon - deviation,
+                       lat + deviation, lon + deviation)
+        for f in features:
+            for w in neighbors_in_set(g, f, Direction.Incoming, "mentions", cworks):
+                if dm(w):
+                    works.add(w)
+        return sorted(works)
     lo_la, hi_la = lat - deviation, lat + deviation
     lo_lo, hi_lo = lon - deviation, lon + deviation
-    cworks = _label_set(g, "CreativeWork")
-    works = set()
     for f in _nl(g, "Feature"):
         la = g.get_property(f, "lat")
         if la is None or not (lo_la <= la <= hi_la):
@@ -567,7 +593,7 @@ def a17(g, lat, lon, deviation):
         if lo is None or not (lo_lo <= lo <= hi_lo):
             continue
         for w in neighbors_in_set(g, f, Direction.Incoming, "mentions", cworks):
-            if g.prop_str(w, "dateModified"):
+            if dm(w):
                 works.add(w)
     return sorted(works)
 
