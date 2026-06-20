@@ -17,7 +17,7 @@ ontology-hierarchy and entity-link traversals. Treat as Tier 3 / optional.
 - RDF parser: **N-Triples** first (`<s> <p> <o> .` is line-parseable); Turtle
   later. A serialization parser, not a store.
 - RDF -> PG mapping: IRI subject/object -> node; IRI-valued predicate -> typed
-  edge; literal-valued predicate -> node property; `rdf:type` -> label.
+  rel; literal-valued predicate -> node property; `rdf:type` -> label.
 - Hand-translate the SPARQL **aggregation** query subset (BGP joins + GROUP/
   ORDER/LIMIT + ontology rollup) — `works_about_entity`, `works_by_category_rollup`.
 - Named graphs flattened; RDFS entailment materialized or walked explicitly

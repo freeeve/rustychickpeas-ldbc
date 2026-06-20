@@ -4,7 +4,7 @@ From the Python-perspective review of `rustychickpeas-python`. Most data-in/out 
 primitives (tasks/140-141) should also get Python methods (double ROI).
 
 ## Expose (high value / low effort)
-- `has_label`, `has_edge`, `has_neighbor_with_property` as bool methods (kills the
+- `has_label`, `has_rel`, `has_neighbor_with_property` as bool methods (kills the
   `"Person" in node_labels(n)` per-node label-index scan inside `bfs` filters).
 - `node_by_label_property -> Optional[int]` (collapses `nodes_with_property(..)[0]`).
 - `first_neighbor -> Optional[int]` / `follow -> list[int]` — return **ids, not Node
@@ -16,7 +16,7 @@ primitives (tasks/140-141) should also get Python methods (double ROI).
 ## Fix divergences / bugs
 - `degree` is Python-only and O(degree) (`.neighbors().count()` in graph_snapshot.rs +
   node.rs); add the O(1) core path (tasks/141), switch both binding impls, add an
-  edge-type filter.
+  rel-type filter.
 - `GraphSnapshot.neighbor_ids` lacks `rel_types` (Node.neighbor_ids has it); add + dedup.
 - `Node.relationships` Incoming/Both does an O(out-degree) reverse-scan (node.rs:87-183)
   — use the existing `in_to_out` map.
@@ -31,7 +31,7 @@ fused/specialized forms (`top_k_by_property`, `group_count_by_property`).
 ## Done (core 2114a3b, e732558, 2681325, 8e076ce)
 **Expose** (batch 1, `2114a3b`): `has_label`, `has_rel`, `has_neighbor_with_property`,
 `node_with_label_property`, `first_neighbor`, `follow`, `prop_str`, `neighborhood`,
-`i64_column` — using the renamed core API (`has_rel` not `has_edge`, `prop_str` not
+`i64_column` — using the renamed core API (`has_rel` not `has_rel`, `prop_str` not
 `str_prop`, `neighborhood` not `khop_nodes`).
 **Divergence fixes** (batch 2a `2681325` + 2b `8e076ce`): `degree` O(1) from CSR
 offsets + typed count (GraphSnapshot + Node); `neighbor_ids` gains a `rel_types`

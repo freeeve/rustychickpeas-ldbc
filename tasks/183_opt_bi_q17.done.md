@@ -10,7 +10,7 @@ algorithmic wins, no new primitive:
    `pm[p2] & pm[p3]` instead of all of m1.
 2. Build forum membership from the FORUM side, not the person side. The needed persons have
    avg incoming degree ~877 (knows-heavy), so `neighbor_ids(p, Incoming, ["hasMember"])`
-   scans ~877 edges per person (~59 ms for 1644 persons). But only 237 forums are in play,
+   scans ~877 rels per person (~59 ms for 1644 persons). But only 237 forums are in play,
    each with low out-degree (~87) -> build forum->members (~1 ms) and invert. A `pm`
    restricted to the relevant forums is sufficient (the join only tests f1/f2, both relevant).
 Rust doesn't apply (2), so Python wins here.

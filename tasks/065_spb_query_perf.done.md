@@ -23,7 +23,7 @@ allocations, bytes and rows per query over the FULL result set.
 | a5 | 37.1 | 108495 | 16.7 MB | 108476 | `has_label` string lookup in loop; per-result `to_string` |
 | q3 | 12.2 | 18 | 240 KB | 9457 | CPU: minute extraction/grouping |
 | a7 | 9.0 | 33579 | 5.5 MB | 33561 | per-result `to_string`; primaryContentOf count per work |
-| a14 | 8.5 | 17 | 2.2 MB | 23192 | CPU: webDocumentType edge traversal per work |
+| a14 | 8.5 | 17 | 2.2 MB | 23192 | CPU: webDocumentType rel traversal per work |
 | q5 | 7.9 | 12219 | 1.5 MB | 7898 | `pstr` audience match per neighbour; label join |
 | q9 | 7.8 | 51839 | 4.6 MB | 9462 | HashSet intersections per candidate |
 | a19 | 7.7 | 27190 | 4.4 MB | 11434 | per-topic accumulation |

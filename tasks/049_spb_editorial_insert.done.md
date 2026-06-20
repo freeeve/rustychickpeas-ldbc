@@ -20,3 +20,8 @@
 **Acceptance.** The `insert` applies and a verifying read reflects it; cross-checked against the same Update on Oxigraph. May be deferred if mutation support is out of scope.
 
 **Depends on.** 014; mutation/delta support in rustychickpeas-core (likely a new core capability).
+
+## Status: deferred
+Blocked on a core mutation/delta API — `GraphSnapshot` is immutable and rustychickpeas-core
+has no incremental insert/update/delete path. The SPB editorial writes can't be implemented
+faithfully until that capability exists. Reopen when a mutation/delta API lands.

@@ -1,7 +1,7 @@
 # 054 — IC14 weighted-path Kùzu cross-check — DONE
 
-The faithful `interactsWith(w)` edge carries `1/n` (Q19, n>0 only), not IC14's
-`1/(interactions+1)` over *every* knows edge — so added a dedicated
+The faithful `interactsWith(w)` rel carries `1/n` (Q19, n>0 only), not IC14's
+`1/(interactions+1)` over *every* knows rel — so added a dedicated
 `ic14weight(FROM Person TO Person, w DOUBLE)` table to `run_faithful.py`'s
 preprocess (reusing the already-computed `inter` reply-interaction dict; both
 knows directions) + DDL + COPY, and rebuilt `db-sf1-faithful`. BI is unaffected
@@ -12,8 +12,8 @@ knows directions) + DDL + COPY, and rebuilt `db-sf1-faithful`. BI is unaffected
 rounded to 6 dp (path node ids aren't comparable across engines). On SF1 both
 engines report cost **1.148053** → `compare.py` ic14 PASS.
 
-Timings: rust 19.4 ms (dijkstra with a per-edge interaction-weight lookup) vs
-Kùzu 7.1 ms (native WSHORTEST over the precomputed edge) — Kùzu wins, as on
+Timings: rust 19.4 ms (dijkstra with a per-rel interaction-weight lookup) vs
+Kùzu 7.1 ms (native WSHORTEST over the precomputed rel) — Kùzu wins, as on
 IC13.
 
 This closes the IC↔Kùzu cross-check: **all 20 cross-checkable IC queries

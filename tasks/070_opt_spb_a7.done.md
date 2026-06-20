@@ -5,3 +5,6 @@ Lead: per-result to_string; primaryContentOf count per work.
 
 Cycle (keep parity 30/30 — re-run scripts/spb_parity.py after each step):
 bench-allocs -> optimize allocs -> bench -> profile CPU (samply) -> optimize CPU -> bench.
+
+## Result
+Sort/truncate on node ids and resolve mention uris only for the kept rows. No change under the ALL benchmark (every result is resolved) but near-free at the official LIMIT 10. Parity 30/30.

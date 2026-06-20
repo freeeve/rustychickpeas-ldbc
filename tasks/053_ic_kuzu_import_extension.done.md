@@ -1,9 +1,9 @@
 # 053 — Extend the faithful Kùzu import; cross-check the loader-backed IC tier — DONE
 
 Extended `kuzu/run_faithful.py`'s `preprocess()` + schema + COPY with the
-IC-only edges/properties (all additive):
+IC-only rels/properties (all additive):
 - Person `fname`/`lname` (IC1/IS1) and birthday `bmon`/`bdom` (IC10)
-- `msgCountry` Message->Place edges (IC3)
+- `msgCountry` Message->Place rels (IC3)
 - `hasMember.hd` join date (IC5); `likes.ld` like time (IC7)
 - `workAt.wf` workFrom + `orgPlace` Organisation->Place (IC11)
 - `isSubclassOf` TagClass hierarchy (IC12)

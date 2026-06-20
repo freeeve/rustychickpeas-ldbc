@@ -4,11 +4,11 @@ Core `GraphSnapshot` additions from the review (`rustychickpeas-core`). All are
 data-in/out → also expose to Python (tasks/143).
 
 ## #4 Facet predicates — DONE (core `884fbae`, SPB `6b4f4e9`)
-- `has_edge(n, dir, edge) -> bool` — existence check.
-- `has_neighbor_with_property(n, dir, edge, key, val) -> bool` — resolves the value to
+- `has_rel(n, dir, rel) -> bool` — existence check.
+- `has_neighbor_with_property(n, dir, rel, key, val) -> bool` — resolves the value to
   its id once, then a per-neighbour id compare (vs the old per-neighbour `pstr`).
-- Adopted across 6 SPB files: retired `has_edge`/`has_any_edge`/`has_edge_to_uri`;
-  a22/q7's `facet_edge`/`facet_matches` now delegate to the two primitives (keeping
+- Adopted across 6 SPB files: retired `has_rel`/`has_any_rel`/`has_rel_to_uri`;
+  a22/q7's `facet_rel`/`facet_matches` now delegate to the two primitives (keeping
   their `want_uri` Option dispatch). Parity 30/30.
 
 ## #10 node_by_label_property — DONE (core `26bfe84`, BI `3eae3ef`)
@@ -21,7 +21,7 @@ data-in/out → also expose to Python (tasks/143).
 ## #5/#6/#9 Traversal — DEFERRED (lower value than estimated)
 Re-surveyed; the remaining items have far fewer / more marginal adoption sites than
 the original estimate, or target `interactive.rs` (IC, not ours):
-- `degree(n, dir, edge)` — only 3 SPB sites (a7/a9/a10), all *typed* (`mentions`/
+- `degree(n, dir, rel)` — only 3 SPB sites (a7/a9/a10), all *typed* (`mentions`/
   `primaryContentOf`), so none exercises the O(1) no-filter CSR path that was the
   point; the win is just `.neighbors_by_type(..).count()` → `.degree(..)`. Marginal.
 - `neighbors_by_types` (DEDUPED union) — the non-dedup union slice form

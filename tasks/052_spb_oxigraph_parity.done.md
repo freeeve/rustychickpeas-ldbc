@@ -25,7 +25,7 @@ that mirrors the hand-translation's semantics over the materialized vocabulary
 
 **Known real-data divergences to confirm/resolve.**
 - `cwork:tag` is ABSENT from the extract → q23 (requires tag) is vacuous.
-- q23 also reads `category` as a literal, but real `category` is a URI edge
+- q23 also reads `category` as a literal, but real `category` is a URI rel
   (`bbc/category/Company`) — would be empty even with tag present. Flag/fix.
 
 **Acceptance.** Each feasible query MATCHES Oxigraph on the extract (set-equal),

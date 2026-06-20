@@ -8,4 +8,10 @@ earlier, or a native "two-hop common-neighbor count among a node set" helper. Lo
 priority given the modest ratio.
 
 ## Result
-(pending)
+DONE (2026-06-20, query-side, no new primitive). Only interested p2 ever count, so each mutual
+friend m is collapsed once to `knows(m) ∩ interested` (memoized in `if_of(m)`): a popular m is
+scanned once instead of once per interested person who knows it, and the inner walk ranges over
+only interested neighbors (not full knows(m), avg degree ~877). Byte-identical condition →
+exact 20-row match. **258.7ms → 110.2ms (~2.35x); now ~1.03x Rust (107ms) — parity.** No
+sign-off needed. The native "two-hop common-neighbor count among a node set" helper (task 190)
+is no longer worth it for Q18 at parity.

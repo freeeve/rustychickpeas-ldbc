@@ -15,9 +15,9 @@ Also implemented later with no loader change: IC4 (new topics), IC6 (tag
 co-occurrence), IC8 (recent replies), IS6 (forum of message, via chain_roots),
 IS7 (replies of message).
 
-Loader-backed tier added (loader extended additively — Message->Country edges,
+Loader-backed tier added (loader extended additively — Message->Country rels,
 hasMember join-date, likes date, Person birthday/gender, workAt workFrom +
-Company location, TagClass subclass edges; BI cross-check re-verified 0-diff):
+Company location, TagClass subclass rels; BI cross-check re-verified 0-diff):
 IC3, IC5, IC7, IC10, IC11, IC12.
 
 IS4 (message content) added behind the loader's opt-in `load_content` flag

@@ -5,17 +5,17 @@ temporal traversals, and time them.
 
 ## Done
 
-Four temporal traversals in `src/finbench.rs`, each reading per-edge `ts`/`amt`
+Four temporal traversals in `src/finbench.rs`, each reading per-rel `ts`/`amt`
 mid-traversal via the relationship accessor's CSR position
 (`relationship_property(pos, key)`):
 
-- **`trace_transfers_in`** — reverse BFS over incoming `transfer` edges, ≤k hops,
-  keeping only edges whose timestamp is in `[start, end]`; returns upstream accounts.
+- **`trace_transfers_in`** — reverse BFS over incoming `transfer` rels, ≤k hops,
+  keeping only rels whose timestamp is in `[start, end]`; returns upstream accounts.
 - **`transfer_cycles`** — DFS for fund-transfer cycles back to the seed with
   strictly-increasing time, amount ≥ threshold, completing within a window; bounded
   by length (6) and a 1000-cycle cap.
 - **`shortest_transfer_path`** — `weighted_shortest_path` over `transfer` with the
-  Dijkstra weight closure pruning out-of-window edges (unit weight → hop count).
+  Dijkstra weight closure pruning out-of-window rels (unit weight → hop count).
 - **`guarantee_exposure`** — BFS the `guarantee` chain, summing the `apply` (loan)
   amounts the person and everyone they guarantee are on the hook for.
 
