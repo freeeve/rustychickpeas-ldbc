@@ -2,7 +2,7 @@
 
 from ic import (
     is1, is2, is3, is5, is6, is7,
-    ic1, ic2, ic3, ic4, ic6, ic8, ic9, ic10, ic11, ic12, ic13, ic14,
+    ic1, ic2, ic3, ic4, ic5, ic6, ic7, ic8, ic9, ic10, ic11, ic12, ic13, ic14,
 )
 from rustychickpeas import Direction, GraphSnapshotBuilder
 
@@ -263,3 +263,36 @@ def test_ic11_job_referral():
     b.set_relationship_prop_i64(1, 2, "workAt", "wf", 2010)
     g = b.finalize()
     assert ic11.ic11_job_referral(g, 0, "X", 2030) == [(1, 2, 2010)]
+
+
+def test_ic5_new_groups():
+    # Seed 0 knows member 1, who joined Forum 2 on day 15 (> min_day 10). Forum 2
+    # contains Post 3, created by member 1 -> forum 2 count 1.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1):
+        b.add_node(["Person"], node_id=nid)
+    b.add_node(["Forum"], node_id=2); b.set_prop(2, "id", 200)
+    b.add_node(["Post"], node_id=3)
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    b.add_relationship(2, 1, "hasMember")
+    b.set_relationship_prop_i64(2, 1, "hasMember", "hd", 15)
+    b.add_relationship(2, 3, "containerOf")
+    b.add_relationship(1, 3, "hasCreator")
+    g = b.finalize()
+    assert ic5.ic5_new_groups(g, 0, 10) == [(2, 1)]
+
+
+def test_ic7_recent_likers():
+    # Seed 0's Post 2 is liked by friend 1 (ld 1000) and non-friend 3 (ld 2000).
+    # Ordered by like time desc: non-friend 3 (is_new), then friend 1.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1, 3):
+        b.add_node(["Person"], node_id=nid)
+        b.set_prop(nid, "id", 100 + nid)
+    b.add_node(["Post"], node_id=2)
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    b.add_relationship(0, 2, "hasCreator")
+    b.add_relationship(1, 2, "likes"); b.set_relationship_prop_i64(1, 2, "likes", "ld", 1000)
+    b.add_relationship(3, 2, "likes"); b.set_relationship_prop_i64(3, 2, "likes", "ld", 2000)
+    g = b.finalize()
+    assert ic7.ic7_recent_likers(g, 0) == [(3, 2000, 2, True), (1, 1000, 2, False)]

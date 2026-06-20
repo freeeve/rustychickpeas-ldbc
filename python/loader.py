@@ -145,6 +145,53 @@ def _normalize_knows(entity_dir: str, out_path: str) -> int:
     return n
 
 
+def _day_and_ms(cdate, day_cache):
+    """(epoch day, epoch ms) for an ISO ``creationDate``; the day is memoized on the
+    YYYY-MM-DD prefix, only the time-of-day is parsed per row."""
+    day = day_cache.get(cdate[:10])
+    if day is None:
+        parsed = props.parse_date(cdate)
+        day = parsed[1] if parsed is not None else 0
+        day_cache[cdate[:10]] = day
+    try:
+        ms = (day * 86_400_000 + int(cdate[11:13]) * 3_600_000
+              + int(cdate[14:16]) * 60_000 + int(cdate[17:19]) * 1_000
+              + (int(cdate[20:23]) if len(cdate) >= 23 and cdate[19] == "." else 0))
+    except (ValueError, IndexError):
+        ms = 0
+    return day, ms
+
+
+def _normalize_has_member(entity_dir: str, out_path: str) -> int:
+    """Write ``ForumId,PersonId,hd`` for hasMember rels, deriving hd (join day) from
+    creationDate so IC5 can filter forums joined after a date. Returns the count."""
+    n = 0
+    cache = {}
+    with open(out_path, "w", newline="", encoding="utf-8") as out:
+        w = csv.writer(out)
+        w.writerow(["ForumId", "PersonId", "hd"])
+        for cdate, fid, pid in iter_rows(entity_dir, ["creationDate", "ForumId", "PersonId"]):
+            day, _ = _day_and_ms(cdate, cache)
+            w.writerow([fid, pid, day])
+            n += 1
+    return n
+
+
+def _normalize_likes(entity_dir: str, out_path: str, msg_col: str) -> int:
+    """Write ``PersonId,MsgId,ld`` for likes rels, deriving ld (like epoch-ms) from
+    creationDate so IC7 can rank likers by recency. Returns the count."""
+    n = 0
+    cache = {}
+    with open(out_path, "w", newline="", encoding="utf-8") as out:
+        w = csv.writer(out)
+        w.writerow(["PersonId", "MsgId", "ld"])
+        for cdate, pid, mid in iter_rows(entity_dir, ["creationDate", "PersonId", msg_col]):
+            _, ms = _day_and_ms(cdate, cache)
+            w.writerow([pid, mid, ms])
+            n += 1
+    return n
+
+
 def load_messages(snapshot_path: str):
     """Build a snapshot containing Post + Comment message nodes (BI Q1's inputs).
 
@@ -252,12 +299,10 @@ def load_bi_graph(snapshot_path: str):
             (f"{static}/Place", _ref("id", "Place"), _ref("PartOfPlaceId", "Place"), "isPartOf"),
             (f"{dynamic}/Person", _ref("id", "Person"), _ref("LocationCityId", "City"), "isLocatedIn"),
             (f"{dynamic}/Forum", _ref("id", "Forum"), _ref("ModeratorPersonId", "Person"), "hasModerator"),
-            (f"{dynamic}/Forum_hasMember_Person", _ref("ForumId", "Forum"), _ref("PersonId", "Person"), "hasMember"),
             (f"{dynamic}/Post_hasTag_Tag", _ref("PostId", "Post"), _ref("TagId", "Tag"), "hasTag"),
             (f"{dynamic}/Comment_hasTag_Tag", _ref("CommentId", "Comment"), _ref("TagId", "Tag"), "hasTag"),
             (f"{dynamic}/Person_hasInterest_Tag", _ref("personId", "Person"), _ref("interestId", "Tag"), "hasInterest"),
-            (f"{dynamic}/Person_likes_Post", _ref("PersonId", "Person"), _ref("PostId", "Post"), "likes"),
-            (f"{dynamic}/Person_likes_Comment", _ref("PersonId", "Person"), _ref("CommentId", "Comment"), "likes"),
+            # hasMember (hd) and likes (ld) are loaded below with their rel properties.
             # knows is loaded below with its creationDate (kd) rel property.
             (f"{static}/Organisation", _ref("id", "Organisation"), _ref("LocationPlaceId", "Place"), "orgPlace"),
             # workAt is loaded below with its workFrom (wf) rel property, for IC11.
@@ -289,6 +334,24 @@ def load_bi_graph(snapshot_path: str):
             Rel("knows", Ref("Person1Id", "Person"), Ref("Person2Id", "Person"), props=[Prop("kd", "kd", int)]),
             Rel("knows", Ref("Person2Id", "Person"), Ref("Person1Id", "Person"), props=[Prop("kd", "kd", int)]),
         ]))
+
+        # hasMember carrying its join day (hd), for IC5.
+        hm_csv = os.path.join(tmp, "hasMember.csv")
+        _normalize_has_member(f"{dynamic}/Forum_hasMember_Person", hm_csv)
+        total += sum(b.load_relationships_from_csv_multi(hm_csv, [
+            Rel("hasMember", Ref("ForumId", "Forum"), Ref("PersonId", "Person"),
+                props=[Prop("hd", "hd", int)]),
+        ]))
+
+        # likes (Post + Comment) carrying the like epoch-ms (ld), for IC7.
+        for entity, label in [("Person_likes_Post", "Post"), ("Person_likes_Comment", "Comment")]:
+            lk_csv = os.path.join(tmp, f"{entity}.csv")
+            _normalize_likes(f"{dynamic}/{entity}", lk_csv,
+                             "PostId" if label == "Post" else "CommentId")
+            total += sum(b.load_relationships_from_csv_multi(lk_csv, [
+                Rel("likes", Ref("PersonId", "Person"), Ref("MsgId", label),
+                    props=[Prop("ld", "ld", int)]),
+            ]))
 
         # workAt carrying workFrom as the wf rel property (year), for IC11.
         total += _load_rels_multi(b, f"{dynamic}/Person_workAt_Company", [

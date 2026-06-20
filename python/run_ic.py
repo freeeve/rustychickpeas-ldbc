@@ -24,7 +24,7 @@ import loader  # noqa: E402
 from props import days_from_civil  # noqa: E402
 from ic import (  # noqa: E402
     is1, is2, is3, is5, is6, is7,
-    ic1, ic2, ic3, ic4, ic6, ic8, ic9, ic10, ic11, ic12, ic13, ic14,
+    ic1, ic2, ic3, ic4, ic5, ic6, ic7, ic8, ic9, ic10, ic11, ic12, ic13, ic14,
 )
 from rustychickpeas import Direction  # noqa: E402
 
@@ -72,6 +72,12 @@ def _specs(g, seeds, ctx):
         ("IC4", "new topics",
          lambda: ic4.ic4_new_topics(g, person, ic4_start, ic4_dur),
          lambda r: [[g.prop_str(t, "name"), c] for (t, c) in r]),
+        ("IC5", "new groups",
+         lambda: ic5.ic5_new_groups(g, person, days_from_civil(2011, 1, 1)),
+         lambda r: [[_eid(g, f), c] for (f, c) in r]),
+        ("IC7", "recent likers",
+         lambda: ic7.ic7_recent_likers(g, person),
+         lambda r: [[lms, _eid(g, liker), int(new)] for (liker, lms, _msg, new) in r]),
         ("IC10", "friend recommend",
          lambda: ic10.ic10_friend_recommend(g, person, 1),
          lambda r: [[_eid(g, p), s] for (p, s) in r]),
