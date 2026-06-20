@@ -32,7 +32,7 @@ NODES = [
     ("medium", "Medium", [("id", "id", "INT64"), ("isBlocked", "isBlocked", "BOOLEAN")]),
 ]
 # (subdir, table, FROM, TO, from_col, to_col, [(prop, src_col, type)])
-EDGES = [
+RELS = [
     ("transfer", "transfer", "Account", "Account", "fromId", "toId", [("createTime", "createTime", "INT64"), ("amount", "amount", "DOUBLE")]),
     ("withdraw", "withdraw", "Account", "Account", "fromId", "toId", [("createTime", "createTime", "INT64"), ("amount", "amount", "DOUBLE")]),
     ("deposit", "deposit", "Loan", "Account", "loanId", "accountId", [("createTime", "createTime", "INT64"), ("amount", "amount", "DOUBLE")]),
@@ -76,7 +76,7 @@ def main():
         shutil.rmtree(DBPATH)
     conn = kuzu.Connection(kuzu.Database(DBPATH))
     t0 = time.time()
-    n_nodes = n_edges = 0
+    n_nodes = n_rels = 0
 
     for subdir, table, cols in NODES:
         coldef = ", ".join(f"{p} {t}" for p, _, t in cols)
@@ -89,7 +89,7 @@ def main():
             n_nodes += rows
             print(f"  node {table}: {rows}")
 
-    for subdir, table, frm, to, fc, tc, props in EDGES:
+    for subdir, table, frm, to, fc, tc, props in RELS:
         propdef = "".join(f", {p} {t}" for p, _, t in props)
         conn.execute(f"CREATE REL TABLE {table}(FROM {frm} TO {to}{propdef})")
         res = trim(subdir, [fc, tc] + [src for _, src, _ in props])
@@ -97,10 +97,10 @@ def main():
             path, rows = res
             conn.execute(f"COPY {table} FROM '{path}' (HEADER=false)")
             os.remove(path)
-            n_edges += rows
+            n_rels += rows
             print(f"  rel  {table}: {rows}")
 
-    print(f"Kùzu FinBench loaded: {n_nodes} nodes, {n_edges} rels -> {DBPATH} [{time.time() - t0:.1f}s]")
+    print(f"Kùzu FinBench loaded: {n_nodes} nodes, {n_rels} rels -> {DBPATH} [{time.time() - t0:.1f}s]")
 
 
 if __name__ == "__main__":

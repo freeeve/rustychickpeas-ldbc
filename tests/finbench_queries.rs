@@ -72,7 +72,7 @@ fn fixture() -> GraphSnapshot {
     amt(&mut b, A_F1, A_F2, "transfer", 150, 2000.0);
     amt(&mut b, A_F2, A_F3, "transfer", 160, 2000.0);
     amt(&mut b, A_F3, A_F1, "transfer", 170, 2000.0); // closes the 3-cycle (150<160<170)
-    amt(&mut b, A_F3, A_UP, "transfer", 50, 400.0); // A_UP's transfer-in (CR9 edge4)
+    amt(&mut b, A_F3, A_UP, "transfer", 50, 400.0); // A_UP's transfer-in (CR9 rel4)
     amt(&mut b, A_P, A_C, "transfer", 180, 900.0); // person-owned -> company-owned (CR12)
                                                    // withdraw (Account -> Account)
     amt(&mut b, A_F2, A_F3, "withdraw", 200, 1500.0); // CR6 card withdrawal

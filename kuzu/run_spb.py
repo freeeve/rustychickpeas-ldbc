@@ -47,7 +47,7 @@ def clean(s):
 
 def project(path, outdir):
     """Parse the extract into CreativeWork / Feature node CSVs + a mentions
-    edge CSV. Returns (n_cw, n_feat, n_mentions)."""
+    rel CSV. Returns (n_cw, n_feat, n_mentions)."""
     cw = {}     # uri -> [title, description]
     feat = {}   # uri -> [name, lat, lon]
     is_cw, is_feat = set(), set()
