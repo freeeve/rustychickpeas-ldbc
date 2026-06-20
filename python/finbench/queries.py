@@ -1,9 +1,11 @@
 """FinBench complex-read queries — temporal traversals over the financial graph.
 
-Each rel's timestamp/amount is read mid-traversal via
-``g.relationships(node, dir, [rel])`` -> ``rel.get_property("ts" / "amt")``; the
-neighbor is the OTHER endpoint (``end_node`` for Outgoing, ``start_node`` for
-Incoming). Mirrors src/finbench.rs.
+Rel props (ts/amt) are read in bulk via the native accessors instead of per-rel
+Relationship objects:
+  - rels_with_props(node, dir, rel, keys) -> (neighbors, [value_lists])  [filter/traverse]
+  - rel_view(node, dir, rel, keys).col(key) -> buffer; sum(memoryview(...)) is C-speed
+    [reductions]
+Mirrors src/finbench.rs.
 """
 
 from collections import deque
@@ -16,16 +18,6 @@ MAX_CYCLE_LEN = 6
 MAX_CYCLES = 1000
 
 
-def _ts(rel):
-    v = rel.get_property("ts")
-    return _I64_MIN if v is None else v
-
-
-def _amt(rel):
-    v = rel.get_property("amt")
-    return 0.0 if v is None else v
-
-
 def trace_transfers_in(g, account, start_ms, end_ms, max_hops):
     """Upstream accounts feeding into ``account`` by a <=max_hops, in-window reverse
     ``transfer`` BFS (TCR1's reverse trace)."""
@@ -36,12 +28,9 @@ def trace_transfers_in(g, account, start_ms, end_ms, max_hops):
         node, depth = queue.popleft()
         if depth >= max_hops:
             continue
-        for rel in g.relationships(node, Direction.Incoming, ["transfer"]):
-            ts = _ts(rel)
-            if ts < start_ms or ts > end_ms:
-                continue
-            nbr = rel.start_node().id()  # incoming: neighbor is the source
-            if nbr not in visited:
+        nbrs, (ts,) = g.rels_with_props(node, Direction.Incoming, "transfer", ["ts"])
+        for nbr, t in zip(nbrs, ts):
+            if start_ms <= t <= end_ms and nbr not in visited:
                 visited.add(nbr)
                 reached.append(nbr)
                 queue.append((nbr, depth + 1))
@@ -52,23 +41,20 @@ def transfer_cycles(g, account, min_amount, window_ms):
     """TCR8 — fund-transfer cycles back to ``account`` where each hop is strictly
     later in time, each amount >= ``min_amount``, completing within ``window_ms``."""
     cycles = []
-    path = [account]
-    on_path = {account}
-    _cycle_dfs(g, account, account, _I64_MIN, None, min_amount, window_ms, path, on_path, cycles)
+    _cycle_dfs(g, account, account, _I64_MIN, None, min_amount, window_ms, [account], {account}, cycles)
     return cycles
 
 
 def _cycle_dfs(g, start, node, last_ts, first_ts, min_amount, window_ms, path, on_path, out):
     if len(path) > MAX_CYCLE_LEN or len(out) >= MAX_CYCLES:
         return
-    for rel in g.relationships(node, Direction.Outgoing, ["transfer"]):
-        ts = _ts(rel)
-        if ts <= last_ts or _amt(rel) < min_amount:
+    nbrs, (tss, amts) = g.rels_with_props(node, Direction.Outgoing, "transfer", ["ts", "amt"])
+    for nbr, ts, amt in zip(nbrs, tss, amts):
+        if ts <= last_ts or amt < min_amount:
             continue  # strictly increasing time + amount threshold
         f0 = ts if first_ts is None else first_ts
         if ts - f0 > window_ms:
             continue
-        nbr = rel.end_node().id()  # outgoing: neighbor is the dest
         if nbr == start:
             if len(path) >= 2:
                 out.append(list(path))
@@ -91,11 +77,10 @@ def shortest_transfer_path(g, src, dst, start_ms, end_ms):
     queue = deque([(src, 0)])
     while queue:
         node, d = queue.popleft()
-        for rel in g.relationships(node, Direction.Outgoing, ["transfer"]):
-            ts = _ts(rel)
-            if ts < start_ms or ts > end_ms:
+        nbrs, (ts,) = g.rels_with_props(node, Direction.Outgoing, "transfer", ["ts"])
+        for nbr, t in zip(nbrs, ts):
+            if t < start_ms or t > end_ms:
                 continue
-            nbr = rel.end_node().id()
             if nbr == dst:
                 return d + 1
             if nbr not in visited:
@@ -115,19 +100,18 @@ def cr1(g, account, start_ms, end_ms, truncation_limit, truncation_order_asc):
         node, depth, last_ts = queue.popleft()
         if depth >= 3:
             continue
-        rels = []
-        for rel in g.relationships(node, Direction.Incoming, ["transfer"]):
-            ts = _ts(rel)
-            if start_ms <= ts <= end_ms and ts < last_ts:
-                rels.append((ts, rel.start_node().id()))
+        nbrs, (tss,) = g.rels_with_props(node, Direction.Incoming, "transfer", ["ts"])
+        rels = [(t, nbr) for nbr, t in zip(nbrs, tss) if start_ms <= t <= end_ms and t < last_ts]
         rels.sort(key=lambda x: x[0], reverse=not truncation_order_asc)
         del rels[truncation_limit:]
         for ts, neighbor in rels:
             if neighbor not in visited:
                 visited.add(neighbor)
                 dist = depth + 1
-                for sig in g.relationships(neighbor, Direction.Incoming, ["signIn"]):
-                    medium = sig.start_node().id()
+                # one result per signIn rel (Rust counts per-rel, not per distinct
+                # medium), so use the per-rel accessor, not neighbor_ids.
+                media, _ = g.rels_with_props(neighbor, Direction.Incoming, "signIn", [])
+                for medium in media:
                     if g.get_property(medium, "blocked"):
                         results.append((neighbor, dist, medium, "Medium"))
                 queue.append((neighbor, dist, ts))
@@ -140,16 +124,15 @@ def cr2(g, person, start_ms, end_ms, truncation_limit, truncation_order_asc):
     (<=3 hops); for each upstream account sum the loan amount/balance deposited into
     it. Returns (otherId, sumLoanAmount, sumLoanBalance), (sumAmount desc, id asc)."""
     by_acct = {}
-    for own in g.relationships(person, Direction.Outgoing, ["own"]):
-        owned = own.end_node().id()
+    for owned in g.neighbor_ids(person, Direction.Outgoing, ["own"]):
         visited = {owned}
         queue = deque([(owned, 0, _I64_MAX)])
         while queue:
             node, depth, last_ts = queue.popleft()
             if depth >= 3:
                 continue
-            rels = [(_ts(rel), rel.start_node().id())
-                    for rel in g.relationships(node, Direction.Incoming, ["transfer"])]
+            nbrs, (tss,) = g.rels_with_props(node, Direction.Incoming, "transfer", ["ts"])
+            rels = list(zip(tss, nbrs))
             rels.sort(key=lambda x: x[0], reverse=not truncation_order_asc)
             del rels[truncation_limit:]
             for ts, neighbor in rels:
@@ -163,11 +146,10 @@ def cr2(g, person, start_ms, end_ms, truncation_limit, truncation_order_asc):
                 continue
             loans = set()
             amt = bal = 0.0
-            for dep in g.relationships(acct, Direction.Incoming, ["deposit"]):
-                ts = _ts(dep)
+            loan_nbrs, (dts,) = g.rels_with_props(acct, Direction.Incoming, "deposit", ["ts"])
+            for loan, ts in zip(loan_nbrs, dts):
                 if ts < start_ms or ts > end_ms:
                     continue
-                loan = dep.start_node().id()
                 if loan not in loans:
                     loans.add(loan)
                     amt += g.get_property(loan, "amount") or 0.0
@@ -186,8 +168,7 @@ def cr5(g, person, start_ms, end_ms, truncation_limit, truncation_order):
     earliest ts. Returns the path node-sequences, sorted by length descending."""
     desc = truncation_order.lower() == "desc"
     out = []
-    for r in g.relationships(person, Direction.Outgoing, ["own"]):
-        start_account = r.end_node().id()
+    for start_account in g.neighbor_ids(person, Direction.Outgoing, ["own"]):
         _cr5_dfs(g, start_account, start_ms, end_ms, _I64_MIN, [start_account],
                  {start_account}, out, 0, truncation_limit, desc)
     uniq = sorted({tuple(p) for p in out})
@@ -199,13 +180,11 @@ def _cr5_dfs(g, node, start_ms, end_ms, last_ts, path, visited, out, depth, limi
     if depth >= 3:
         return
     by_neighbor = {}
-    for r in g.relationships(node, Direction.Outgoing, ["transfer"]):
-        ts = _ts(r)
-        if start_ms <= ts <= end_ms and ts > last_ts:
-            nbr = r.end_node().id()
-            if nbr not in visited:
-                cur = by_neighbor.get(nbr)
-                by_neighbor[nbr] = ts if cur is None else min(cur, ts)
+    nbrs, (tss,) = g.rels_with_props(node, Direction.Outgoing, "transfer", ["ts"])
+    for nbr, ts in zip(nbrs, tss):
+        if start_ms <= ts <= end_ms and ts > last_ts and nbr not in visited:
+            cur = by_neighbor.get(nbr)
+            by_neighbor[nbr] = ts if cur is None else min(cur, ts)
     candidates = list(by_neighbor.items())
     if limit > 0 and len(candidates) > limit:
         candidates.sort(key=lambda x: x[1], reverse=desc)
@@ -223,17 +202,16 @@ def cr6(g, dst_card, threshold1, threshold2, start_ms, end_ms, truncation_limit,
     """TCR6 — withdrawal after many-to-one. Sources whose in-window transfer
     (amt > threshold1, before the card's last in-window withdrawal of amt > threshold2)
     feeds dst_card. Returns (srcId, sumInAmount, totalWithdrawn), (sum desc, id asc)."""
-    withdraws = [(_ts(r), _amt(r)) for r in g.relationships(dst_card, Direction.Outgoing, ["withdraw"])]
-    withdraws = [(t, a) for t, a in withdraws if start_ms <= t <= end_ms and a > threshold2]
+    _w, (wts, wamt) = g.rels_with_props(dst_card, Direction.Outgoing, "withdraw", ["ts", "amt"])
+    withdraws = [(t, a) for t, a in zip(wts, wamt) if start_ms <= t <= end_ms and a > threshold2]
     if not withdraws:
         return []
     total_withdraw = sum(a for _, a in withdraws)
     last_withdraw = max(t for t, _ in withdraws)
     by_src = {}
-    for r in g.relationships(dst_card, Direction.Incoming, ["transfer"]):
-        ts, amt = _ts(r), _amt(r)
+    srcs, (its, iamt) = g.rels_with_props(dst_card, Direction.Incoming, "transfer", ["ts", "amt"])
+    for src, ts, amt in zip(srcs, its, iamt):
         if start_ms <= ts <= end_ms and amt > threshold1 and ts <= last_withdraw:
-            src = r.start_node().id()
             by_src[src] = by_src.get(src, 0.0) + amt
     out = [(s, a, total_withdraw) for s, a in by_src.items()]
     out.sort(key=lambda r: (-r[1], r[0]))
@@ -241,20 +219,24 @@ def cr6(g, dst_card, threshold1, threshold2, start_ms, end_ms, truncation_limit,
 
 
 def cr7(g, account, threshold, start_ms, end_ms, truncation_limit, truncation_order_asc):
-    """TCR7 — transfer in/out ratio. Counts distinct sources/destinations (in-window,
-    amt > threshold, truncated to limit by ts) and the in/out amount ratio (3dp, or
-    -1.0 if no outgoing). Returns (numSrc, numDst, ratio)."""
+    """TCR7 — transfer in/out ratio (distinct sources/destinations + in/out amount
+    ratio, 3dp). rel_view + a C-speed sum when no filter/truncation binds."""
+    no_window = start_ms == _I64_MIN and end_ms == _I64_MAX
+
     def collect(direction, is_out):
-        rels = []
-        for r in g.relationships(account, direction, ["transfer"]):
-            ts, amt = _ts(r), _amt(r)
-            if start_ms <= ts <= end_ms and amt > threshold:
-                nbr = r.end_node().id() if is_out else r.start_node().id()
-                rels.append((ts, amt, nbr))
+        v = g.rel_view(account, direction, "transfer", ["ts", "amt"])
+        n = len(v)
+        nbr = memoryview(v.neighbors)
+        amt = memoryview(v.col("amt"))
+        if no_window and threshold <= 0 and n <= truncation_limit:
+            return len(set(nbr)), sum(amt)  # fast path: no filter, C-speed sum
+        ts = memoryview(v.col("ts"))
+        rels = [(ts[i], amt[i], nbr[i]) for i in range(n)
+                if start_ms <= ts[i] <= end_ms and amt[i] > threshold]
         if len(rels) > truncation_limit:
             rels.sort(key=lambda x: x[0], reverse=not truncation_order_asc)
             del rels[truncation_limit:]
-        return len({n for _, _, n in rels}), sum(a for _, a, _ in rels)
+        return len({x[2] for x in rels}), sum(x[1] for x in rels)
 
     num_src, in_amt = collect(Direction.Incoming, False)
     num_dst, out_amt = collect(Direction.Outgoing, True)
@@ -263,17 +245,13 @@ def cr7(g, account, threshold, start_ms, end_ms, truncation_limit, truncation_or
 
 
 def cr8(g, loan_id, threshold, start_ms, end_ms, truncation_limit, truncation_order):
-    """TCR8 — transfer trace after a loan. From each account the loan deposits to,
+    """TCR8 — transfer trace after a loan: from each account the loan deposits to,
     trace transfer/withdraw <=3 hops (following only amt > threshold*upstream-in);
-    return (dstId, inflow/loanAmount ratio 3dp, minDistance), (dist desc, ratio desc,
-    id asc)."""
-    loan_amount = g.get_property(loan_id, "amount")
-    if loan_amount is None:
-        loan_amount = 1.0
+    return (dstId, inflow/loanAmount 3dp, minDistance), (dist desc, ratio desc, id asc)."""
+    loan_amount = g.get_property(loan_id, "amount") or 1.0
     desc = truncation_order == "DESC"
-    deposits = [(r.end_node().id(), _amt(r))
-                for r in g.relationships(loan_id, Direction.Outgoing, ["deposit"])
-                if start_ms <= _ts(r) <= end_ms]
+    dn, (dts, damt) = g.rels_with_props(loan_id, Direction.Outgoing, "deposit", ["ts", "amt"])
+    deposits = [(n, a) for n, t, a in zip(dn, dts, damt) if start_ms <= t <= end_ms]
     results = {}  # node -> [total_inflow, min_dist]
     for start_account, deposit_amt in deposits:
         visited = {start_account}
@@ -288,13 +266,14 @@ def cr8(g, loan_id, threshold, start_ms, end_ms, truncation_limit, truncation_or
                 cur[1] = min(cur[1], dist)
             if dist >= 3:
                 continue
-            upstream_total = sum(_amt(r) for r in g.relationships(node, Direction.Incoming, ["transfer"])
-                                 if start_ms <= _ts(r) <= end_ms)
+            _u, (uts, uamt) = g.rels_with_props(node, Direction.Incoming, "transfer", ["ts", "amt"])
+            upstream_total = sum(a for t, a in zip(uts, uamt) if start_ms <= t <= end_ms)
             rels = []
             for rel_type in ("transfer", "withdraw"):
-                for r in g.relationships(node, Direction.Outgoing, [rel_type]):
-                    if start_ms <= _ts(r) <= end_ms:
-                        rels.append((_amt(r), r.end_node().id()))
+                on, (ots, oamt) = g.rels_with_props(node, Direction.Outgoing, rel_type, ["ts", "amt"])
+                for n2, t, a in zip(on, ots, oamt):
+                    if start_ms <= t <= end_ms:
+                        rels.append((a, n2))
             rels.sort(key=lambda x: x[0], reverse=desc)
             del rels[truncation_limit:]
             for amt, neighbor in rels:
@@ -307,15 +286,20 @@ def cr8(g, loan_id, threshold, start_ms, end_ms, truncation_limit, truncation_or
 
 
 def cr9(g, account, threshold, start_ms, end_ms, truncation_limit, truncation_asc):
-    """TCR9 — money-laundering ratios for an account: repay/deposit-in, repay/
-    transfer-in, transfer-out/transfer-in (3dp; -1 on a zero denominator). transfer
-    rels filtered by amt >= threshold; each set truncated to the limit by ts."""
+    """TCR9 — money-laundering ratios: repay/deposit-in, repay/transfer-in,
+    transfer-out/transfer-in (3dp; -1 on a zero denominator). rel_view + a C-speed
+    sum when no filter/truncation binds."""
+    no_window = start_ms == _I64_MIN and end_ms == _I64_MAX
+
     def sum_amt(direction, rel, amt_filter):
-        rels = []
-        for r in g.relationships(account, direction, [rel]):
-            ts, amt = _ts(r), _amt(r)
-            if start_ms <= ts <= end_ms and (not amt_filter or amt >= threshold):
-                rels.append((ts, amt))
+        v = g.rel_view(account, direction, rel, ["ts", "amt"])
+        amt = v.col("amt")
+        if no_window and not (amt_filter and threshold > 0) and len(v) <= truncation_limit:
+            return sum(memoryview(amt))  # fast path: no filter/truncation -> C-speed
+        ts = memoryview(v.col("ts"))
+        am = memoryview(amt)
+        rels = [(ts[i], am[i]) for i in range(len(v))
+                if start_ms <= ts[i] <= end_ms and (not amt_filter or am[i] >= threshold)]
         if len(rels) > truncation_limit:
             rels.sort(key=lambda x: x[0], reverse=not truncation_asc)
             del rels[truncation_limit:]
@@ -334,12 +318,11 @@ def cr9(g, account, threshold, start_ms, end_ms, truncation_limit, truncation_as
 def cr10(g, person, start_ms, end_ms):
     """TCR10 — investor similarity: other investors who share invested Companies (in
     window) with ``person``. Returns (otherId, sharedCompanyCount), (count desc, id asc)."""
-    companies = {r.end_node().id() for r in g.relationships(person, Direction.Outgoing, ["invest"])
-                 if start_ms <= _ts(r) <= end_ms}
+    cn, (cts,) = g.rels_with_props(person, Direction.Outgoing, "invest", ["ts"])
+    companies = {c for c, t in zip(cn, cts) if start_ms <= t <= end_ms}
     shared = {}
     for c in companies:
-        for r in g.relationships(c, Direction.Incoming, ["invest"]):
-            other = r.start_node().id()
+        for other in g.neighbor_ids(c, Direction.Incoming, ["invest"]):
             if other != person:
                 shared[other] = shared.get(other, 0) + 1
     out = list(shared.items())
@@ -351,22 +334,20 @@ def cr12(g, person_id, start_ms, end_ms, truncation_limit, truncation_order_asc)
     """TCR12 — sums of a person's in-window transfers (via accounts they own) into
     Company-owned accounts. Returns (compAccountId, summedAmount), (sum desc, id asc)."""
     companies = set(g.nodes_with_label("Company"))
-    person_accounts = [r.end_node().id()
-                       for r in g.relationships(person_id, Direction.Outgoing, ["own"])]
+    person_accounts = list(g.neighbor_ids(person_id, Direction.Outgoing, ["own"]))
     if len(person_accounts) > truncation_limit:
         person_accounts.sort()
         person_accounts = person_accounts[:truncation_limit]
     amounts = {}
     for pa in person_accounts:
-        transfers = [(rel.end_node().id(), _amt(rel))
-                     for rel in g.relationships(pa, Direction.Outgoing, ["transfer"])
-                     if start_ms <= _ts(rel) <= end_ms]
+        tn, (tts, tamt) = g.rels_with_props(pa, Direction.Outgoing, "transfer", ["ts", "amt"])
+        transfers = [(n, a) for n, t, a in zip(tn, tts, tamt) if start_ms <= t <= end_ms]
         if len(transfers) > truncation_limit:
             transfers.sort(key=lambda x: x[1], reverse=not truncation_order_asc)
             transfers = transfers[:truncation_limit]
         for target, amt in transfers:
-            if any(own.start_node().id() in companies
-                   for own in g.relationships(target, Direction.Incoming, ["own"])):
+            if any(owner in companies
+                   for owner in g.neighbor_ids(target, Direction.Incoming, ["own"])):
                 amounts[target] = amounts.get(target, 0.0) + amt
     out = list(amounts.items())
     out.sort(key=lambda r: (-r[1], r[0]))
@@ -381,10 +362,8 @@ def guarantee_exposure(g, person):
     total = 0.0
     while queue:
         p = queue.popleft()
-        for rel in g.relationships(p, Direction.Outgoing, ["apply"]):
-            total += _amt(rel)
-        for rel in g.relationships(p, Direction.Outgoing, ["guarantee"]):
-            nbr = rel.end_node().id()
+        total += sum(memoryview(g.rel_view(p, Direction.Outgoing, "apply", ["amt"]).col("amt")))
+        for nbr in g.neighbor_ids(p, Direction.Outgoing, ["guarantee"]):
             if nbr not in visited:
                 visited.add(nbr)
                 queue.append(nbr)
