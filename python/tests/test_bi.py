@@ -529,7 +529,7 @@ def test_q19_interaction_path():
     g = b.finalize()
 
     interaction = q19.build_interaction_map(g)
-    assert interaction == {(2, 4): 2, (3, 4): 1}
+    assert interaction.to_dict() == {(2, 4): 2, (3, 4): 1}
     assert q19.q19_interaction_path(g, 100, 200, interaction) == [(1, 2, 1.5)]
 
 
