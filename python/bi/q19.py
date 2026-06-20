@@ -16,18 +16,12 @@ from rustychickpeas import Direction
 
 def build_interaction_map(g):
     """Map each undirected person pair to their reply-interaction count: for each
-    comment, its creator replied to the parent message's creator."""
-    interaction = {}
-    for c in g.nodes_with_label("Comment"):
-        a = g.first_neighbor(c, Direction.Incoming, "hasCreator")
-        if a is None:
-            continue
-        for parent in g.neighbor_ids(c, Direction.Outgoing, ["replyOf"]):
-            b = g.first_neighbor(parent, Direction.Incoming, "hasCreator")
-            if b is not None and a != b:
-                key = (a, b) if a < b else (b, a)
-                interaction[key] = interaction.get(key, 0) + 1
-    return interaction
+    comment, its creator replied to the parent message's creator. This is the
+    one-mode projection of ``replyOf`` through each message's creator — the native
+    ``fold_via`` kernel folds it in parallel (replyOf edges originate only from
+    Comments, so folding every node matches the per-Comment scan)."""
+    creators = g.neighbor_via("hasCreator", Direction.Incoming)
+    return g.fold_via("replyOf", Direction.Outgoing, creators)
 
 
 def _dijkstra(g, src, interaction):
