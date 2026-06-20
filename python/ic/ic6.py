@@ -23,5 +23,5 @@ def ic6_tag_cooccurrence(g, person, tag_name):
                 if t != target:
                     counts[t] = counts.get(t, 0) + 1
     rows = list(counts.items())
-    rows.sort(key=lambda r: (-r[1], g.prop_str(r[0], "name")))
+    rows.sort(key=lambda r: (-r[1], g.prop_str(r[0], "name") or ""))
     return rows[:10]

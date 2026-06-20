@@ -21,8 +21,10 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import loader  # noqa: E402
+from props import days_from_civil  # noqa: E402
 from ic import (  # noqa: E402
-    is1, is2, is3, is5, is6, is7, ic1, ic2, ic6, ic8, ic9, ic13, ic14,
+    is1, is2, is3, is5, is6, is7,
+    ic1, ic2, ic3, ic4, ic6, ic8, ic9, ic12, ic13, ic14,
 )
 from rustychickpeas import Direction  # noqa: E402
 
@@ -47,7 +49,8 @@ def _specs(g, seeds, ctx):
     """Each spec: (id, description, run_fn, project_fn) where project_fn(result)
     maps the query result to the comparable rows the Rust side emits."""
     person, person_b, max_day = seeds["person"], seeds["person_b"], seeds["max_day"]
-    first_name, seed_tag = seeds["first_name"], seeds["seed_tag"]
+    first_name, seed_tag, seed_class = seeds["first_name"], seeds["seed_tag"], seeds["seed_class"]
+    ic4_start, ic4_dur = seeds["ic4_start"], seeds["ic4_dur"]
     seed_post, roots = ctx["seed_post"], ctx["roots"]
 
     def is5_run():
@@ -62,6 +65,16 @@ def _specs(g, seeds, ctx):
         ("IC1", "friends by name",
          lambda: ic1.ic1_friends_by_name(g, person, first_name),
          lambda r: [[d, ln, _eid(g, p)] for (p, d, ln) in r]),
+        ("IC3", "two-country friends",
+         lambda: ic3.ic3_friends_two_countries(
+             g, person, "China", "Germany", days_from_civil(2010, 1, 1), 1500),
+         lambda r: [[_eid(g, p), xc, yc] for (p, xc, yc) in r]),
+        ("IC4", "new topics",
+         lambda: ic4.ic4_new_topics(g, person, ic4_start, ic4_dur),
+         lambda r: [[g.prop_str(t, "name"), c] for (t, c) in r]),
+        ("IC12", "expert search",
+         lambda: ic12.ic12_expert_search(g, person, seed_class),
+         lambda r: [[_eid(g, f), c] for (f, c, _names) in r]),
         ("IS2", "recent of person",
          lambda: is2.is2_recent_of_person(g, person, max_day),
          lambda r: [[ms] for (_id, ms) in r]),
@@ -116,6 +129,9 @@ def main():
         "max_day": raw["max_day"],
         "first_name": raw["first_name"],
         "seed_tag": raw["seed_tag"],
+        "seed_class": raw["seed_class"],
+        "ic4_start": raw["ic4_start"],
+        "ic4_dur": raw["ic4_dur"],
     }
 
     print("\n=== LDBC SNB Interactive — Python (rustychickpeas) ===")

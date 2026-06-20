@@ -1,6 +1,8 @@
 """Tests for the Python LDBC Interactive (IC/IS) queries on tiny synthetic data."""
 
-from ic import is1, is2, is3, is5, is6, is7, ic1, ic2, ic6, ic8, ic9, ic13, ic14
+from ic import (
+    is1, is2, is3, is5, is6, is7, ic1, ic2, ic3, ic4, ic6, ic8, ic9, ic12, ic13, ic14,
+)
 from rustychickpeas import Direction, GraphSnapshotBuilder
 
 _NAMES = {0: ("Ann", "Alpha"), 1: ("Bob", "Beta"), 2: ("Ann", "Gamma")}
@@ -150,3 +152,69 @@ def test_ic6_tag_cooccurrence():
     g = _tags()
     # FoF(0) = {1, 2}; their posts 3, 4 both carry T; co-occurring Apple(1), Banana(1).
     assert ic6.ic6_tag_cooccurrence(g, 0, "T") == [(6, 1), (7, 1)]
+
+
+def test_ic4_new_topics():
+    # Seed 0 knows friend 1. Friend's Post 2 (day 5, tag A) is before window [10,20);
+    # Post 3 (day 15, tag B) and Post 4 (day 16, tags B,C) are in-window. A is excluded
+    # (seen before); B count 2, C count 1.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1):
+        b.add_node(["Person"], node_id=nid)
+    for nid, day in [(2, 5), (3, 15), (4, 16)]:
+        b.add_node(["Post"], node_id=nid)
+        b.set_prop(nid, "day", day)
+    for nid, name in [(5, "A"), (6, "B"), (7, "C")]:
+        b.add_node(["Tag"], node_id=nid)
+        b.set_prop(nid, "name", name)
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    for p in (2, 3, 4):
+        b.add_relationship(1, p, "hasCreator")
+    for post, tag in [(2, 5), (3, 6), (4, 6), (4, 7)]:
+        b.add_relationship(post, tag, "hasTag")
+    g = b.finalize()
+    assert ic4.ic4_new_topics(g, 0, 10, 10) == [(6, 2), (7, 1)]
+
+
+def test_ic3_two_country():
+    # Seed 0 knows friend 1 (home Country Z, not X/Y). Friend posted in X (day 15) and
+    # Y (day 16), both in window [10,20).
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1):
+        b.add_node(["Person"], node_id=nid)
+        b.set_prop(nid, "id", 100 + nid)
+    for nid, name in [(2, "X"), (3, "Y"), (4, "Z")]:
+        b.add_node(["Country"], node_id=nid)
+        b.set_prop(nid, "name", name)
+    b.add_node(["City"], node_id=5)
+    for nid, day in [(6, 15), (7, 16)]:
+        b.add_node(["Comment"], node_id=nid)
+        b.set_prop(nid, "day", day)
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    b.add_relationship(1, 5, "isLocatedIn")
+    b.add_relationship(5, 4, "isPartOf")
+    b.add_relationship(1, 6, "hasCreator"); b.add_relationship(1, 7, "hasCreator")
+    b.add_relationship(6, 2, "msgCountry")
+    b.add_relationship(7, 3, "msgCountry")
+    g = b.finalize()
+    assert ic3.ic3_friends_two_countries(g, 0, "X", "Y", 10, 10) == [(1, 1, 1)]
+
+
+def test_ic12_expert_search():
+    # Seed 0 knows friend 1. Post 2 tagged T; T hasType class C. Friend's Comment 3
+    # replies Post 2 -> friend 1 is an expert with 1 qualifying reply.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1):
+        b.add_node(["Person"], node_id=nid)
+        b.set_prop(nid, "id", 100 + nid)
+    b.add_node(["Post"], node_id=2)
+    b.add_node(["Comment"], node_id=3)
+    b.add_node(["Tag"], node_id=4); b.set_prop(4, "name", "T")
+    b.add_node(["TagClass"], node_id=5); b.set_prop(5, "name", "C")
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    b.add_relationship(1, 3, "hasCreator")
+    b.add_relationship(3, 2, "replyOf")
+    b.add_relationship(2, 4, "hasTag")
+    b.add_relationship(4, 5, "hasType")
+    g = b.finalize()
+    assert ic12.ic12_expert_search(g, 0, "C") == [(1, 1, ["T"])]
