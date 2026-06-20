@@ -96,15 +96,17 @@ def _normalize_forums(entity_dir: str, out_path: str) -> int:
 
 
 def _normalize_persons(entity_dir: str, out_path: str) -> int:
-    """Write ``id,pday,pym`` for persons, deriving pday (creation day) and pym
-    (creation year*12+month) from creationDate, for BI Q13's zombie test. Returns
-    the row count."""
+    """Write ``id,pday,pym,fname,lname`` for persons, deriving pday (creation day)
+    and pym (creation year*12+month) from creationDate (BI Q13's zombie test) and
+    carrying firstName/lastName (IC1/IS1). Returns the row count."""
     n = 0
     with open(out_path, "w", newline="", encoding="utf-8") as out:
         w = csv.writer(out)
-        w.writerow(["id", "pday", "pym"])
+        w.writerow(["id", "pday", "pym", "fname", "lname"])
         date_cache = {}
-        for ext_id, cdate in iter_rows(entity_dir, ["id", "creationDate"]):
+        for ext_id, cdate, fname, lname in iter_rows(
+            entity_dir, ["id", "creationDate", "firstName", "lastName"]
+        ):
             prefix = cdate[:10]
             pd = date_cache.get(prefix)
             if pd is None:
@@ -116,7 +118,7 @@ def _normalize_persons(entity_dir: str, out_path: str) -> int:
                 else:
                     pd = (0, 0)
                 date_cache[prefix] = pd
-            w.writerow([ext_id, pd[0], pd[1]])
+            w.writerow([ext_id, pd[0], pd[1], fname, lname])
             n += 1
     return n
 
@@ -223,7 +225,7 @@ def load_bi_graph(snapshot_path: str):
         s["tags"] = _load_nodes(b, f"{static}/Tag", property_columns=["id", "name"], default_label="Tag")
         person_csv = os.path.join(tmp, "Person.csv")
         s["persons"] = _normalize_persons(f"{dynamic}/Person", person_csv)
-        b.load_nodes_from_csv(person_csv, property_columns=["id", "pday", "pym"], default_label="Person")
+        b.load_nodes_from_csv(person_csv, property_columns=["id", "pday", "pym", "fname", "lname"], default_label="Person")
         # Place/Organisation get a super-label so id-refs that span their subtypes
         # (City/Country/Continent, Company/University) resolve.
         s["places"] = _load_nodes(b, f"{static}/Place", property_columns=["id", "name"], label_columns=["type"], default_label="Place")

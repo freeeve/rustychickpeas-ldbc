@@ -1,7 +1,9 @@
 """Tests for the Python LDBC Interactive (IC/IS) queries on tiny synthetic data."""
 
-from ic import is2, is3, is5, ic2, ic9, ic13, ic14
-from rustychickpeas import GraphSnapshotBuilder
+from ic import is1, is2, is3, is5, is6, is7, ic1, ic2, ic6, ic8, ic9, ic13, ic14
+from rustychickpeas import Direction, GraphSnapshotBuilder
+
+_NAMES = {0: ("Ann", "Alpha"), 1: ("Bob", "Beta"), 2: ("Ann", "Gamma")}
 
 
 def _social():
@@ -12,6 +14,9 @@ def _social():
     for nid in (0, 1, 2):
         b.add_node(["Person"], node_id=nid)
         b.set_prop(nid, "id", 100 + nid)
+        b.set_prop(nid, "fname", _NAMES[nid][0])
+        b.set_prop(nid, "lname", _NAMES[nid][1])
+        b.set_prop(nid, "pday", nid)
     for nid, label in [(3, "Post"), (4, "Comment"), (5, "Post")]:
         b.add_node([label], node_id=nid)
         b.set_prop(nid, "day", 10 * (nid - 2))   # 10, 20, 30
@@ -23,6 +28,18 @@ def _social():
         b.add_relationship(creator, msg, "hasCreator")
     b.add_relationship(4, 3, "replyOf")  # comment 4 -> post 3
     return b.finalize()
+
+
+def test_is1_profile():
+    g = _social()
+    assert is1.is1_profile(g, 1) == ("Bob", "Beta", 1)
+
+
+def test_ic1_friends_by_name():
+    g = _social()
+    # Within 3 knows hops of person 0 with first name "Ann": only person 2 (dist 2);
+    # person 0 itself is excluded (dist 0).
+    assert ic1.ic1_friends_by_name(g, 0, "Ann") == [(2, 2, "Gamma")]
 
 
 def test_is2_recent_of_person():
@@ -66,3 +83,70 @@ def test_ic14_weighted_path():
     # one reply interaction between creators 1 and 2 -> edge (1,2) cost 1/(1+1)=0.5;
     # edge (0,1) has no interaction -> 1/(0+1)=1.0. Path 0-1-2 = 1.5.
     assert ic14.ic14_weighted_path(g, 0, 2, interaction) == 1.5
+
+
+def _thread():
+    # Person 0(moderator), 1(author), 2(replier). Post 3 by 1; Comment 4 replies 3,
+    # by 2. Forum 5 containerOf Post 3, hasModerator 0. Author 1 knows replier 2.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1, 2):
+        b.add_node(["Person"], node_id=nid)
+        b.set_prop(nid, "id", 100 + nid)
+    for nid, label, ms in [(3, "Post", 1000), (4, "Comment", 2000)]:
+        b.add_node([label], node_id=nid)
+        b.set_prop(nid, "ms", ms)
+    b.add_node(["Forum"], node_id=5)
+    b.set_prop(5, "id", 500)
+    b.add_relationship(1, 3, "hasCreator")
+    b.add_relationship(2, 4, "hasCreator")
+    b.add_relationship(4, 3, "replyOf")
+    b.add_relationship(5, 3, "containerOf")
+    b.add_relationship(5, 0, "hasModerator")
+    b.add_relationship(1, 2, "knows")
+    b.add_relationship(2, 1, "knows")
+    return b.finalize()
+
+
+def test_ic8_recent_replies():
+    g = _thread()
+    assert ic8.ic8_recent_replies(g, 1) == [(4, 2000)]  # reply 4 to person 1's post 3
+
+
+def test_is6_forum_of_message():
+    g = _thread()
+    roots = g.roots_via("replyOf", Direction.Outgoing)
+    assert is6.is6_forum_of_message(g, 4, roots) == (5, 0)  # root post 3 -> forum 5, mod 0
+    assert is6.is6_forum_of_message(g, 3, roots) == (5, 0)
+
+
+def test_is7_replies():
+    g = _thread()
+    # reply 4 (ms 2000) by person 2, who is a knows-friend of post 3's author (1).
+    assert is7.is7_replies(g, 3) == [(4, 2000, 2, True)]
+
+
+def _tags():
+    # Persons 0,1,2 with knows 0-1-2. Posts 3(by 1), 4(by 2). Tags 5("T" target),
+    # 6("Apple"), 7("Banana"). Both posts carry T; 3 also Apple, 4 also Banana.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1, 2):
+        b.add_node(["Person"], node_id=nid)
+    for nid in (3, 4):
+        b.add_node(["Post"], node_id=nid)
+    for nid, name in [(5, "T"), (6, "Apple"), (7, "Banana")]:
+        b.add_node(["Tag"], node_id=nid)
+        b.set_prop(nid, "name", name)
+    for u, v in [(0, 1), (1, 2)]:
+        b.add_relationship(u, v, "knows")
+        b.add_relationship(v, u, "knows")
+    b.add_relationship(1, 3, "hasCreator")
+    b.add_relationship(2, 4, "hasCreator")
+    for post, tag in [(3, 5), (3, 6), (4, 5), (4, 7)]:
+        b.add_relationship(post, tag, "hasTag")
+    return b.finalize()
+
+
+def test_ic6_tag_cooccurrence():
+    g = _tags()
+    # FoF(0) = {1, 2}; their posts 3, 4 both carry T; co-occurring Apple(1), Banana(1).
+    assert ic6.ic6_tag_cooccurrence(g, 0, "T") == [(6, 1), (7, 1)]

@@ -21,7 +21,10 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import loader  # noqa: E402
-from ic import is2, is3, is5, ic2, ic9, ic13, ic14  # noqa: E402
+from ic import (  # noqa: E402
+    is1, is2, is3, is5, is6, is7, ic1, ic2, ic6, ic8, ic9, ic13, ic14,
+)
+from rustychickpeas import Direction  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SNAPSHOT = os.path.join(
@@ -44,6 +47,8 @@ def _specs(g, seeds, ctx):
     """Each spec: (id, description, run_fn, project_fn) where project_fn(result)
     maps the query result to the comparable rows the Rust side emits."""
     person, person_b, max_day = seeds["person"], seeds["person_b"], seeds["max_day"]
+    first_name, seed_tag = seeds["first_name"], seeds["seed_tag"]
+    seed_post, roots = ctx["seed_post"], ctx["roots"]
 
     def is5_run():
         msgs = is2.is2_recent_of_person(g, person, max_day)
@@ -51,6 +56,12 @@ def _specs(g, seeds, ctx):
         return creator
 
     return [
+        ("IS1", "profile",
+         lambda: is1.is1_profile(g, person),
+         lambda r: [[r[0], r[1]]]),
+        ("IC1", "friends by name",
+         lambda: ic1.ic1_friends_by_name(g, person, first_name),
+         lambda r: [[d, ln, _eid(g, p)] for (p, d, ln) in r]),
         ("IS2", "recent of person",
          lambda: is2.is2_recent_of_person(g, person, max_day),
          lambda r: [[ms] for (_id, ms) in r]),
@@ -72,6 +83,19 @@ def _specs(g, seeds, ctx):
         ("IC14", "weighted path",
          lambda: ic14.ic14_weighted_path(g, person, person_b, ctx["interaction"]),
          lambda r: [] if r is None else [[round(r, 6)]]),
+        ("IC6", "tag co-occurrence",
+         lambda: ic6.ic6_tag_cooccurrence(g, person, seed_tag),
+         lambda r: [[g.prop_str(t, "name"), c] for (t, c) in r]),
+        ("IC8", "recent replies",
+         lambda: ic8.ic8_recent_replies(g, person),
+         lambda r: [[ms] for (_id, ms) in r]),
+        ("IS6", "forum of message",
+         lambda: is6.is6_forum_of_message(g, seed_post, roots) if seed_post is not None else None,
+         lambda r: [] if r is None else [[_eid(g, r[0]), _eid(g, r[1])]]),
+        ("IS7", "replies",
+         lambda: is7.is7_replies(g, seed_post) if seed_post is not None else [],
+         lambda r: [[ms, (_eid(g, ra) if ra != 0xFFFFFFFF else 0), int(k)]
+                    for (_reply, ms, ra, k) in r]),
     ]
 
 
@@ -90,6 +114,8 @@ def main():
         "person": g.node_with_label_property("Person", "id", raw["person"]),
         "person_b": g.node_with_label_property("Person", "id", raw["person_b"]),
         "max_day": raw["max_day"],
+        "first_name": raw["first_name"],
+        "seed_tag": raw["seed_tag"],
     }
 
     print("\n=== LDBC SNB Interactive — Python (rustychickpeas) ===")
@@ -97,9 +123,19 @@ def main():
 
     t = time.perf_counter()
     interaction = ic14.build_interaction(g)
+    # IS6/IS7 anchor on the seed's newest Post (same as the Rust runner); IS6 walks
+    # the replyOf thread roots.
+    posts = set(g.nodes_with_label("Post"))
+    seed_post, best = None, None
+    for m in g.neighbor_ids(seeds["person"], Direction.Outgoing, ["hasCreator"]):
+        if m in posts:
+            mms = g.get_property(m, "ms")
+            if best is None or mms > best:
+                best, seed_post = mms, m
+    roots = g.roots_via("replyOf", Direction.Outgoing)
     setup_s = time.perf_counter() - t
-    print(f"Precompute (IC14 interaction map) in {setup_s:.1f}s\n")
-    ctx = {"interaction": interaction}
+    print(f"Precompute (IC14 interaction map + IS6 roots) in {setup_s:.1f}s\n")
+    ctx = {"interaction": interaction, "seed_post": seed_post, "roots": roots}
 
     runs = int(os.environ.get("LDBC_RUNS", "5"))
     print(f"{'Query':<7}{'Description':<22}{'Time':>12}  Parity")
