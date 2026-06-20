@@ -45,7 +45,7 @@ validation and a deep pool of published cross-system numbers. See `tasks/005`–
 ### Tier 2 — FinBench — breadth, new schema + generator
 Transaction-network schema (Account / transfer / withdraw / loan) with
 temporal-path and fund-cycle queries (fraud-tracing shape). Plays to traversal
-strength and to the edge-`creationDate`-during-traversal capability Q11 drove.
+strength and to the rel-`creationDate`-during-traversal capability Q11 drove.
 Heaviest lift: new schema, new Spark-based generator. See `tasks/007`–`008`.
 All 12 Transaction Complex Reads (TCR1–TCR12) are implemented and benchmarked
 head-to-head against Kùzu on SF10 — see [`finbench-results.md`](finbench-results.md).
@@ -53,7 +53,7 @@ head-to-head against Kùzu on SF10 — see [`finbench-results.md`](finbench-resu
 ### Tier 3 — SPB (Semantic Publishing) — feasible *and* drives two core features
 SPB is RDF/SPARQL natively, but we run it with the **same trick as BI**: parse the
 RDF *serialization* (N-Triples is line-parseable), map RDF -> property graph (IRI
-object -> edge, literal object -> property, `rdf:type` -> label), and
+object -> rel, literal object -> property, `rdf:type` -> label), and
 hand-translate the SPARQL templates into Rust traversals. No SPARQL engine, no
 triple store, no reasoner.
 
