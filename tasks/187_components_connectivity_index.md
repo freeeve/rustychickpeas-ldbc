@@ -7,7 +7,7 @@ Follow-up from the `roots_via`/`root_via` design discussion (the chain-root read
 A general **connectivity index**: `component_of(node)` and `same_component(a, b)`, built once
 via union-find (or BFS) over a relationship (set) and materialized as a flat `node -> component
 representative` array, with O(1) lookups. Same "node -> representative labeling" shape as
-`roots_via`, but for **arbitrary (non-functional) edges**, not just single-successor chains.
+`roots_via`, but for **arbitrary (non-functional) rels**, not just single-successor chains.
 
 Relationship to `roots_via`: `roots_via` (functional relation -> chain terminal) is the special
 case where each node has one parent; "same thread?" for replyOf is exactly
