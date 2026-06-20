@@ -31,7 +31,7 @@ const ENTITY_TYPES: [&str; 3] = ["Company", "Event", "Thing"];
 
 /// About-entity types ranked by how many `(work, about)` pairs they cover, over
 /// works whose `liveCoverage` equals `live_coverage` and that carry an `audience`
-/// edge to `audience_uri`. Returned as `(type_local_name, count)` ordered by count
+/// rel to `audience_uri`. Returned as `(type_local_name, count)` ordered by count
 /// descending then name, truncated to `limit` (the template's `LIMIT 1000`).
 pub fn run(
     g: &GraphSnapshot,
@@ -77,7 +77,7 @@ mod tests {
     use super::*;
 
     // TBox (Company/Event subClassOf coreconcepts:Thing) + works carrying a
-    // liveCoverage flag, an audience edge, and an `about` edge to a typed entity:
+    // liveCoverage flag, an audience rel, and an `about` rel to a typed entity:
     // two about a Company, one about an Event, plus one excluded by liveCoverage
     // and one excluded by audience.
     const FIXTURE: &str = r#"

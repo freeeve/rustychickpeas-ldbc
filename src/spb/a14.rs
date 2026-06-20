@@ -24,17 +24,17 @@
 //! ```
 //!
 //! `cwork:tag` is the RDFS super-property of `about`/`mentions` (the loader
-//! forward-chains it, so the topic links materialize a `tag` edge — same as q8);
+//! forward-chains it, so the topic links materialize a `tag` rel — same as q8);
 //! the remaining required patterns demand ≥1 `category`/`thumbnail`/`audience`
-//! edge and a non-empty `dateModified`. The pinned facets are exact-value: an
-//! outgoing `primaryFormat` edge to `primary_format_uri`, and a `primaryContentOf`
+//! rel and a non-empty `dateModified`. The pinned facets are exact-value: an
+//! outgoing `primaryFormat` rel to `primary_format_uri`, and a `primaryContentOf`
 //! web document whose `webDocumentType` targets `web_doc_type`. Both
 //! `primaryFormat` and `webDocumentType` carry IRI objects in the data
-//! (`bbc:webDocumentType <…/Mobile>`), so the loader stores them as edges to a
+//! (`bbc:webDocumentType <…/Mobile>`), so the loader stores them as rels to a
 //! node bearing that `uri` — we match them by resolving the target `uri` to its
 //! node and traversing to it, not a literal-property read. The template additionally pins a specific
 //! `audience` (in the FILTER and a second OPTIONAL); this batch's signature leaves
-//! the audience unbound, so we require only that an `audience` edge is present.
+//! the audience unbound, so we require only that an `audience` rel is present.
 //! Results are ordered by `dateModified` (ISO-8601, hence lexicographic)
 //! descending, id tie-break, truncated to `limit` (the template's `LIMIT 200`).
 
@@ -43,8 +43,8 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use super::queries::node_by_uri;
 use crate::props::top_k_by_key;
 
-/// Whether `work` binds every required edge of the q14 star: ≥1 `tag`
-/// (about∪mentions), `category`, `thumbnail` and `audience` edge.
+/// Whether `work` binds every required rel of the q14 star: ≥1 `tag`
+/// (about∪mentions), `category`, `thumbnail` and `audience` rel.
 fn has_required_star(g: &GraphSnapshot, work: u32) -> bool {
     g.has_rel(work, Direction::Outgoing, "tag")
         && g.has_rel(work, Direction::Outgoing, "category")
@@ -53,7 +53,7 @@ fn has_required_star(g: &GraphSnapshot, work: u32) -> bool {
 }
 
 /// q14: creative works satisfying the full required star (≥1 `tag`/`category`/
-/// `thumbnail`/`audience` edge, a non-empty `dateModified`, a `primaryFormat` edge
+/// `thumbnail`/`audience` rel, a non-empty `dateModified`, a `primaryFormat` rel
 /// to `primary_format_uri`, and a `primaryContentOf` web document of type
 /// `web_doc_type`), ordered by `dateModified` descending then id, truncated to
 /// `limit`.
@@ -64,7 +64,7 @@ pub fn run(
     limit: usize,
 ) -> Vec<u32> {
     // Resolve the two pinned facet targets to node ids once (a `Facet`-labelled
-    // uri lookup), so the filters are id comparisons, not per-edge uri reads.
+    // uri lookup), so the filters are id comparisons, not per-rel uri reads.
     let (Some(works), Some(pf), Some(wdt)) = (
         g.nodes_with_label("CreativeWork"),
         node_by_uri(g, primary_format_uri),
@@ -107,7 +107,7 @@ mod tests {
     const MOBILE: &str = "http://www.bbc.co.uk/ontologies/bbc/Mobile";
 
     // TBox (about/mentions subPropertyOf tag, so the topic links materialize a tag
-    // edge) plus five CreativeWorks: two fully-specified Video/Mobile matches
+    // rel) plus five CreativeWorks: two fully-specified Video/Mobile matches
     // (differing dateModified, to exercise the DESC ordering) and three that each
     // drop one required/filtered pattern — missing thumbnail, wrong primaryFormat,
     // wrong webDocumentType — and so must be excluded.

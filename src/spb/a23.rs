@@ -32,8 +32,8 @@
 //! [`parse_date`]'s epoch-day count.
 //!
 //! Tag / category modeling: the SPB generator emits no literal `cwork:tag`, and
-//! `cwork:category` is a uri edge (`bbc/category/...`), not a literal. So — as in
-//! q21/q22 — the `category` facet is an outgoing edge to the pinned uri, and the
+//! `cwork:category` is a uri rel (`bbc/category/...`), not a literal. So — as in
+//! q21/q22 — the `category` facet is an outgoing rel to the pinned uri, and the
 //! required `cwork:tag ?tag` grouping is folded to the `about`/`mentions` topic
 //! links the data actually carries; each grouped "tag" is such a topic, keyed by
 //! its uri. The remaining required BGP patterns (`description`, `audience`,
@@ -62,7 +62,7 @@ pub fn run(
     // topic node -> the set of distinct creation days (epoch-day count) seen for it.
     let mut by_tag: HashMap<u32, HashSet<i64>> = HashMap::new();
     for w in g.full_text_search("CreativeWork", "title", word).iter() {
-        // {{{filter2}}}: the pinned category facet (an outgoing edge to the uri).
+        // {{{filter2}}}: the pinned category facet (an outgoing rel to the uri).
         if !g.has_neighbor_with_property(w, Direction::Outgoing, "category", "uri", category_uri) {
             continue;
         }

@@ -16,7 +16,7 @@
 //! it is a `CreativeWork` that has a `title`, return it so the caller can read
 //! off its properties (title, dateCreated/Modified) and `about`/`mentions`
 //! neighbours.* The lookup is the whole query — the `CONSTRUCT` body is just the
-//! described node's own columns and out-edges.
+//! described node's own columns and out-rels.
 //!
 //! Two parts of the SPARQL drop out by design:
 //!   * `?type rdfs:subClassOf cwork:CreativeWork` is the redundant pattern the
@@ -37,7 +37,7 @@ use crate::props::PropExt;
 /// The caller "describes" the node by reading its properties
 /// (`g.prop(n, k).str()` for `title` / `dateCreated` / `dateModified`) and its
 /// `about` / `mentions`
-/// edges, mirroring the SPARQL `CONSTRUCT` block.
+/// rels, mirroring the SPARQL `CONSTRUCT` block.
 pub fn run(g: &GraphSnapshot, cw_uri: &str) -> Option<u32> {
     let node = g
         .nodes_with_property("CreativeWork", "uri", cw_uri)

@@ -12,7 +12,7 @@
 //!
 //! `cwork:tag` is the RDFS super-property of `cwork:about` / `cwork:mentions`
 //! (`rdfs:subPropertyOf`); the loader forward-chains it, so each `about`/`mentions`
-//! statement is also a `tag` edge and we read the work's `tag` neighbours
+//! statement is also a `tag` rel and we read the work's `tag` neighbours
 //! directly — no per-query about/mentions fold. Counts each topic over the type /
 //! audience / `dateModified` (exclusive, lexicographic) restrictions.
 

@@ -63,7 +63,7 @@ pub fn run() -> Result<()> {
         "Loaded {nodes} nodes ({} persons, {} posts, {} comments, {} tags, {} tagclasses)",
         s.persons, s.posts, s.comments, s.tags, s.tag_classes
     );
-    println!("       {} edges in {load_secs:.1}s\n", s.edges);
+    println!("       {} rels in {load_secs:.1}s\n", s.rels);
 
     // --- Faithful LDBC BI queries (official Cypher params) ---
     // Set LDBC_EMIT_JSON=<dir> to dump Q1/Q2 result rows for the Kùzu
@@ -441,7 +441,7 @@ pub fn run() -> Result<()> {
         Some((c1, c2)) => {
             let q19 = q19_interaction_path(&graph, c1, c2, &interaction);
             println!(
-                "  Q19 interaction path (cities 669<->648): {} pairs over {} interaction edges",
+                "  Q19 interaction path (cities 669<->648): {} pairs over {} interaction rels",
                 q19.len(),
                 interaction.len()
             );
@@ -458,7 +458,7 @@ pub fn run() -> Result<()> {
         Some((co, p2)) => {
             let q20 = q20_recruitment(&graph, co, p2, &study_wm);
             println!(
-                "  Q20 recruitment (Falcon_Air -> person 66): {} candidates over {} study edges",
+                "  Q20 recruitment (Falcon_Air -> person 66): {} candidates over {} study rels",
                 q20.len(),
                 study_wm.len()
             );

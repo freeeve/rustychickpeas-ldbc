@@ -12,12 +12,12 @@
 //! The work type is pinned by the materialized `CreativeWork` super-class (works
 //! are typed as `BlogPost`/`NewsItem`/… subclasses, which the loader
 //! forward-chains). For each creative work we count its OUTGOING `mentions`
-//! edges and return the maximum (the `ORDER BY DESC … LIMIT 1` count), 0 when no
+//! rels and return the maximum (the `ORDER BY DESC … LIMIT 1` count), 0 when no
 //! work mentions anything.
 
 use rustychickpeas_core::{Direction, GraphSnapshot};
 
-/// The maximum number of outgoing `mentions` edges on any single creative work
+/// The maximum number of outgoing `mentions` rels on any single creative work
 /// (0 when no work has any).
 pub fn run(g: &GraphSnapshot) -> usize {
     let Some(works) = g.nodes_with_label("CreativeWork") else {

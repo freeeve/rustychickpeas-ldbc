@@ -438,9 +438,9 @@ pub(crate) fn q8_central_person(
 }
 
 /// Q11 — Friend triangles. Count triangles in the `knows` graph among persons of
-/// a given country where every edge was created within a date window. This is
-/// the query that motivated the core `out_edges` API: it reads each knows edge's
-/// `creationDate` (`kd`) during traversal via the edge's CSR position.
+/// a given country where every rel was created within a date window. This is
+/// the query that motivated the core `out_rels` API: it reads each knows rel's
+/// `creationDate` (`kd`) during traversal via the rel's CSR position.
 /// Cypher: bi-11.cypher.
 pub(crate) fn q11_friend_triangles(
     g: &GraphSnapshot,
@@ -459,11 +459,11 @@ pub(crate) fn q11_friend_triangles(
             in_country.insert(p);
         }
     }
-    // Date-filtered knows adjacency among in-country persons, reading each edge's
+    // Date-filtered knows adjacency among in-country persons, reading each rel's
     // creationDate through its CSR position.
-    // Hoist the edge `kd` (creationDate) column once; the traversal reads it for
-    // every knows edge, so index it by CSR position instead of re-resolving the
-    // property key per edge.
+    // Hoist the rel `kd` (creationDate) column once; the traversal reads it for
+    // every knows rel, so index it by CSR position instead of re-resolving the
+    // property key per rel.
     let kd_col = g.rel_col("kd").map(Col::i64);
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
     for &a in &in_country {
@@ -479,7 +479,7 @@ pub(crate) fn q11_friend_triangles(
             }
         }
     }
-    // Count triangles a<b<c (by internal id) with all three edges present.
+    // Count triangles a<b<c (by internal id) with all three rels present.
     let mut count: u64 = 0;
     for (&a, nbrs_a) in &adj {
         for &b in nbrs_a {

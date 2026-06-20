@@ -24,7 +24,7 @@
 //! Vocabulary mapping (no SPARQL / RDFS engine):
 //!   * `cwork:tag` is the super-property of `cwork:about` / `cwork:mentions`;
 //!     lacking sub-property reasoning we evaluate it as the union of the `about`,
-//!     `mentions` and direct `tag` out-edges, deduped per work — so a work that
+//!     `mentions` and direct `tag` out-rels, deduped per work — so a work that
 //!     tags one topic via both `about` and `mentions` counts once, matching RDF
 //!     triple-set semantics for the entailed `cwork:tag` triple.
 //!   * `?topic ldbcspb:prefLabel ?topicPrefLabel` is an inner join: only topics
@@ -32,7 +32,7 @@
 //!     from `rdfs:label` onto the `Company` / `Event` topic nodes, read here as
 //!     the `label` property (`MAX` collapses to that single value).
 //!   * `a {{{cwType}}}` and `cwork:audience {{{cwAudience}}}` are equality
-//!     restrictions: the work's type label, and an `audience` out-edge to the
+//!     restrictions: the work's type label, and an `audience` out-rel to the
 //!     node with the requested uri.
 //!   * the FILTER is a `dateModified` range, compared as epoch-ms via `parse_ms`.
 

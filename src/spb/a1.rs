@@ -21,7 +21,7 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use super::queries::node_by_uri;
 
-/// Creative works with a `pred` edge ("about" or "mentions") to the node with uri
+/// Creative works with a `pred` rel ("about" or "mentions") to the node with uri
 /// `thing_uri` and a non-empty `dateModified`, ordered by `dateModified`
 /// descending then node id ascending. Empty when the thing is unknown.
 pub fn run(g: &GraphSnapshot, pred: &str, thing_uri: &str) -> Vec<u32> {

@@ -1,13 +1,13 @@
 //! LDBC FinBench (Financial Benchmark) — loader + transaction-tracing queries.
 //!
 //! FinBench is a different schema from SNB: Account / Person / Company / Medium /
-//! Loan nodes, and time-stamped, amount-weighted edges — `transfer`, `withdraw`,
+//! Loan nodes, and time-stamped, amount-weighted rels — `transfer`, `withdraw`,
 //! `deposit`, `repay`, `guarantee`, `invest`, `signIn`, `own`, `apply`. The
 //! generator (`scripts/gen_finbench.sh`) emits pipe-delimited CSV under `raw/`.
 //!
 //! The read workload is transaction tracing: temporal fund-flow paths, transfer
 //! cycles inside a time window, blocked-account propagation. This plays to the
-//! edge-property-during-traversal capability (per-edge `ts` / `amt` read via the
+//! rel-property-during-traversal capability (per-rel `ts` / `amt` read via the
 //! relationship accessor's CSR position) — the queries below (`tasks/008`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -23,14 +23,14 @@ type FastSet<T> = hashbrown::HashSet<T>;
 /// Load report, mirroring the BI loader.
 pub struct Stats {
     pub nodes: u64,
-    pub edges: u64,
+    pub rels: u64,
     pub load_ms: u128,
 }
 
 /// Iterate pipe-delimited `.csv` files in `dir`, resolving `cols` by header and
 /// calling `f` with those column values per row. Plain-file sibling of the BI
 /// loader's gzip `for_each_row` (FinBench CSV is not gzipped). A missing
-/// directory yields zero rows (some edge types are empty at small scale).
+/// directory yields zero rows (some rel types are empty at small scale).
 fn for_each_csv(dir: &Path, cols: &[&str], mut f: impl FnMut(&[&str])) -> Result<u64, String> {
     if !dir.exists() {
         return Ok(0);
@@ -71,10 +71,10 @@ fn for_each_csv(dir: &Path, cols: &[&str], mut f: impl FnMut(&[&str])) -> Result
     Ok(count)
 }
 
-/// Add an amount-bearing edge type (from -> to), storing `ts` + `amt` so the
+/// Add an amount-bearing rel type (from -> to), storing `ts` + `amt` so the
 /// queries can filter on timestamp/amount during traversal.
 #[allow(clippy::too_many_arguments)]
-fn edge_amt(
+fn rel_amt_of(
     b: &mut GraphBuilder,
     dir: &Path,
     from: &HashMap<i64, u32>,
@@ -105,8 +105,8 @@ fn edge_amt(
     Ok(n)
 }
 
-/// Add a timestamp-only edge type (from -> to), storing `ts`.
-fn edge_ts(
+/// Add a timestamp-only rel type (from -> to), storing `ts`.
+fn rel_ts_of(
     b: &mut GraphBuilder,
     dir: &Path,
     from: &HashMap<i64, u32>,
@@ -135,7 +135,7 @@ fn edge_ts(
 
 /// Load a FinBench `raw/` directory into an immutable snapshot. FinBench ids are
 /// i64 unique only within a type, so each node type gets its own id -> NodeId
-/// map; edges resolve their endpoints through the right maps.
+/// map; rels resolve their endpoints through the right maps.
 pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
     let t0 = Instant::now();
     let mut b = GraphBuilder::new(Some(150_000), Some(1_000_000));
@@ -187,9 +187,9 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
     })?;
     let nodes = next as u64;
 
-    // --- edges (ts + amount where the schema carries it) ---
-    let mut edges = 0u64;
-    edges += edge_amt(
+    // --- rels (ts + amount where the schema carries it) ---
+    let mut rels = 0u64;
+    rels += rel_amt_of(
         &mut b,
         &raw.join("transfer"),
         &acct,
@@ -200,7 +200,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "amount",
         "transfer",
     )?;
-    edges += edge_amt(
+    rels += rel_amt_of(
         &mut b,
         &raw.join("withdraw"),
         &acct,
@@ -211,7 +211,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "amount",
         "withdraw",
     )?;
-    edges += edge_amt(
+    rels += rel_amt_of(
         &mut b,
         &raw.join("deposit"),
         &loan,
@@ -222,7 +222,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "amount",
         "deposit",
     )?;
-    edges += edge_amt(
+    rels += rel_amt_of(
         &mut b,
         &raw.join("repay"),
         &acct,
@@ -233,7 +233,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "amount",
         "repay",
     )?;
-    edges += edge_amt(
+    rels += rel_amt_of(
         &mut b,
         &raw.join("personApplyLoan"),
         &pers,
@@ -244,7 +244,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "loanAmount",
         "apply",
     )?;
-    edges += edge_amt(
+    rels += rel_amt_of(
         &mut b,
         &raw.join("companyApplyLoan"),
         &comp,
@@ -255,7 +255,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "loanAmount",
         "apply",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("personGuarantee"),
         &pers,
@@ -265,7 +265,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "createTime",
         "guarantee",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("companyGuarantee"),
         &comp,
@@ -275,7 +275,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "createTime",
         "guarantee",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("personOwnAccount"),
         &pers,
@@ -285,7 +285,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "createTime",
         "own",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("companyOwnAccount"),
         &comp,
@@ -295,7 +295,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "createTime",
         "own",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("personInvest"),
         &pers,
@@ -305,7 +305,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "createTime",
         "invest",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("companyInvest"),
         &comp,
@@ -315,7 +315,7 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         "createTime",
         "invest",
     )?;
-    edges += edge_ts(
+    rels += rel_ts_of(
         &mut b,
         &raw.join("signIn"),
         &med,
@@ -331,23 +331,23 @@ pub fn load_finbench(raw: &Path) -> Result<(GraphSnapshot, Stats), String> {
         snapshot,
         Stats {
             nodes,
-            edges,
+            rels,
             load_ms: t0.elapsed().as_millis(),
         },
     ))
 }
 
-// --- queries (tasks/008): temporal traversals that read each edge's ts / amount
+// --- queries (tasks/008): temporal traversals that read each rel's ts / amount
 // mid-traversal via the relationship accessor's CSR position. ---
 
-/// Edge timestamp (`ts`, epoch ms) at CSR position `pos`.
+/// Rel timestamp (`ts`, epoch ms) at CSR position `pos`.
 fn rel_ts(g: &GraphSnapshot, pos: u32) -> i64 {
     g.rel_prop(pos, "ts")
         .and_then(|p| p.i64())
         .unwrap_or(i64::MIN)
 }
 
-/// Edge amount (`amt`) at CSR position `pos`.
+/// Rel amount (`amt`) at CSR position `pos`.
 fn rel_amt(g: &GraphSnapshot, pos: u32) -> f64 {
     g.rel_prop(pos, "amt").and_then(|p| p.f64()).unwrap_or(0.0)
 }
@@ -359,7 +359,7 @@ fn node_f64(g: &GraphSnapshot, node: u32, key: &str) -> Option<f64> {
 
 /// TCR1-style — trace `transfer` paths (≤`max_hops`) feeding into `account`
 /// within `[start_ms, end_ms]`, returning the upstream accounts. The window
-/// filter reads each edge's timestamp during the reverse BFS.
+/// filter reads each rel's timestamp during the reverse BFS.
 pub fn trace_transfers_in(
     g: &GraphSnapshot,
     account: u32,
@@ -476,8 +476,8 @@ fn cycle_dfs(
 }
 
 /// TCR3-style — shortest in-window `transfer` path (hop count) from `src` to
-/// `dst`, or -1 if unreachable. Out-of-window edges are pruned by the Dijkstra
-/// weight closure reading each edge's timestamp.
+/// `dst`, or -1 if unreachable. Out-of-window rels are pruned by the Dijkstra
+/// weight closure reading each rel's timestamp.
 pub fn shortest_transfer_path(
     g: &GraphSnapshot,
     src: u32,
@@ -540,42 +540,42 @@ pub fn cr1(
     queue.push_back((account, 0, i64::MAX));
 
     // Resolve the hot property columns and relationship types once: otherwise
-    // the `ts` read (per edge), the `blocked` check (per signIn), and each
+    // the `ts` read (per rel), the `blocked` check (per signIn), and each
     // `relationships(..)` call (per node) all re-resolve their string key
     // through the interner on every call.
     let ts_col = g.rel_col("ts").map(|c| c.i64());
     let blocked_col = g.col("blocked").map(|c| c.bool());
     let transfer = g.relationship_type_from_str("transfer");
     let signin = g.relationship_type_from_str("signIn");
-    let edge_ts = |pos: u32| ts_col.as_ref().and_then(|c| c.get(pos)).unwrap_or(i64::MIN);
+    let rel_ts_of = |pos: u32| ts_col.as_ref().and_then(|c| c.get(pos)).unwrap_or(i64::MIN);
 
     // (ts, neighbor) buffer reused across BFS nodes — keeps its capacity so the
-    // per-node edge gather doesn't re-allocate, and reads each edge's ts once.
-    let mut edges: Vec<(i64, u32)> = Vec::new();
+    // per-node rel gather doesn't re-allocate, and reads each rel's ts once.
+    let mut rels: Vec<(i64, u32)> = Vec::new();
     while let Some((node, depth, last_ts)) = queue.pop_front() {
         if depth >= 3 {
             continue;
         }
         // In-window, strictly-ascending (forward) = strictly-decreasing backward.
-        edges.clear();
+        rels.clear();
         for r in g.relationships(node, Direction::Incoming, transfer) {
-            let ts = edge_ts(r.pos);
+            let ts = rel_ts_of(r.pos);
             if ts >= start_ms && ts <= end_ms && ts < last_ts {
-                edges.push((ts, r.neighbor));
+                rels.push((ts, r.neighbor));
             }
         }
         // Order matters beyond truncation: each node is first-claimed in BFS
-        // order and inherits the claiming edge's ts as its `last_ts`, so the
-        // sort fixes which edge wins. The ts key is already materialized, so the
+        // order and inherits the claiming rel's ts as its `last_ts`, so the
+        // sort fixes which rel wins. The ts key is already materialized, so the
         // sort is cheap (unlike the old rel_ts-in-comparator). Then truncate.
         if truncation_order_asc {
-            edges.sort_unstable_by_key(|&(ts, _)| ts);
+            rels.sort_unstable_by_key(|&(ts, _)| ts);
         } else {
-            edges.sort_unstable_by_key(|&(ts, _)| std::cmp::Reverse(ts));
+            rels.sort_unstable_by_key(|&(ts, _)| std::cmp::Reverse(ts));
         }
-        edges.truncate(truncation_limit as usize);
+        rels.truncate(truncation_limit as usize);
 
-        for &(ts, neighbor) in &edges {
+        for &(ts, neighbor) in &rels {
             if visited.insert(neighbor) {
                 let dist = depth + 1;
                 for sig in g.relationships(neighbor, Direction::Incoming, signin) {
@@ -606,7 +606,7 @@ pub fn cr2(
     let mut by_acct: HashMap<u32, (f64, f64)> = HashMap::new();
 
     // Buffers reused across the BFS and the deposit scan so neither re-allocates
-    // per node. `rels` holds (ts, neighbor) so each edge's ts is read once.
+    // per node. `rels` holds (ts, neighbor) so each rel's ts is read once.
     let mut rels: Vec<(i64, u32)> = Vec::new();
     let mut loans: FastSet<u32> = FastSet::default();
     for own in g.relationships(person, Direction::Outgoing, "own") {
@@ -688,7 +688,7 @@ pub fn cr5(
     let mut all_paths = Vec::new();
     let desc = truncation_order.eq_ignore_ascii_case("desc");
 
-    // Find accounts owned by this person via "own" edges (person -> account)
+    // Find accounts owned by this person via "own" rels (person -> account)
     for r in g.relationships(person, Direction::Outgoing, "own") {
         let start_account = r.neighbor;
         let mut path = vec![start_account];
@@ -710,7 +710,7 @@ pub fn cr5(
         );
     }
 
-    // Per the spec, parallel src->dst edges form one path; collapsing edges by
+    // Per the spec, parallel src->dst rels form one path; collapsing rels by
     // neighbor (below) makes each node-sequence unique, but dedup defensively
     // before the length sort so the result is a true set of traces.
     all_paths.sort();
@@ -720,7 +720,7 @@ pub fn cr5(
 }
 
 /// DFS helper for cr5: explores transfer paths from a node with time-window,
-/// strictly increasing timestamp, and cycle constraints. Parallel edges to the
+/// strictly increasing timestamp, and cycle constraints. Parallel rels to the
 /// same neighbor are collapsed to their earliest in-window timestamp — the
 /// least-restrictive choice, which is the faithful test for "an ascending
 /// trace to that neighbor exists" and treats them as one path (spec note).
@@ -738,12 +738,12 @@ fn cr5_dfs(
     truncation_limit: u32,
     desc: bool,
 ) {
-    // Stop at max 3 hops (edges)
+    // Stop at max 3 hops (rels)
     if depth >= 3 {
         return;
     }
 
-    // Collapse parallel transfer edges per neighbor, keeping the earliest valid
+    // Collapse parallel transfer rels per neighbor, keeping the earliest valid
     // timestamp (in window, strictly after last_ts, target not on this path).
     let mut by_neighbor: HashMap<u32, i64> = HashMap::new();
     for r in g.relationships(node, Direction::Outgoing, "transfer") {
@@ -800,8 +800,8 @@ fn cr5_dfs(
 /// 1. Withdraw to dstCard with amount > threshold2 within [startTime, endTime]
 /// 2. Have > 3 distinct incoming transfers from sources with amount > threshold1
 ///
-/// Returns Vec<(midId, sumEdge1Amount, sumEdge2Amount)> sorted by
-/// sumEdge2Amount descending, then midId ascending.
+/// Returns Vec<(midId, sumRel1Amount, sumRel2Amount)> sorted by
+/// sumRel2Amount descending, then midId ascending.
 pub fn cr6(
     g: &GraphSnapshot,
     dst_card: u32,
@@ -856,7 +856,7 @@ pub enum TruncationOrder {
 }
 
 /// TCR7-style — transfer in/out ratio. Given an account and time window,
-/// find all transfer-in and transfer-out edges where amount exceeds a threshold.
+/// find all transfer-in and transfer-out rels where amount exceeds a threshold.
 /// Return the count of distinct source/destination accounts and the ratio of
 /// total transfer-in amount to transfer-out amount (or -1.0 if no outgoing transfers).
 pub fn cr7(
@@ -868,62 +868,62 @@ pub fn cr7(
     truncation_limit: u32,
     truncation_order: TruncationOrder,
 ) -> (u32, u32, f64) {
-    // Collect and filter transfer-in edges (incoming)
-    let mut in_edges: Vec<(i64, f64, u32)> = Vec::new();
+    // Collect and filter transfer-in rels (incoming)
+    let mut in_rels: Vec<(i64, f64, u32)> = Vec::new();
     for r in g.relationships(account, Direction::Incoming, "transfer") {
         let ts = rel_ts(g, r.pos);
         let amt = rel_amt(g, r.pos);
         if ts >= start_ms && ts <= end_ms && amt > threshold {
-            in_edges.push((ts, amt, r.neighbor));
+            in_rels.push((ts, amt, r.neighbor));
         }
     }
 
     // Truncation only binds above the limit; below it the frontier order is
     // irrelevant to the distinct-count + sum, so pick the top-`limit` by time
     // with an O(n) partial selection instead of a full O(n log n) sort.
-    if in_edges.len() > truncation_limit as usize {
+    if in_rels.len() > truncation_limit as usize {
         let k = truncation_limit as usize;
         match truncation_order {
-            TruncationOrder::Ascending => in_edges.select_nth_unstable_by_key(k, |e| e.0),
-            TruncationOrder::Descending => in_edges.select_nth_unstable_by(k, |a, b| b.0.cmp(&a.0)),
+            TruncationOrder::Ascending => in_rels.select_nth_unstable_by_key(k, |e| e.0),
+            TruncationOrder::Descending => in_rels.select_nth_unstable_by(k, |a, b| b.0.cmp(&a.0)),
         };
-        in_edges.truncate(k);
+        in_rels.truncate(k);
     }
 
     // Aggregate transfer-in: count distinct sources, sum amounts
     let mut in_src_set: FastSet<u32> = FastSet::default();
     let mut in_amount = 0.0;
-    for (_, amt, neighbor) in &in_edges {
+    for (_, amt, neighbor) in &in_rels {
         in_src_set.insert(*neighbor);
         in_amount += amt;
     }
     let num_src = in_src_set.len() as u32;
 
-    // Collect and filter transfer-out edges (outgoing)
-    let mut out_edges: Vec<(i64, f64, u32)> = Vec::new();
+    // Collect and filter transfer-out rels (outgoing)
+    let mut out_rels: Vec<(i64, f64, u32)> = Vec::new();
     for r in g.relationships(account, Direction::Outgoing, "transfer") {
         let ts = rel_ts(g, r.pos);
         let amt = rel_amt(g, r.pos);
         if ts >= start_ms && ts <= end_ms && amt > threshold {
-            out_edges.push((ts, amt, r.neighbor));
+            out_rels.push((ts, amt, r.neighbor));
         }
     }
 
-    if out_edges.len() > truncation_limit as usize {
+    if out_rels.len() > truncation_limit as usize {
         let k = truncation_limit as usize;
         match truncation_order {
-            TruncationOrder::Ascending => out_edges.select_nth_unstable_by_key(k, |e| e.0),
+            TruncationOrder::Ascending => out_rels.select_nth_unstable_by_key(k, |e| e.0),
             TruncationOrder::Descending => {
-                out_edges.select_nth_unstable_by(k, |a, b| b.0.cmp(&a.0))
+                out_rels.select_nth_unstable_by(k, |a, b| b.0.cmp(&a.0))
             }
         };
-        out_edges.truncate(k);
+        out_rels.truncate(k);
     }
 
     // Aggregate transfer-out: count distinct destinations, sum amounts
     let mut out_dst_set: FastSet<u32> = FastSet::default();
     let mut out_amount = 0.0;
-    for (_, amt, neighbor) in &out_edges {
+    for (_, amt, neighbor) in &out_rels {
         out_dst_set.insert(*neighbor);
         out_amount += amt;
     }
@@ -956,8 +956,8 @@ pub fn cr8(
     // Get loan amount (for ratio calculation: inflow / loan_amount)
     let loan_amount = node_f64(g, loan_id, "amount").unwrap_or(1.0);
 
-    // Find all deposit edges from the loan within the time window [start_ms, end_ms]
-    let deposit_edges: Vec<(u32, f64)> = g
+    // Find all deposit rels from the loan within the time window [start_ms, end_ms]
+    let deposit_rels: Vec<(u32, f64)> = g
         .relationships(loan_id, Direction::Outgoing, "deposit")
         .filter(|r| {
             let ts = rel_ts(g, r.pos);
@@ -969,16 +969,16 @@ pub fn cr8(
     // Results: dstId -> (total_inflow, min_distance_from_loan)
     let mut results: HashMap<u32, (f64, u32)> = HashMap::new();
 
-    // (amt, neighbor) buffer reused across the BFS so the per-node edge gather
-    // doesn't re-allocate and reads each edge's amount once.
-    let mut edges: Vec<(f64, u32)> = Vec::new();
+    // (amt, neighbor) buffer reused across the BFS so the per-node rel gather
+    // doesn't re-allocate and reads each rel's amount once.
+    let mut rels: Vec<(f64, u32)> = Vec::new();
     // For each deposited account, trace transfers/withdraws up to distance 3
-    for (start_account, deposit_amt) in deposit_edges {
+    for (start_account, deposit_amt) in deposit_rels {
         let mut visited: FastSet<u32> = FastSet::default();
         visited.insert(start_account);
 
         let mut queue: VecDeque<(u32, u32, f64)> = VecDeque::new();
-        queue.push_back((start_account, 1, deposit_amt)); // distance 1 (via deposit edge)
+        queue.push_back((start_account, 1, deposit_amt)); // distance 1 (via deposit rel)
 
         while let Some((node, dist, inflow)) = queue.pop_front() {
             // Add/update results with this account
@@ -1005,36 +1005,36 @@ pub fn cr8(
                 .map(|r| rel_amt(g, r.pos))
                 .sum();
 
-            // Collect outgoing transfer + withdraw edges in window as (amt,
+            // Collect outgoing transfer + withdraw rels in window as (amt,
             // neighbor) into the reused buffer, reading each amount once.
-            edges.clear();
+            rels.clear();
             for r in g
                 .relationships(node, Direction::Outgoing, "transfer")
                 .chain(g.relationships(node, Direction::Outgoing, "withdraw"))
             {
                 let ts = rel_ts(g, r.pos);
                 if (start_ms..=end_ms).contains(&ts) {
-                    edges.push((rel_amt(g, r.pos), r.neighbor));
+                    rels.push((rel_amt(g, r.pos), r.neighbor));
                 }
             }
 
             // Sort by amount in truncation order — claim order decides which
-            // edge first reaches (so sets the inflow/distance of) each node.
+            // rel first reaches (so sets the inflow/distance of) each node.
             if truncation_order == "DESC" {
-                edges.sort_unstable_by(|a, b| {
+                rels.sort_unstable_by(|a, b| {
                     b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
                 });
             } else {
-                edges.sort_unstable_by(|a, b| {
+                rels.sort_unstable_by(|a, b| {
                     a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
                 });
             }
-            edges.truncate(truncation_limit as usize);
+            rels.truncate(truncation_limit as usize);
 
-            // Process edges: only follow if amount > threshold * upstream_total
-            for &(edge_amt, neighbor) in &edges {
-                if edge_amt > threshold * upstream_total && visited.insert(neighbor) {
-                    queue.push_back((neighbor, dist + 1, edge_amt));
+            // Process rels: only follow if amount > threshold * upstream_total
+            for &(rel_amt_of, neighbor) in &rels {
+                if rel_amt_of > threshold * upstream_total && visited.insert(neighbor) {
+                    queue.push_back((neighbor, dist + 1, rel_amt_of));
                 }
             }
         }
@@ -1064,21 +1064,21 @@ pub fn cr8(
 /// TCR9: Money laundering with loan involved
 ///
 /// Given an account, a transfer amount threshold, and a time window,
-/// find deposit and repay edges between the account and loans, and
+/// find deposit and repay rels between the account and loans, and
 /// transfers-in and transfers-out. Returns three ratios:
-/// - ratioRepay = sum(edge1) / sum(edge2), or -1 if no edge2 found
-/// - ratioDeposit = sum(edge1) / sum(edge4), or -1 if no edge4 found
-/// - ratioTransfer = sum(edge3) / sum(edge4), or -1 if no edge4 found
+/// - ratioRepay = sum(rel1) / sum(rel2), or -1 if no rel2 found
+/// - ratioDeposit = sum(rel1) / sum(rel4), or -1 if no rel4 found
+/// - ratioTransfer = sum(rel3) / sum(rel4), or -1 if no rel4 found
 ///
-/// Edge mapping (per loader schema):
-/// - edge1: repay edges (account -> loan)
-/// - edge2: deposit edges (loan -> account)
-/// - edge3: transfer edges out (account -> other_account)
-/// - edge4: transfer edges in (other_account -> account)
+/// Rel mapping (per loader schema):
+/// - rel1: repay rels (account -> loan)
+/// - rel2: deposit rels (loan -> account)
+/// - rel3: transfer rels out (account -> other_account)
+/// - rel4: transfer rels in (other_account -> account)
 ///
-/// All edges filtered by time window [start_ms, end_ms].
-/// Transfer edges (edge3, edge4) additionally filtered by amount >= threshold.
-/// At most truncation_limit edges of each type are kept (after sorting by truncation_order).
+/// All rels filtered by time window [start_ms, end_ms].
+/// Transfer rels (rel3, rel4) additionally filtered by amount >= threshold.
+/// At most truncation_limit rels of each type are kept (after sorting by truncation_order).
 pub fn cr9(
     g: &GraphSnapshot,
     account: u32,
@@ -1088,69 +1088,69 @@ pub fn cr9(
     truncation_limit: usize,
     truncation_asc: bool, // true = ascending by timestamp, false = descending
 ) -> (f32, f32, f32) {
-    // Collect edge1 (repay: account -> loan)
-    let mut edge1_edges: Vec<(i64, f64)> = Vec::new();
+    // Collect rel1 (repay: account -> loan)
+    let mut rel1_rels: Vec<(i64, f64)> = Vec::new();
     for r in g.relationships(account, Direction::Outgoing, "repay") {
         let ts = rel_ts(g, r.pos);
         if ts >= start_ms && ts <= end_ms {
-            edge1_edges.push((ts, rel_amt(g, r.pos)));
+            rel1_rels.push((ts, rel_amt(g, r.pos)));
         }
     }
 
-    // Collect edge2 (deposit: loan -> account)
-    let mut edge2_edges: Vec<(i64, f64)> = Vec::new();
+    // Collect rel2 (deposit: loan -> account)
+    let mut rel2_rels: Vec<(i64, f64)> = Vec::new();
     for r in g.relationships(account, Direction::Incoming, "deposit") {
         let ts = rel_ts(g, r.pos);
         if ts >= start_ms && ts <= end_ms {
-            edge2_edges.push((ts, rel_amt(g, r.pos)));
+            rel2_rels.push((ts, rel_amt(g, r.pos)));
         }
     }
 
-    // Collect edge3 (transfer-out: account -> other_account, amt >= threshold)
-    let mut edge3_edges: Vec<(i64, f64)> = Vec::new();
+    // Collect rel3 (transfer-out: account -> other_account, amt >= threshold)
+    let mut rel3_rels: Vec<(i64, f64)> = Vec::new();
     for r in g.relationships(account, Direction::Outgoing, "transfer") {
         let ts = rel_ts(g, r.pos);
         let amt = rel_amt(g, r.pos);
         if ts >= start_ms && ts <= end_ms && amt >= threshold {
-            edge3_edges.push((ts, amt));
+            rel3_rels.push((ts, amt));
         }
     }
 
-    // Collect edge4 (transfer-in: other_account -> account, amt >= threshold)
-    let mut edge4_edges: Vec<(i64, f64)> = Vec::new();
+    // Collect rel4 (transfer-in: other_account -> account, amt >= threshold)
+    let mut rel4_rels: Vec<(i64, f64)> = Vec::new();
     for r in g.relationships(account, Direction::Incoming, "transfer") {
         let ts = rel_ts(g, r.pos);
         let amt = rel_amt(g, r.pos);
         if ts >= start_ms && ts <= end_ms && amt >= threshold {
-            edge4_edges.push((ts, amt));
+            rel4_rels.push((ts, amt));
         }
     }
 
-    // Truncation keeps the top-`limit` edges by time; the ratios sum the kept
-    // edges, so their order within the kept set is irrelevant — select the
+    // Truncation keeps the top-`limit` rels by time; the ratios sum the kept
+    // rels, so their order within the kept set is irrelevant — select the
     // top-k in O(n), and skip the work entirely when the limit doesn't bind.
-    fn apply_truncation(edges: &mut Vec<(i64, f64)>, limit: usize, asc: bool) {
-        if edges.len() <= limit {
+    fn apply_truncation(rels: &mut Vec<(i64, f64)>, limit: usize, asc: bool) {
+        if rels.len() <= limit {
             return;
         }
         if asc {
-            edges.select_nth_unstable_by_key(limit, |e| e.0);
+            rels.select_nth_unstable_by_key(limit, |e| e.0);
         } else {
-            edges.select_nth_unstable_by(limit, |a, b| b.0.cmp(&a.0));
+            rels.select_nth_unstable_by(limit, |a, b| b.0.cmp(&a.0));
         }
-        edges.truncate(limit);
+        rels.truncate(limit);
     }
 
-    apply_truncation(&mut edge1_edges, truncation_limit, truncation_asc);
-    apply_truncation(&mut edge2_edges, truncation_limit, truncation_asc);
-    apply_truncation(&mut edge3_edges, truncation_limit, truncation_asc);
-    apply_truncation(&mut edge4_edges, truncation_limit, truncation_asc);
+    apply_truncation(&mut rel1_rels, truncation_limit, truncation_asc);
+    apply_truncation(&mut rel2_rels, truncation_limit, truncation_asc);
+    apply_truncation(&mut rel3_rels, truncation_limit, truncation_asc);
+    apply_truncation(&mut rel4_rels, truncation_limit, truncation_asc);
 
     // Sum amounts
-    let edge1_sum: f64 = edge1_edges.iter().map(|(_, amt)| amt).sum();
-    let edge2_sum: f64 = edge2_edges.iter().map(|(_, amt)| amt).sum();
-    let edge3_sum: f64 = edge3_edges.iter().map(|(_, amt)| amt).sum();
-    let edge4_sum: f64 = edge4_edges.iter().map(|(_, amt)| amt).sum();
+    let rel1_sum: f64 = rel1_rels.iter().map(|(_, amt)| amt).sum();
+    let rel2_sum: f64 = rel2_rels.iter().map(|(_, amt)| amt).sum();
+    let rel3_sum: f64 = rel3_rels.iter().map(|(_, amt)| amt).sum();
+    let rel4_sum: f64 = rel4_rels.iter().map(|(_, amt)| amt).sum();
 
     // Helper: round to 3 decimal places
     fn round_3dp(x: f64) -> f32 {
@@ -1158,22 +1158,22 @@ pub fn cr9(
     }
 
     // Calculate ratios with -1 for division by zero
-    let ratio_repay = if edge2_sum == 0.0 {
+    let ratio_repay = if rel2_sum == 0.0 {
         -1.0f32
     } else {
-        round_3dp(edge1_sum / edge2_sum)
+        round_3dp(rel1_sum / rel2_sum)
     };
 
-    let ratio_deposit = if edge4_sum == 0.0 {
+    let ratio_deposit = if rel4_sum == 0.0 {
         -1.0f32
     } else {
-        round_3dp(edge1_sum / edge4_sum)
+        round_3dp(rel1_sum / rel4_sum)
     };
 
-    let ratio_transfer = if edge4_sum == 0.0 {
+    let ratio_transfer = if rel4_sum == 0.0 {
         -1.0f32
     } else {
-        round_3dp(edge3_sum / edge4_sum)
+        round_3dp(rel3_sum / rel4_sum)
     };
 
     (ratio_repay, ratio_deposit, ratio_transfer)

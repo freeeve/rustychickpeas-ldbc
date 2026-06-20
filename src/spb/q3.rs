@@ -12,7 +12,7 @@
 //! Mapping to the SPB-10 extract:
 //!   * `cwork:tag` is the abstract tagging predicate; the BBC data materializes
 //!     the concrete tag links as `about` (entities) and `mentions` (geonames
-//!     Features), which our loader keeps as edges — so we union INCOMING `about`
+//!     Features), which our loader keeps as rels — so we union INCOMING `about`
 //!     and `mentions` into the topic, matching the SPARQL's topic constraint.
 //!   * `dateCreated` is an xsd:dateTime string literal; ISO-8601 sorts
 //!     lexicographically, so DESC(?created) is a reverse string compare.

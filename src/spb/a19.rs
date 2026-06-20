@@ -32,9 +32,9 @@
 //!     (the value `?topic` actually binds to), and never drop a topic.
 //!
 //! Vocabulary mapping (no SPARQL / RDFS engine): `cwork:tag` is evaluated as the
-//! union of the `about` / `mentions` / direct `tag` out-edges, deduped per work
+//! union of the `about` / `mentions` / direct `tag` out-rels, deduped per work
 //! (RDF triple-set semantics); `a {{{cwType}}}` / `cwork:audience` are equality
-//! restrictions on the work's type label and `audience` out-edge target; the date
+//! restrictions on the work's type label and `audience` out-rel target; the date
 //! condition is an inclusive `[start, end]` window on `dateModified`, compared as
 //! epoch-ms via `parse_ms`.
 
@@ -45,8 +45,8 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use super::queries::has_label;
 use crate::props::{parse_ms, PropExt};
 
-/// Edges making up `cwork:tag` once its `about` / `mentions` sub-properties are
-/// folded in (no RDFS engine), plus any direct `tag` edge.
+/// Rels making up `cwork:tag` once its `about` / `mentions` sub-properties are
+/// folded in (no RDFS engine), plus any direct `tag` rel.
 const TAG_PREDICATES: [&str; 3] = ["about", "mentions", "tag"];
 
 /// Run SPB advanced q19: the top `limit` topics by most-recent tagging-work

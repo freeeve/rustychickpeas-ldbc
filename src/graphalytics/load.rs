@@ -75,8 +75,8 @@ pub fn load(dir: &Path, name: &str) -> Result<Dataset> {
 /// Build a [`Dataset`] from in-memory file contents (the unit-test seam for
 /// [`load`]). Vertices are assigned dense node ids in `.v` file order; each `.e`
 /// line `src dst [weight]` becomes an `e` relationship with a `weight` f64
-/// property (default `1.0`). Undirected graphs store each edge once; algorithms
-/// traverse `Direction::Both`. Edges referencing an unknown vertex are skipped.
+/// property (default `1.0`). Undirected graphs store each rel once; algorithms
+/// traverse `Direction::Both`. Rels referencing an unknown vertex are skipped.
 pub fn load_str(v_text: &str, e_text: &str, props: &str) -> Dataset {
     let params = parse_params(props);
 
@@ -113,7 +113,7 @@ pub fn load_str(v_text: &str, e_text: &str, props: &str) -> Dataset {
         let weight: f64 = it.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
         if let (Some(&su), Some(&du)) = (node_of_vertex.get(&sv), node_of_vertex.get(&dv)) {
             // Set the weight via the returned index: set_relationship_prop_f64 does
-            // a linear find_rel_index scan, which is O(E^2) over a real edge list.
+            // a linear find_rel_index scan, which is O(E^2) over a real rel list.
             let idx = b.add_relationship(su, du, "e").unwrap();
             b.set_relationship_props_by_index(idx, &[("weight", PropertyValue::Float(weight))]);
         }
@@ -186,7 +186,7 @@ graph.x.sssp.source-vertex = 10
     }
 
     #[test]
-    fn edges_carry_weights_with_unit_default() {
+    fn rels_carry_weights_with_unit_default() {
         let ds = load_str(V, E, "");
         // node 0 (v10) -> node 1 (v20) and node 0 -> node 2 (v30, default weight).
         let outs: Vec<u32> = ds.graph.neighbors(0, Direction::Outgoing).collect();

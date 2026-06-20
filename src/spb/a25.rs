@@ -29,7 +29,7 @@
 //! the same day (or a single work co-mentioning several entities) collapse
 //! exactly as the `DISTINCT` dictates.
 //!
-//! Implementation: resolve `A` by `uri`; walk its incoming `about` edges to the
+//! Implementation: resolve `A` by `uri`; walk its incoming `about` rels to the
 //! creative works about it (`CreativeWork`-labelled), read each work's required
 //! `dateCreated` down to its `YYYY-MM-DD` prefix, and fold every *other*
 //! outgoing `about` target's day into a per-`who` day set. We then

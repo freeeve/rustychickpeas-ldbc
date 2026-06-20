@@ -13,9 +13,9 @@
 //! `tag` (about/mentions) traversal.
 //!
 //! Facets (each an `Option`, applied only when bound — `None` = "any"):
-//!   * `category_uri` / `audience_uri` — an outgoing `category` / `audience` edge
+//!   * `category_uri` / `audience_uri` — an outgoing `category` / `audience` rel
 //!     to a node carrying that `uri`.
-//!   * `tag_uri` — an outgoing `about` OR `mentions` edge to that `uri` (the BBC
+//!   * `tag_uri` — an outgoing `about` OR `mentions` rel to that `uri` (the BBC
 //!     `cwork:tag` materializes as those two concrete links).
 //!   * `live_coverage` — the `liveCoverage` boolean property.
 //!   * `date_from` / `date_to` — inclusive lexicographic bounds on the ISO-8601

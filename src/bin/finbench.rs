@@ -1,5 +1,5 @@
-//! FinBench loader: load a generated `raw/` directory, print node/edge counts
-//! and load time, and verify an edge's timestamp + amount are readable during
+//! FinBench loader: load a generated `raw/` directory, print node/rel counts
+//! and load time, and verify an rel's timestamp + amount are readable during
 //! traversal (the relationship-accessor capability the queries rely on).
 //!
 //!   cargo run --release --bin finbench -- data/finbench/raw
@@ -47,15 +47,15 @@ fn main() {
     };
 
     println!(
-        "FinBench {dir}: {} nodes, {} edges in {} ms (snapshot {} nodes / {} rels)",
+        "FinBench {dir}: {} nodes, {} rels in {} ms (snapshot {} nodes / {} rels)",
         s.nodes,
-        s.edges,
+        s.rels,
         s.load_ms,
         g.node_count(),
         g.relationship_count()
     );
 
-    // 007 acceptance: edge timestamp + amount readable during traversal.
+    // 007 acceptance: rel timestamp + amount readable during traversal.
     for n in 0..g.node_count() {
         if let Some(r) = g.relationships(n, Direction::Outgoing, "transfer").next() {
             println!(

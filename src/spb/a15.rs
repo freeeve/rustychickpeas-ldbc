@@ -28,7 +28,7 @@
 //!     loader forward-chains `coreconcepts:Thing` onto all of them via
 //!     `rdfs:subClassOf`, so `Thing` is the only entity type an about- and a
 //!     mentions-target can share. We require one of each carrying it.
-//!   * `cwork:category ?category` — at least one outgoing `category` edge.
+//!   * `cwork:category ?category` — at least one outgoing `category` rel.
 //!   * the OPTIONAL audience and the projected `?about`/`?mentions`/`?entityType`/
 //!     `?category` columns only fan each qualifying DISTINCT work out into a cross
 //!     product; the meaningful identity is the work, so `run` returns the
@@ -59,7 +59,7 @@ fn about_and_mentions_share_type(g: &GraphSnapshot, work: u32) -> bool {
 }
 
 /// Run SPB advanced q15: DISTINCT creative works whose `title` matches `word`
-/// (full-text), that carry a `category` edge and an about-/mentions-target pair
+/// (full-text), that carry a `category` rel and an about-/mentions-target pair
 /// sharing the `Thing` entity type, sorted by id and truncated to `limit` (the
 /// template's `LIMIT {{{randomLimit}}}`).
 pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<u32> {

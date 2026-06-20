@@ -11,9 +11,9 @@
 //! ```
 //!
 //! `cwork:tag` is the RDFS super-property of `cwork:about` / `cwork:mentions`,
-//! materialized by the loader, so each `about`/`mentions` edge is also a `tag`
-//! edge we read directly. `?category` and `?dateModified` are bound (the work
-//! must carry a category edge to one of the two pinned uris and a non-empty
+//! materialized by the loader, so each `about`/`mentions` rel is also a `tag`
+//! rel we read directly. `?category` and `?dateModified` are bound (the work
+//! must carry a category rel to one of the two pinned uris and a non-empty
 //! `dateModified`) but the `SELECT DISTINCT` identity is `(?thing, ?tag)` — the
 //! pair we return, one row per distinct tag target.
 

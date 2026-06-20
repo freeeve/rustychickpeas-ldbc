@@ -15,7 +15,7 @@
 //!
 //! In SPB `cwork:about` and `cwork:mentions` are sub-properties of `cwork:tag`, so
 //! "tagged with the topic" expands (RDFS) to reaching the topic by `about` OR
-//! `mentions`; with no RDFS engine we union those two edges directly. `a {{cwType}}`
+//! `mentions`; with no RDFS engine we union those two rels directly. `a {{cwType}}`
 //! is the blog-post subclass — a work carries BOTH the `CreativeWork` label and its
 //! subclass label, so we filter `has_label("BlogPost")`. `cwork:dateCreated` is a
 //! required pattern, giving the `ORDER BY DESC(?created)` key; `LIMIT` is `limit`.

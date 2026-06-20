@@ -58,7 +58,7 @@ pub struct Stats {
     pub comments: u64,
     pub tags: u64,
     pub tag_classes: u64,
-    pub edges: u64,
+    pub rels: u64,
 }
 
 /// Store the message properties the faithful queries read: year, day-number,
@@ -103,7 +103,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
     let mut comment: HashMap<i64, u32> = HashMap::new();
     let mut stats = Stats::default();
 
-    // Static TagClass (load before Tag so HAS_TYPE edges resolve).
+    // Static TagClass (load before Tag so HAS_TYPE rels resolve).
     for_each_row(&static_.join("TagClass"), &["id", "name"], |v| {
         if let Ok(lid) = v[0].parse::<i64>() {
             let id = next;
@@ -124,7 +124,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let parent = v[1].parse::<i64>().ok().and_then(|i| tagclass.get(&i));
             if let (Some(&c), Some(&p)) = (c, parent) {
                 builder.add_relationship(c, p, "isSubclassOf").unwrap();
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -142,14 +142,14 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 tag.insert(lid, id);
                 if let Some(&class) = v[2].parse::<i64>().ok().and_then(|c| tagclass.get(&c)) {
                     builder.add_relationship(id, class, "hasType").unwrap();
-                    stats.edges += 1;
+                    stats.rels += 1;
                 }
             }
         },
     )?;
     stats.tags = tag.len() as u64;
 
-    // Persons (before Posts/Comments so hasCreator edges can resolve). Store
+    // Persons (before Posts/Comments so hasCreator rels can resolve). Store
     // creationDate as epoch day (pday) and year*12+month (pym) for Q13, plus
     // first/last name (fname/lname) for the Interactive workload's IC1/IS1.
     for_each_row(
@@ -212,7 +212,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
         let parent = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
         if let (Some(&c), Some(&p)) = (c, parent) {
             builder.add_relationship(c, p, "isPartOf").unwrap();
-            stats.edges += 1;
+            stats.rels += 1;
         }
     })?;
     for_each_row(&dynamic.join("Person"), &["id", "LocationCityId"], |v| {
@@ -220,7 +220,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
         let city = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
         if let (Some(&p), Some(&city)) = (p, city) {
             builder.add_relationship(p, city, "isLocatedIn").unwrap();
-            stats.edges += 1;
+            stats.rels += 1;
         }
     })?;
 
@@ -243,7 +243,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 forum.insert(lid, id);
                 if let Some(&m) = v[3].parse::<i64>().ok().and_then(|p| person.get(&p)) {
                     builder.add_relationship(id, m, "hasModerator").unwrap();
-                    stats.edges += 1;
+                    stats.rels += 1;
                 }
             }
         },
@@ -259,7 +259,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 let idx = builder.add_relationship(f, p, "hasMember").unwrap();
                 builder
                     .set_relationship_props_by_index(idx, &[("hd", PropertyValue::Integer(day))]); // IC5 join date
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -291,7 +291,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 post.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
                     builder.add_relationship(creator, id, "hasCreator").unwrap();
-                    stats.edges += 1;
+                    stats.rels += 1;
                 }
             }
         },
@@ -304,7 +304,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
         let f = v[1].parse::<i64>().ok().and_then(|i| forum.get(&i));
         if let (Some(&p), Some(&f)) = (p, f) {
             builder.add_relationship(f, p, "containerOf").unwrap();
-            stats.edges += 1;
+            stats.rels += 1;
         }
     })?;
 
@@ -324,7 +324,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 comment.insert(lid, id);
                 if let Some(&creator) = v[1].parse::<i64>().ok().and_then(|c| person.get(&c)) {
                     builder.add_relationship(creator, id, "hasCreator").unwrap();
-                    stats.edges += 1;
+                    stats.rels += 1;
                 }
             }
         },
@@ -340,7 +340,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let t = v[1].parse::<i64>().ok().and_then(|i| tag.get(&i));
             if let (Some(&p), Some(&t)) = (p, t) {
                 builder.add_relationship(p, t, "hasTag").unwrap();
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -354,7 +354,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let t = v[1].parse::<i64>().ok().and_then(|i| tag.get(&i));
             if let (Some(&c), Some(&t)) = (c, t) {
                 builder.add_relationship(c, t, "hasTag").unwrap();
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -368,7 +368,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let t = v[1].parse::<i64>().ok().and_then(|i| tag.get(&i));
             if let (Some(&p), Some(&t)) = (p, t) {
                 builder.add_relationship(p, t, "hasInterest").unwrap();
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -387,7 +387,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             };
             if let (Some(&c), Some(&p)) = (c, parent) {
                 builder.add_relationship(c, p, "replyOf").unwrap();
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -398,7 +398,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
         let c = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
         if let (Some(&m), Some(&c)) = (m, c) {
             builder.add_relationship(m, c, "msgCountry").unwrap();
-            stats.edges += 1;
+            stats.rels += 1;
         }
     })?;
     for_each_row(
@@ -409,7 +409,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
             let c = v[1].parse::<i64>().ok().and_then(|i| place.get(&i));
             if let (Some(&m), Some(&c)) = (m, c) {
                 builder.add_relationship(m, c, "msgCountry").unwrap();
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -427,7 +427,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                     idx,
                     &[("ld", PropertyValue::Integer(parse_ms(v[0])))],
                 ); // IC7
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -443,14 +443,14 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                     idx,
                     &[("ld", PropertyValue::Integer(parse_ms(v[0])))],
                 ); // IC7
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
 
-    // Person -[knows]- Person, undirected (both directions), with the edge's
+    // Person -[knows]- Person, undirected (both directions), with the rel's
     // creationDate stored as the "kd" property (epoch day) so Q11 can filter
-    // knows edges by date during traversal. Uses the index returned by add_relationship
+    // knows rels by date during traversal. Uses the index returned by add_relationship
     // to set the property without an O(n) endpoint lookup.
     for_each_row(
         &dynamic.join("Person_knows_Person"),
@@ -464,13 +464,13 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 builder.set_relationship_props_by_index(i1, &[("kd", PropertyValue::Integer(day))]);
                 let i2 = builder.add_relationship(b, a, "knows").unwrap();
                 builder.set_relationship_props_by_index(i2, &[("kd", PropertyValue::Integer(day))]);
-                stats.edges += 2;
+                stats.rels += 2;
             }
         },
     )?;
 
     // Organisations (Company/University) + Person workAt Company + Person studyAt
-    // University (classYear stored as an edge property), for Q20.
+    // University (classYear stored as an rel property), for Q20.
     let mut org: HashMap<i64, u32> = HashMap::new();
     for_each_row(
         &static_.join("Organisation"),
@@ -487,7 +487,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                     builder
                         .add_relationship(id, place_node, "orgPlace")
                         .unwrap();
-                    stats.edges += 1;
+                    stats.rels += 1;
                 }
             }
         },
@@ -504,7 +504,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                     idx,
                     &[("wf", PropertyValue::Integer(v[2].parse().unwrap_or(0)))],
                 ); // IC11
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;
@@ -518,7 +518,7 @@ pub fn load_graph_opts(snapshot: &Path, load_content: bool) -> Result<(GraphSnap
                 let cy = v[2].parse::<i64>().unwrap_or(0);
                 let idx = builder.add_relationship(p, u, "studyAt").unwrap();
                 builder.set_relationship_props_by_index(idx, &[("cy", PropertyValue::Integer(cy))]);
-                stats.edges += 1;
+                stats.rels += 1;
             }
         },
     )?;

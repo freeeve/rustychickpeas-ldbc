@@ -271,7 +271,7 @@ pub(crate) fn q4_top_creators(g: &GraphSnapshot, after_day: i64) -> (Vec<(i64, i
 }
 
 /// Q15 — Weighted interaction path. Weighted shortest path over the knows graph
-/// where each edge weight is 1/(w+1); w sums reply interactions between the two
+/// where each rel weight is 1/(w+1); w sums reply interactions between the two
 /// people whose thread root-post forum was created in [start_day, end_day]
 /// (1.0 if a Post is involved, else 0.5). Returns the path cost, or -1 if
 /// unreachable. Cypher: bi-15.cypher.
@@ -400,8 +400,8 @@ pub(crate) fn q17_information_propagation(
         }
     }
     // Forum membership built from the FORUM side: each forum in play has few outgoing
-    // hasMember edges, where a person's incoming hasMember is buried among their
-    // knows-heavy incoming edges. Only relevant-forum memberships are needed — the
+    // hasMember rels, where a person's incoming hasMember is buried among their
+    // knows-heavy incoming rels. Only relevant-forum memberships are needed — the
     // join only ever tests f1 (from m1) and f2 (from cand).
     let relevant: HashSet<u32> = m1_list
         .iter()

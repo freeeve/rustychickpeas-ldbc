@@ -130,7 +130,7 @@ pub(crate) fn build_interaction_map(g: &GraphSnapshot) -> HashMap<(u32, u32), u3
 }
 
 /// Q19 — Interaction path between cities. For people in city1 and city2, find the
-/// shortest weighted path on the `knows` graph, where each edge weight is
+/// shortest weighted path on the `knows` graph, where each rel weight is
 /// 1/(reply interactions between the two people); return the 20 city1-city2 pairs
 /// with the smallest path weight. Uses core `dijkstra` with a derived-weight
 /// closure (the weight comes from the precomputed interaction map, not a stored
@@ -196,12 +196,12 @@ pub(crate) fn person_by_plid(g: &GraphSnapshot, plid: i64) -> Option<u32> {
     g.node_with_property("plid", plid)
 }
 
-/// Per-person study records (university, classYear), read from studyAt edges and
-/// their classYear edge property.
+/// Per-person study records (university, classYear), read from studyAt rels and
+/// their classYear rel property.
 pub(crate) fn build_studyat(g: &GraphSnapshot) -> HashMap<u32, Vec<(u32, i64)>> {
     let mut m: HashMap<u32, Vec<(u32, i64)>> = HashMap::new();
-    // Hoist the edge `cy` (classYear) column once instead of resolving the key
-    // per studyAt edge.
+    // Hoist the rel `cy` (classYear) column once instead of resolving the key
+    // per studyAt rel.
     let cy_col = g.rel_col("cy").map(Col::i64);
     if let Some(persons) = g.nodes_with_label("Person") {
         for p in persons.iter() {
@@ -251,7 +251,7 @@ pub(crate) fn build_study_weight_map(
 }
 
 /// Q20 — Recruitment. From each employee of a company, the shortest weighted path
-/// on the `knows` graph to a target person, where edge weight is the closeness of
+/// on the `knows` graph to a target person, where rel weight is the closeness of
 /// the two people's university cohorts; return the 20 employees with the smallest
 /// path weight. Uses core dijkstra (single-pair, with target early-exit) and a
 /// derived-weight closure. Cypher: bi-20.cypher.

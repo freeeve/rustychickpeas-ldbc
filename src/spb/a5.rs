@@ -14,7 +14,7 @@
 //! samples a type such as `coreconcepts:Thing`, which the about-targets
 //! (`dbo:Company` / `dbo:Event`) carry only by `rdfs:subClassOf` — the loader
 //! forward-chains it, so the entity is labelled `Thing` and we restrict with
-//! `has_label`. Counts each about-target over works whose `category` edge points
+//! `has_label`. Counts each about-target over works whose `category` rel points
 //! to either pinned uri.
 
 use std::collections::HashMap;

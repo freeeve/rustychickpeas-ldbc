@@ -11,7 +11,7 @@
 //! ```
 //!
 //! Reading each sub-select's body, the count is over entities `E` shared between
-//! the focal work and an other work, keyed by the (focal edge, other edge) pair:
+//! the focal work and an other work, keyed by the (focal rel, other rel) pair:
 //!   * `cnt_2`   — focal `about` E,    other `about` E      → factor **2**
 //!   * `cnt_1_5` — focal `about` E,    other `mentions` E   → factor **1.5**
 //!   * `cnt_1`   — focal `mentions` E, other `about` E      → factor **1**
@@ -21,9 +21,9 @@
 //! double their `mentions` counterpart.
 //!
 //! `owl:sameAs` reasoning is inert on this dataset: the generator asserts no
-//! `sameAs` edges, so every `FILTER(!BOUND(?eq))` no-sameAs branch fires and the
+//! `sameAs` rels, so every `FILTER(!BOUND(?eq))` no-sameAs branch fires and the
 //! sameAs branches contribute nothing. We score over the direct `about`/`mentions`
-//! edges only.
+//! rels only.
 //!
 //! Two deliberate departures from the literal SPARQL, to produce the meaningful
 //! per-work ranking the query name ("Creative Works *related* to a particular
@@ -47,9 +47,9 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use super::queries::{has_label, node_by_uri};
 use crate::props::PropExt;
 
-/// The distinct entity targets of `work`'s outgoing `edge` (`about` / `mentions`).
-fn targets(g: &GraphSnapshot, work: u32, edge: &str) -> HashSet<u32> {
-    g.neighbors_by_type(work, Direction::Outgoing, edge)
+/// The distinct entity targets of `work`'s outgoing `rel` (`about` / `mentions`).
+fn targets(g: &GraphSnapshot, work: u32, rel: &str) -> HashSet<u32> {
+    g.neighbors_by_type(work, Direction::Outgoing, rel)
         .collect()
 }
 
@@ -67,11 +67,11 @@ pub fn run(g: &GraphSnapshot, cw_uri: &str, limit: usize) -> Vec<(String, f64)> 
     let focal_mentions = targets(g, focal, "mentions");
 
     // Candidate other works: those reaching a shared tagged entity through an
-    // incoming about/mentions edge (cwork:tag = about ∪ mentions).
+    // incoming about/mentions rel (cwork:tag = about ∪ mentions).
     let mut candidates: HashSet<u32> = HashSet::new();
     for &ent in focal_about.iter().chain(focal_mentions.iter()) {
-        for edge in ["about", "mentions"] {
-            for w in g.neighbors_by_type(ent, Direction::Incoming, edge) {
+        for rel in ["about", "mentions"] {
+            for w in g.neighbors_by_type(ent, Direction::Incoming, rel) {
                 if w != focal && has_label(g, w, "CreativeWork") {
                     candidates.insert(w);
                 }

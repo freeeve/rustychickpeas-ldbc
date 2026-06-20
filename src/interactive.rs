@@ -163,14 +163,14 @@ pub fn ic9_fof_messages(g: &GraphSnapshot, person: u32, max_day: i64) -> Vec<(u3
 /// graph (`-1` if unreachable). Built on the core `bfs_distances` primitive.
 pub fn ic13_shortest_path(g: &GraphSnapshot, p1: u32, p2: u32) -> i64 {
     // Bidirectional search (meet-in-the-middle) for just the p1->p2 distance,
-    // instead of a full unidirectional BFS over p1's whole component. Unit edge
+    // instead of a full unidirectional BFS over p1's whole component. Unit rel
     // weights make the path cost equal to the hop count.
     g.weighted_shortest_path(p1, p2, Direction::Outgoing, "knows", |_, _| 1.0)
         .map(|cost| cost as i64)
         .unwrap_or(-1)
 }
 
-/// IC14 — a weighted shortest path between two persons, where each `knows` edge
+/// IC14 — a weighted shortest path between two persons, where each `knows` rel
 /// costs `1 / (interactions + 1)` (more reply interactions = cheaper). Returns
 /// the path and its total cost, or `None` if unreachable.
 pub fn ic14_weighted_path(
@@ -191,7 +191,7 @@ pub fn ic14_weighted_path(
 }
 
 /// Reply interactions between message creators, keyed by the unordered person
-/// pair — the IC14 edge-weight source (mirrors the BI Q19 projection).
+/// pair — the IC14 rel-weight source (mirrors the BI Q19 projection).
 pub fn build_knows_interaction(g: &GraphSnapshot) -> HashMap<(u32, u32), u32> {
     let mut m: HashMap<(u32, u32), u32> = HashMap::new();
     if let Some(comments) = g.nodes_with_label("Comment") {

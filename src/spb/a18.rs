@@ -23,7 +23,7 @@
 //! `dateModified` is an ISO-8601 string literal, so a lexicographic compare both
 //! orders and range-filters it. The BGP only yields a row when `title` /
 //! `category` / `liveCoverage` / `audience` are all bound, so we require those to
-//! be present (`category` / `audience` are edges to IRI nodes — only their
+//! be present (`category` / `audience` are rels to IRI nodes — only their
 //! existence is checked; q18 does not facet on them). `{{{orderBy}}}` /
 //! `{{{randomLimit}}}` are substitution parameters: we apply ORDER BY
 //! DESC(?dateModif) (newest first — the drill-down idiom) with a node-id
@@ -36,7 +36,7 @@ use crate::props::PropExt;
 /// SPB advanced **q18**: the `limit` most-recently-modified creative works
 /// labelled `cw_type` whose `dateModified` lies in `[after, before]`
 /// (lexicographic on the ISO-8601 string) and that carry a `title`,
-/// `liveCoverage`, and `category` + `audience` edges. Returns the matching work
+/// `liveCoverage`, and `category` + `audience` rels. Returns the matching work
 /// ids ordered by `dateModified` descending (node id breaking ties), truncated
 /// to `limit`.
 pub fn run(g: &GraphSnapshot, cw_type: &str, after: &str, before: &str, limit: usize) -> Vec<u32> {
@@ -67,7 +67,7 @@ mod tests {
     use super::*;
 
     // Five creative works with varying dateModified. cwD deliberately lacks an
-    // `audience` edge, so the BGP must exclude it regardless of its date.
+    // `audience` rel, so the BGP must exclude it regardless of its date.
     const FIXTURE: &str = r#"
 <http://ex/cwA> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .
 <http://ex/cwA> <http://www.bbc.co.uk/ontologies/creativework/title> "Alpha update" .

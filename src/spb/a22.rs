@@ -24,7 +24,7 @@
 //! A faceted drill-down: a full-text search on a `word` in the creative work's
 //! `title`, progressively narrowed by facets. `{{{filter1..3}}}` are the
 //! substitution facets the drill-down pins; per the query header and the q22
-//! facet set those are `category` / `audience` / `tag` (out-edges, matched by the
+//! facet set those are `category` / `audience` / `tag` (out-rels, matched by the
 //! target node's `uri`), a `dateCreated` range (ISO-8601 string, lexicographic
 //! compare), and `liveCoverage` (a bool). The BGP also binds `description` and
 //! `primaryFormat`, so we require those present too (a row only exists when the
@@ -41,22 +41,22 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::PropExt;
 
-/// Whether `node` has an outgoing `edge` satisfying the facet:
-/// * `Some(uri)` — at least one edge target carries that `uri`;
-/// * `None` — at least one such edge exists at all (the SPARQL "bound" check).
-fn facet_edge(g: &GraphSnapshot, node: u32, edge: &str, want_uri: Option<&str>) -> bool {
+/// Whether `node` has an outgoing `rel` satisfying the facet:
+/// * `Some(uri)` — at least one rel target carries that `uri`;
+/// * `None` — at least one such rel exists at all (the SPARQL "bound" check).
+fn facet_rel(g: &GraphSnapshot, node: u32, rel: &str, want_uri: Option<&str>) -> bool {
     match want_uri {
-        None => g.has_rel(node, Direction::Outgoing, edge),
-        Some(uri) => g.has_neighbor_with_property(node, Direction::Outgoing, edge, "uri", uri),
+        None => g.has_rel(node, Direction::Outgoing, rel),
+        Some(uri) => g.has_neighbor_with_property(node, Direction::Outgoing, rel, "uri", uri),
     }
 }
 
 /// The official `cwork:tag ?tag` requirement, folded to the `about`/`mentions`
 /// topic links the SPB generator emits (it produces no literal `cwork:tag`):
-/// `Some(uri)` matches an about/mentions edge to that uri; `None` requires at
-/// least one such edge to exist.
+/// `Some(uri)` matches an about/mentions rel to that uri; `None` requires at
+/// least one such rel to exist.
 fn folded_tag(g: &GraphSnapshot, node: u32, want_uri: Option<&str>) -> bool {
-    facet_edge(g, node, "about", want_uri) || facet_edge(g, node, "mentions", want_uri)
+    facet_rel(g, node, "about", want_uri) || facet_rel(g, node, "mentions", want_uri)
 }
 
 /// SPB advanced **q22**: creative works whose `title` matches the full-text
@@ -86,12 +86,12 @@ pub fn run(
                 return false;
             };
             // Full BGP bound + the pinned facets (a `None` facet only requires the
-            // property/edge to exist, matching the SPARQL's bound semantics).
+            // property/rel to exist, matching the SPARQL's bound semantics).
             g.prop(w, "description").str().is_some()
                 && g.prop(w, "liveCoverage").is_some()
-                && facet_edge(g, w, "primaryFormat", None)
-                && facet_edge(g, w, "category", category_uri)
-                && facet_edge(g, w, "audience", audience_uri)
+                && facet_rel(g, w, "primaryFormat", None)
+                && facet_rel(g, w, "category", category_uri)
+                && facet_rel(g, w, "audience", audience_uri)
                 && folded_tag(g, w, tag_uri)
                 && after.is_none_or(|a| created >= a)
                 && before.is_none_or(|b| created <= b)
@@ -109,7 +109,7 @@ mod tests {
     use super::*;
 
     // Creative works whose titles all contain "football" except cw3 (tennis).
-    // cw4 deliberately lacks a `primaryFormat` edge, so the BGP must exclude it.
+    // cw4 deliberately lacks a `primaryFormat` rel, so the BGP must exclude it.
     const FIXTURE: &str = r#"
 <http://ex/cw1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.bbc.co.uk/ontologies/creativework/CreativeWork> .
 <http://ex/cw1> <http://www.bbc.co.uk/ontologies/creativework/title> "London football derby" .

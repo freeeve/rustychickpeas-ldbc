@@ -88,8 +88,8 @@ pub fn run() -> Result<()> {
 
     println!("\n=== LDBC SPB (RDF -> property graph, no SPARQL) ===");
     println!(
-        "Loaded {} resources from {} triples ({} edges, {} literal props) in {:.3}s",
-        stats.resources, stats.triples, stats.edges, stats.literals, secs
+        "Loaded {} resources from {} triples ({} rels, {} literal props) in {:.3}s",
+        stats.resources, stats.triples, stats.rels, stats.literals, secs
     );
     println!(
         "  CreativeWorks: {}   geonames Features: {}",

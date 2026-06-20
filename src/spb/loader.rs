@@ -4,7 +4,7 @@
 //! standard RDF-as-property-graph convention:
 //!   * every IRI/blank subject or IRI object becomes a node (one per resource);
 //!   * `rdf:type` makes the object's local name a **label** on the subject;
-//!   * a predicate with an IRI/blank object becomes a typed **edge**
+//!   * a predicate with an IRI/blank object becomes a typed **rel**
 //!     (local name of the predicate);
 //!   * a predicate with a literal object becomes a node **property** (local name
 //!     of the predicate), typed from the literal's `xsd:` datatype.
@@ -55,7 +55,7 @@ fn close_transitively(m: &mut HashMap<String, HashSet<String>>) {
 pub struct SpbStats {
     pub resources: usize,
     pub triples: usize,
-    pub edges: usize,
+    pub rels: usize,
     pub literals: usize,
 }
 
@@ -152,7 +152,7 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
         }
     }
 
-    // Pass 3: edges (IRI objects, each materialized for the predicate and its
+    // Pass 3: rels (IRI objects, each materialized for the predicate and its
     // super-properties) and properties (literal objects). TBox triples are skipped.
     let mut stats = SpbStats {
         resources: next as usize,
@@ -175,9 +175,9 @@ pub fn load_str(text: &str) -> (GraphSnapshot, SpbStats) {
                 builder
                     .add_relationship(subj, dst, key)
                     .expect("add_relationship");
-                stats.edges += 1;
+                stats.rels += 1;
                 // RDFS subPropertyOf: the same statement also satisfies every
-                // super-property (e.g. an `about`/`mentions` edge is a `tag` edge).
+                // super-property (e.g. an `about`/`mentions` rel is a `tag` rel).
                 if let Some(supers) = subprop.get(pred) {
                     for s in supers {
                         builder
@@ -294,10 +294,10 @@ mod tests {
 "#;
 
     #[test]
-    fn maps_types_to_labels_and_edges_and_props() {
+    fn maps_types_to_labels_and_rels_and_props() {
         let (g, stats) = load_str(DOC);
         assert_eq!(stats.resources, 2); // cw1, London
-        assert_eq!(stats.edges, 1); // about
+        assert_eq!(stats.rels, 1); // about
         assert!(stats.literals >= 3); // title, lat, views
 
         let cw = g.nodes_with_label("CreativeWork").unwrap();
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_uses_predicate_local_name() {
+    fn rel_uses_predicate_local_name() {
         let (g, _) = load_str(DOC);
         let cw = g
             .nodes_with_label("CreativeWork")
@@ -361,7 +361,7 @@ mod tests {
         let thing = g.nodes_with_label("Thing").unwrap();
         assert!(thing.contains(acme) && !thing.contains(cw1));
 
-        // subPropertyOf: the `about` edge is also a `tag` edge.
+        // subPropertyOf: the `about` rel is also a `tag` rel.
         use rustychickpeas_core::Direction;
         let tag: Vec<u32> = g
             .neighbors_by_type(cw1, Direction::Outgoing, "tag")

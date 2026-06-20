@@ -20,9 +20,9 @@
 //! FILTER (the "Date range query" choke point). `dateCreated` is an ISO-8601
 //! string literal, so a lexicographic compare orders it. The BGP only yields a
 //! row when `title` / `category` / `liveCoverage` / `audience` are all bound, so
-//! we require those to be present. `category` / `audience` are edges to IRI
+//! we require those to be present. `category` / `audience` are rels to IRI
 //! nodes; we optionally pin each to a target `uri` (a facet), otherwise we only
-//! require the edge to exist (the SPARQL's "bound" semantics). The template has
+//! require the rel to exist (the SPARQL's "bound" semantics). The template has
 //! no ORDER BY, so the result order is unspecified — we sort by node id for a
 //! deterministic return.
 
@@ -30,19 +30,19 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 
 use crate::props::PropExt;
 
-/// Whether `node` has an outgoing `edge` satisfying the facet:
-/// * `Some(uri)` — at least one edge target carries that `uri`;
-/// * `None` — at least one such edge exists at all (the SPARQL "bound" check).
-fn facet_matches(g: &GraphSnapshot, node: u32, edge: &str, want_uri: Option<&str>) -> bool {
+/// Whether `node` has an outgoing `rel` satisfying the facet:
+/// * `Some(uri)` — at least one rel target carries that `uri`;
+/// * `None` — at least one such rel exists at all (the SPARQL "bound" check).
+fn facet_matches(g: &GraphSnapshot, node: u32, rel: &str, want_uri: Option<&str>) -> bool {
     match want_uri {
-        None => g.has_rel(node, Direction::Outgoing, edge),
-        Some(uri) => g.has_neighbor_with_property(node, Direction::Outgoing, edge, "uri", uri),
+        None => g.has_rel(node, Direction::Outgoing, rel),
+        Some(uri) => g.has_neighbor_with_property(node, Direction::Outgoing, rel, "uri", uri),
     }
 }
 
 /// SPB basic **q7**: creative works labelled `cw_type` whose `dateCreated` lies
 /// in `[after, before]` (lexicographic on the ISO-8601 string), that carry a
-/// `title` and a `liveCoverage`, and whose `category` / `audience` edges are
+/// `title` and a `liveCoverage`, and whose `category` / `audience` rels are
 /// bound — optionally pinned to `category_uri` / `audience_uri`. Returns the
 /// matching work ids, sorted by id.
 pub fn run(
@@ -80,7 +80,7 @@ mod tests {
     use super::*;
 
     // Four creative works carrying dateCreated / title / liveCoverage and
-    // category + audience edges. cw4 deliberately lacks an `audience` edge, so the
+    // category + audience rels. cw4 deliberately lacks an `audience` rel, so the
     // BGP's "audience bound" requirement must exclude it. Categories/audiences are
     // IRI nodes; the loader gives each a `uri` property we facet on.
     const FIXTURE: &str = r#"

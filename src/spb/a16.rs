@@ -25,7 +25,7 @@
 //! with `tag` already materialized as about∪mentions, collapses to one row per
 //! `tag` target. `CONTAINS(?title, word)` is served by the core inverted index
 //! (`full_text_search`, whole-word — same caveat as q20/q21), and the required
-//! `cwork:category`/`cwork:title` patterns demand a `category` edge and a
+//! `cwork:category`/`cwork:title` patterns demand a `category` rel and a
 //! non-empty `title`. Rows are `(work_uri, tag_uri)`, deduped (`SELECT DISTINCT`),
 //! ordered by tag then work (the template's `ORDER BY ?tag`), truncated to
 //! `limit`.
@@ -37,7 +37,7 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use crate::props::PropExt;
 
 /// q16: for each creative work whose `title` matches `word` (full-text) and that
-/// carries a `category` edge and a non-empty `title`, one `(work_uri, tag_uri)`
+/// carries a `category` rel and a non-empty `title`, one `(work_uri, tag_uri)`
 /// row per distinct `tag` target (about∪mentions), ordered by tag then work and
 /// truncated to `limit`.
 pub fn run(g: &GraphSnapshot, word: &str, limit: usize) -> Vec<(String, String)> {

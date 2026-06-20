@@ -13,7 +13,7 @@
 //! ```
 //!
 //! No RDFS materialization here — both `primaryContentOf` and `mentions` are read
-//! as plain outgoing edges. The inner sub-select degenerates to an out-degree:
+//! as plain outgoing rels. The inner sub-select degenerates to an out-degree:
 //! keep works whose outgoing `primaryContentOf` count is strictly greater than
 //! `min_primary_content`, then tally their outgoing `mentions` targets, counting
 //! each `(work, mentions)` pair (the outer `COUNT(*)`).
@@ -23,7 +23,7 @@ use rustychickpeas_core::{Direction, GraphSnapshot};
 use crate::props::{top_k_by_count, PropExt};
 
 /// Mention targets ranked by how many qualifying works mention them, where a work
-/// qualifies when its outgoing `primaryContentOf` edge count is strictly greater
+/// qualifies when its outgoing `primaryContentOf` rel count is strictly greater
 /// than `min_primary_content`. Returned as `(mentions_uri, count)` ordered by count
 /// descending then uri, truncated to `limit` (the template's `LIMIT 10`).
 pub fn run(g: &GraphSnapshot, min_primary_content: usize, limit: usize) -> Vec<(String, usize)> {
