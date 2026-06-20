@@ -11,6 +11,7 @@ Maps N-Triples into a rustychickpeas GraphSnapshot:
 No triple store, no SPARQL.
 """
 
+import gc
 import glob
 import os
 
@@ -177,12 +178,31 @@ def parse_line(line):
         return None
     obj = parts[2]
     if obj.startswith('"'):
-        o, _ = _read_literal(obj, 0)
+        o = _fast_literal(obj)
     else:
         o = _node_term(obj.rstrip())
     if o is None:
         return None
     return s, p, o
+
+
+def _fast_literal(tok):
+    """Parse an object literal token. Fast path (no backslash): the closing quote is
+    the next `"`, so slice the value and read any ^^<dt> / @lang suffix without a
+    char loop. Falls back to the escape-aware reader when a backslash is present."""
+    if "\\" in tok:
+        term, _ = _read_literal(tok, 0)
+        return term
+    end = tok.find('"', 1)
+    if end < 0:
+        return None
+    value = tok[1:end]
+    rest = tok[end + 1:].rstrip()
+    if rest.startswith("^^<") and rest.endswith(">"):
+        return ("lit", value, rest[3:-1], None)
+    if rest.startswith("@"):
+        return ("lit", value, None, rest[1:])
+    return ("lit", value, None, None)
 
 
 def _close_transitively(m):
@@ -216,6 +236,14 @@ def _iter_triples(paths):
 
 def load_ntriples(paths):
     """Build the SPB property graph from N-Triples file(s). Returns (snapshot, stats)."""
+    gc.disable()  # millions of short-lived triple tuples -> GC churn dominates; load is bulk-allocate
+    try:
+        return _load_ntriples(paths)
+    finally:
+        gc.enable()
+
+
+def _load_ntriples(paths):
     if isinstance(paths, str):
         paths = [paths]
     triples = list(_iter_triples(paths))
