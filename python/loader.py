@@ -96,16 +96,16 @@ def _normalize_forums(entity_dir: str, out_path: str) -> int:
 
 
 def _normalize_persons(entity_dir: str, out_path: str) -> int:
-    """Write ``id,pday,pym,fname,lname`` for persons, deriving pday (creation day)
-    and pym (creation year*12+month) from creationDate (BI Q13's zombie test) and
-    carrying firstName/lastName (IC1/IS1). Returns the row count."""
+    """Write ``id,pday,pym,fname,lname,bmon,bdom`` for persons: pday (creation day)
+    and pym (creation year*12+month) from creationDate (BI Q13), firstName/lastName
+    (IC1/IS1), and birthday month/day (IC10's day-window filter). Returns the count."""
     n = 0
     with open(out_path, "w", newline="", encoding="utf-8") as out:
         w = csv.writer(out)
-        w.writerow(["id", "pday", "pym", "fname", "lname"])
+        w.writerow(["id", "pday", "pym", "fname", "lname", "bmon", "bdom"])
         date_cache = {}
-        for ext_id, cdate, fname, lname in iter_rows(
-            entity_dir, ["id", "creationDate", "firstName", "lastName"]
+        for ext_id, cdate, fname, lname, bday in iter_rows(
+            entity_dir, ["id", "creationDate", "firstName", "lastName", "birthday"]
         ):
             prefix = cdate[:10]
             pd = date_cache.get(prefix)
@@ -118,7 +118,9 @@ def _normalize_persons(entity_dir: str, out_path: str) -> int:
                 else:
                     pd = (0, 0)
                 date_cache[prefix] = pd
-            w.writerow([ext_id, pd[0], pd[1], fname, lname])
+            bmon = int(bday[5:7]) if len(bday) >= 7 and bday[5:7].isdigit() else 0
+            bdom = int(bday[8:10]) if len(bday) >= 10 and bday[8:10].isdigit() else 0
+            w.writerow([ext_id, pd[0], pd[1], fname, lname, bmon, bdom])
             n += 1
     return n
 
@@ -225,7 +227,7 @@ def load_bi_graph(snapshot_path: str):
         s["tags"] = _load_nodes(b, f"{static}/Tag", property_columns=["id", "name"], default_label="Tag")
         person_csv = os.path.join(tmp, "Person.csv")
         s["persons"] = _normalize_persons(f"{dynamic}/Person", person_csv)
-        b.load_nodes_from_csv(person_csv, property_columns=["id", "pday", "pym", "fname", "lname"], default_label="Person")
+        b.load_nodes_from_csv(person_csv, property_columns=["id", "pday", "pym", "fname", "lname", "bmon", "bdom"], default_label="Person")
         # Place/Organisation get a super-label so id-refs that span their subtypes
         # (City/Country/Continent, Company/University) resolve.
         s["places"] = _load_nodes(b, f"{static}/Place", property_columns=["id", "name"], label_columns=["type"], default_label="Place")
@@ -258,7 +260,7 @@ def load_bi_graph(snapshot_path: str):
             (f"{dynamic}/Person_likes_Comment", _ref("PersonId", "Person"), _ref("CommentId", "Comment"), "likes"),
             # knows is loaded below with its creationDate (kd) rel property.
             (f"{static}/Organisation", _ref("id", "Organisation"), _ref("LocationPlaceId", "Place"), "orgPlace"),
-            (f"{dynamic}/Person_workAt_Company", _ref("PersonId", "Person"), _ref("CompanyId", "Company"), "workAt"),
+            # workAt is loaded below with its workFrom (wf) rel property, for IC11.
             # studyAt is loaded below with its classYear (cy) rel property.
         ]
         total = 0
@@ -287,6 +289,12 @@ def load_bi_graph(snapshot_path: str):
             Rel("knows", Ref("Person1Id", "Person"), Ref("Person2Id", "Person"), props=[Prop("kd", "kd", int)]),
             Rel("knows", Ref("Person2Id", "Person"), Ref("Person1Id", "Person"), props=[Prop("kd", "kd", int)]),
         ]))
+
+        # workAt carrying workFrom as the wf rel property (year), for IC11.
+        total += _load_rels_multi(b, f"{dynamic}/Person_workAt_Company", [
+            Rel("workAt", Ref("PersonId", "Person"), Ref("CompanyId", "Company"),
+                props=[Prop("wf", "workFrom", int)]),
+        ])
 
         # studyAt carrying classYear as the cy rel property (epoch year), for Q20.
         total += _load_rels_multi(b, f"{dynamic}/Person_studyAt_University", [

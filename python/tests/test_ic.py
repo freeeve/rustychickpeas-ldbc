@@ -1,7 +1,8 @@
 """Tests for the Python LDBC Interactive (IC/IS) queries on tiny synthetic data."""
 
 from ic import (
-    is1, is2, is3, is5, is6, is7, ic1, ic2, ic3, ic4, ic6, ic8, ic9, ic12, ic13, ic14,
+    is1, is2, is3, is5, is6, is7,
+    ic1, ic2, ic3, ic4, ic6, ic8, ic9, ic10, ic11, ic12, ic13, ic14,
 )
 from rustychickpeas import Direction, GraphSnapshotBuilder
 
@@ -218,3 +219,47 @@ def test_ic12_expert_search():
     b.add_relationship(4, 5, "hasType")
     g = b.finalize()
     assert ic12.ic12_expert_search(g, 0, "C") == [(1, 1, ["T"])]
+
+
+def test_ic10_friend_recommend():
+    # Seed 0 -knows- 1 -knows- 2 (foaf). 0 is interested in Tag T. foaf 2 born 01-21
+    # (in window for month 1); its Posts 4,5 carry T (common), Post 6 carries U
+    # (uncommon) -> score 2 - 1 = 1.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1, 2):
+        b.add_node(["Person"], node_id=nid)
+        b.set_prop(nid, "id", 100 + nid)
+    b.set_prop(2, "bmon", 1)
+    b.set_prop(2, "bdom", 21)
+    b.add_node(["Tag"], node_id=3); b.set_prop(3, "name", "T")
+    for nid in (4, 5, 6):
+        b.add_node(["Post"], node_id=nid)
+    b.add_node(["Tag"], node_id=7); b.set_prop(7, "name", "U")
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    b.add_relationship(1, 2, "knows"); b.add_relationship(2, 1, "knows")
+    b.add_relationship(0, 3, "hasInterest")
+    for p in (4, 5, 6):
+        b.add_relationship(2, p, "hasCreator")
+    b.add_relationship(4, 3, "hasTag"); b.add_relationship(5, 3, "hasTag")
+    b.add_relationship(6, 7, "hasTag")
+    g = b.finalize()
+    assert ic10.ic10_friend_recommend(g, 0, 1) == [(2, 1)]
+
+
+def test_ic11_job_referral():
+    # Seed 0 -knows- 1; 1 worked at Company 2 (workFrom 2010), located in City 3 of
+    # Country X. Referral for X with year cutoff 2030.
+    b = GraphSnapshotBuilder()
+    for nid in (0, 1):
+        b.add_node(["Person"], node_id=nid)
+        b.set_prop(nid, "id", 100 + nid)
+    b.add_node(["Company"], node_id=2); b.set_prop(2, "name", "Acme")
+    b.add_node(["City"], node_id=3)
+    b.add_node(["Country"], node_id=4); b.set_prop(4, "name", "X")
+    b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
+    b.add_relationship(3, 4, "isPartOf")
+    b.add_relationship(2, 3, "orgPlace")
+    b.add_relationship(1, 2, "workAt")
+    b.set_relationship_prop_i64(1, 2, "workAt", "wf", 2010)
+    g = b.finalize()
+    assert ic11.ic11_job_referral(g, 0, "X", 2030) == [(1, 2, 2010)]
