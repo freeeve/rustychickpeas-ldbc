@@ -1,11 +1,15 @@
-"""The six LDBC Graphalytics algorithms over a rustychickpeas GraphSnapshot,
-hand-ported from src/graphalytics/mod.rs. Outputs are node-indexed lists (index ==
-dense node id). ``directed`` selects the forward direction: Outgoing (directed) or
-Both (undirected, whose rels are stored once).
+"""The six LDBC Graphalytics algorithms over a rustychickpeas GraphSnapshot.
 
-Adjacency is read with the *untyped* ``neighbor_ids(v, dir)`` (the graph has only
-``e`` rels), which — unlike the typed form — does not dedup, matching the Rust
-``g.neighbors`` multiset; ``degree(v, dir)`` is the O(1) CSR count.
+Each prefers the native core kernel (`g.pagerank`/`wcc`/`cdlp`/`lcc`/`sssp`,
+`bfs_distances`) when the binding exposes it — these run in Rust with the GIL
+released — and falls back to the pure-Python reference implementation otherwise (an
+older wheel). Outputs are node-indexed lists (index == dense node id). ``directed``
+selects the forward direction: Outgoing (directed) or Both (undirected, rels stored
+once).
+
+The pure-Python fallbacks read adjacency with the *untyped* ``neighbor_ids(v, dir)``
+(the graph has only ``e`` rels), which — unlike the typed form — does not dedup,
+matching the Rust ``g.neighbors`` multiset; ``degree(v, dir)`` is the O(1) CSR count.
 """
 
 import heapq
@@ -37,8 +41,55 @@ def bfs(g, source, n, directed):
 
 def sssp(g, source, n, directed, weighted=True):
     """Single-source shortest paths over forward rels (`weight` rel prop when
-    weighted, else unit); unreachable nodes get inf. Pure-Python binary-heap
-    Dijkstra reading rel weights via the native rels_with_props."""
+    weighted, else unit); unreachable nodes get inf. Native `sssp` kernel when
+    present, else a pure-Python binary-heap Dijkstra."""
+    fn = getattr(g, "sssp", None)
+    if fn is not None:
+        return fn(source, directed, "weight" if weighted else None)
+    return _sssp_py(g, source, n, directed, weighted)
+
+
+def wcc(g, n):
+    """Weakly connected components: each node's label is the smallest node id in its
+    component. Native `wcc` kernel when present, else a pure-Python flood."""
+    fn = getattr(g, "wcc", None)
+    if fn is not None:
+        return fn()
+    return _wcc_py(g, n)
+
+
+def pagerank(g, n, directed, damping, iterations):
+    """PageRank after `iterations` synchronous pull updates with `damping` (sinks
+    redistribute uniformly). Native `pagerank` kernel when present, else pure-Python."""
+    fn = getattr(g, "pagerank", None)
+    if fn is not None:
+        return fn(directed, damping, iterations)
+    return _pagerank_py(g, n, directed, damping, iterations)
+
+
+def cdlp(g, n, directed, iterations, seed):
+    """Community detection by synchronous label propagation seeded with `seed[node]`
+    (vertex ids match a vertex-keyed reference). Native `cdlp` kernel when present,
+    else pure-Python."""
+    fn = getattr(g, "cdlp", None)
+    if fn is not None:
+        return fn(directed, iterations, list(seed))
+    return _cdlp_py(g, n, directed, iterations, seed)
+
+
+def lcc(g, n, directed):
+    """Local clustering coefficient per node. Native `lcc` kernel when present, else
+    a pure-Python triangle count."""
+    fn = getattr(g, "lcc", None)
+    if fn is not None:
+        return fn(directed)
+    return _lcc_py(g, n, directed)
+
+
+# ---- pure-Python reference fallbacks ---------------------------------------
+
+
+def _sssp_py(g, source, n, directed, weighted):
     dist = [float("inf")] * n
     if source < 0 or source >= n:
         return dist
@@ -60,9 +111,7 @@ def sssp(g, source, n, directed, weighted=True):
     return dist
 
 
-def wcc(g, n):
-    """Weakly connected components: each node's label is the smallest node id in its
-    component (sweep ascending, flood Direction.Both)."""
+def _wcc_py(g, n):
     UNSEEN = -1
     comp = [UNSEEN] * n
     nbr = g.neighbor_ids
@@ -80,15 +129,13 @@ def wcc(g, n):
     return comp
 
 
-def pagerank(g, n, directed, damping, iterations):
-    """PageRank after `iterations` synchronous pull updates with `damping`; sinks
-    (out-degree 0) redistribute their rank uniformly."""
+def _pagerank_py(g, n, directed, damping, iterations):
     if n == 0:
         return []
     nf = float(n)
     out_dir, in_dir = _fwd(directed), _in_dir(directed)
     outdeg = [g.degree(v, out_dir) for v in range(n)]
-    in_nbrs = [g.neighbor_ids(v, in_dir) for v in range(n)]  # cache adjacency once
+    in_nbrs = [g.neighbor_ids(v, in_dir) for v in range(n)]
     sinks = [v for v in range(n) if outdeg[v] == 0]
     pr = [1.0 / nf] * n
     for _ in range(iterations):
@@ -109,12 +156,7 @@ def pagerank(g, n, directed, damping, iterations):
     return pr
 
 
-def cdlp(g, n, directed, iterations, seed):
-    """Community detection by synchronous label propagation seeded with `seed[node]`
-    (use vertex ids to match a vertex-keyed reference). Each node adopts the most
-    frequent neighbour label — smallest on a tie — counting in+out separately for a
-    directed graph (a mutual rel counts twice); a node with no neighbours keeps its
-    label."""
+def _cdlp_py(g, n, directed, iterations, seed):
     cur = list(seed)
     if directed:
         out_n = [g.neighbor_ids(v, Direction.Outgoing) for v in range(n)]
@@ -133,16 +175,12 @@ def cdlp(g, n, directed, iterations, seed):
                 nxt[v] = cur[v]
                 continue
             counts = Counter(labs)
-            # most frequent, smallest label breaking ties.
             nxt[v] = min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
         cur = nxt
     return cur
 
 
-def lcc(g, n, directed):
-    """Local clustering coefficient: for each node v with undirected neighbour set
-    N(v) (each once, self excluded), 0 if |N(v)|<=1 else the number of forward rels
-    between members of N(v) over |N(v)|*(|N(v)|-1)."""
+def _lcc_py(g, n, directed):
     out_dir = _fwd(directed)
     fwd_adj = [set(g.neighbor_ids(v, out_dir)) for v in range(n)]
     result = [0.0] * n
