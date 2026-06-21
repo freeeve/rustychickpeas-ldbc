@@ -137,12 +137,21 @@ def main():
     print("\n=== LDBC SNB BI — Python (rustychickpeas) ===")
     print(f"Loaded {g.node_count()} nodes / {g.relationship_count()} rels in {load_s:.1f}s")
 
-    t = time.perf_counter()
-    interaction = q19.build_interaction_map(g)
-    studyat = q20.build_studyat(g)
-    study_wm = q20.build_study_weight_map(g, studyat)
-    setup_s = time.perf_counter() - t
-    print(f"Precompute (Q19 interaction map + Q20 cohort weights) in {setup_s:.1f}s\n")
+    # LDBC_ONLY=q3,q7 runs just those queries (per-query opt work); the Q19/Q20
+    # precompute is skipped unless one of them is selected.
+    only = os.environ.get("LDBC_ONLY")
+    only = {q.strip().upper() for q in only.split(",")} if only else None
+
+    if only is None or only & {"Q19", "Q20"}:
+        t = time.perf_counter()
+        interaction = q19.build_interaction_map(g)
+        studyat = q20.build_studyat(g)
+        study_wm = q20.build_study_weight_map(g, studyat)
+        setup_s = time.perf_counter() - t
+        print(f"Precompute (Q19 interaction map + Q20 cohort weights) in {setup_s:.1f}s\n")
+    else:
+        interaction = study_wm = None
+        setup_s = 0.0
     ctx = {"interaction": interaction, "study_wm": study_wm}
 
     runs = int(os.environ.get("LDBC_RUNS", "5"))
@@ -150,6 +159,8 @@ def main():
     print("-" * 68)
     passed = checked = 0
     for qid, label, run_fn, parity_fn in _specs(g, ctx):
+        if only is not None and qid.upper() not in only:
+            continue
         result = run_fn()
         times = []
         for _ in range(runs):

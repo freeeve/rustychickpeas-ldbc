@@ -11,3 +11,11 @@ Node-construction is the lead.
 
 ## Result
 (pending)
+
+## Result (2026-06-21) — DONE (rels_with_props)
+The date-filtered knows adjacency now uses the bulk `rels_with_props(a, Out,
+"knows", ["kd"])` accessor — aligned `(neighbor_id, kd)` arrays — instead of
+`relationships()` constructing a `Node` per rel + a `get_property` per rel. Parity
+ok (count=805). Clean structural win (strictly less per-rel work); a precise
+speedup measurement is pending a quiet machine (the box was saturated by unrelated
+VM/Roblox load at validation time).

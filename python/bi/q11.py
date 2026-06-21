@@ -3,9 +3,10 @@
 Count triangles of persons located in ``country`` where all three knows rels
 were created within [start_day, end_day]. Returns the triangle count.
 
-Existing primitives: build a date-filtered knows adjacency among the country's
-persons (reading each knows rel's ``kd`` creation-day property), then count
-triangles a<b<c with all three rels present.
+Optimization (task 177): the date-filtered knows adjacency is built via the bulk
+``rels_with_props`` accessor — aligned ``(neighbor_id, kd)`` arrays read from the
+rel column — instead of ``relationships()`` which constructs a ``Node`` per rel just
+to read its id and a ``get_property`` per rel for ``kd``.
 """
 
 from rustychickpeas import Direction
@@ -22,11 +23,12 @@ def q11_friend_triangles(g, country_name: str, start_day: int, end_day: int) -> 
 
     adj = {}  # person -> set of in-country knows neighbors with rel kd in window
     for a in in_country:
+        neighbors, cols = g.rels_with_props(a, Direction.Outgoing, "knows", ["kd"])
+        kds = cols[0]
         nbrs = set()
-        for rel in g.relationships(a, Direction.Outgoing, ["knows"]):
-            nbr = rel.end_node().id()
+        for i, nbr in enumerate(neighbors):
             if nbr in in_country:
-                kd = rel.get_property("kd")
+                kd = kds[i]
                 if kd is not None and start_day <= kd <= end_day:
                     nbrs.add(nbr)
         if nbrs:

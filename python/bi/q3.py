@@ -6,9 +6,13 @@ the forums' post reply-trees that carry a tag of ``tagclass``; top 20 by count
 ``(forum_id, title, moderator_id, message_count)`` — fday is omitted (it's
 deterministic from the forum id, so the cross-check uses id + moderator + count).
 
-First cut: existing Python primitives — a small country→city→person→forum
-traversal, then ``neighborhood`` to walk each post's reply-tree and a set of the
-class's tags to test each message.
+Investigated (task 169): the per-message ``hasTag`` check runs only over Burma's
+small forum reply-trees, so it is already cheap (~14 ms). The obvious "flip" —
+precomputing the graph-wide set of messages carrying any class tag — is a net loss
+here (MusicalArtist spans millions of messages, so materializing that set dwarfs the
+per-message checks; measured 40 ms). Beating ~14 ms would need a native "filter a
+node set to those carrying any tag in S" kernel; left as the existing-primitive
+version. Resolved a `Node` per forum once.
 """
 
 from rustychickpeas import Direction
@@ -34,15 +38,15 @@ def q3_popular_topics(g, country_name: str, tagclass_name: str):
             for forum in g.neighbor_ids(person, Direction.Incoming, ["hasModerator"]):
                 msgs = set()
                 for post in g.neighbor_ids(forum, Direction.Outgoing, ["containerOf"]):
-                    tree = g.neighborhood(post, Direction.Incoming, "replyOf", _REPLY_DEPTH)
-                    for n in (post, *tree):
+                    for n in (post, *g.neighborhood(post, Direction.Incoming, "replyOf", _REPLY_DEPTH)):
                         if has_class_tag(n):
                             msgs.add(n)
                 if msgs:
+                    fnode = g.node(forum)
                     rows.append(
                         (
-                            g.node(forum).get_property("id"),
-                            g.node(forum).get_property("title"),
+                            fnode.get_property("id"),
+                            fnode.get_property("title"),
                             g.node(person).get_property("id"),
                             len(msgs),
                         )
