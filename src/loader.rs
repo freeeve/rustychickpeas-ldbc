@@ -77,8 +77,9 @@ pub fn set_message_props(
     b.set_prop_i64(id, "ms", parse_ms(creation)).unwrap();
     b.set_prop_i64(id, "len", length.parse::<i64>().unwrap_or(0))
         .unwrap();
-    // content presence as 0/1 i64 (q12's only reader) so the native aggregate
-    // kernel — which filters dense i64 columns — can apply it directly.
+    // content presence as 0/1 i64 (read by q1's content filter and q12's native
+    // aggregate) so the aggregate kernel — which filters dense i64 columns — and
+    // q1's par_fold can both read it as a dense i64.
     b.set_prop_i64(id, "content", i64::from(!content.is_empty()))
         .unwrap();
 }

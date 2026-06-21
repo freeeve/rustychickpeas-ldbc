@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustychickpeas_core::{AggOp, Col, Direction, GraphSnapshot, ValueId};
 
-use super::{bool_or_false, i64_or_zero, Q1Row};
+use super::{i64_or_zero, Q1Row};
 use crate::props::*;
 
 type Q1Groups = hashbrown::HashMap<(i64, bool, u8), (u64, i64)>;
@@ -16,7 +16,7 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
     // contiguous-range fast path) lives in core, so the query stays rayon-free.
     let (day_col, content_col, len_col, year_col) = (
         g.col("day").map(|c| c.i64()),
-        g.col("content").map(|c| c.bool()),
+        g.col("content").map(|c| c.i64()),
         g.col("len").map(|c| c.i64()),
         g.col("year").map(|c| c.i64()),
     );
@@ -50,8 +50,8 @@ pub(crate) fn q1_posting_summary(g: &GraphSnapshot, cutoff_day: i64) -> (Vec<Q1R
             }
             acc.1 += 1;
             let has_content = match content_s {
-                Some(s) => s[i],
-                None => bool_or_false(content_col, msg),
+                Some(s) => s[i] != 0,
+                None => i64_or_zero(content_col, msg) != 0,
             };
             if !has_content {
                 return acc;

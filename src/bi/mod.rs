@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use rustychickpeas_core::{BoolCol, I64Col};
+use rustychickpeas_core::I64Col;
 
 use crate::harness::{emit_json, jstr, time_query, Result};
 use crate::loader::load_graph;
@@ -30,12 +30,6 @@ pub(crate) fn i64_or_zero(c: Option<I64Col>, n: u32) -> i64 {
     c.and_then(|c| c.get(n)).unwrap_or(0)
 }
 
-/// Read a resolved boolean column at `n` (false if absent) — the boolean analogue
-/// of [`i64_or_zero`].
-#[inline]
-pub(crate) fn bool_or_false(c: Option<BoolCol>, n: u32) -> bool {
-    c.and_then(|c| c.get(n)).unwrap_or(false)
-}
 pub fn run() -> Result<()> {
     let default = PathBuf::from(
         "data/bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot",
