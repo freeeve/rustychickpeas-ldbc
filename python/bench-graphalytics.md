@@ -16,25 +16,24 @@ run here — matching the Rust page.
 
 > **Numbers** are a single timed run, Apple M3 Max, ~3–4 cores of background load — wall
 > time is noisy on a shared box (the PASS/FAIL is the reliable signal). **Py/Rust** =
-> Python ÷ Rust; lower is better. **Rust column: provisional (re-bench pending)** — the
-> Rust Graphalytics suite is mid-refactor; these are the current numbers from
-> [bench-graphalytics.md](../docs/bench-graphalytics.md), to be refreshed when that lands.
+> Python ÷ Rust; lower is better. Rust numbers are the fresh ones from
+> [bench-graphalytics.md](../docs/bench-graphalytics.md).
 
-| Algorithm | Python | Rust *(prov.)* | Py/Rust | Validation | how |
-|-----------|-------:|---------------:|--------:|------------|-----|
-| BFS | 588.5 ms | 64 ms | 9.2× | PASS | level-synchronous CSR frontier expansion |
-| PageRank | 126.9 ms | 54 ms | 2.4× | PASS | iterated rank push over CSR (fixed iteration count) |
-| WCC | 374.4 ms | 133 ms | 2.8× | PASS | union-find / label propagation over rels |
-| CDLP | 666.8 ms | 170 ms | 3.9× | PASS | community label propagation (deterministic tie-break) |
-| LCC | 2252.7 ms | 1062 ms | 2.1× | PASS | per-node neighbour-pair triangle counting |
-| SSSP | — | 6 ms | — | n/a here | unit/weighted Dijkstra (no wiki-Talk reference) |
+| Algorithm | Python | Rust | Py/Rust | Validation | how |
+|-----------|-------:|-----:|--------:|------------|-----|
+| BFS | 588.5 ms | 56 ms | 10.5× | PASS | level-synchronous CSR frontier expansion |
+| PageRank | 126.9 ms | 55 ms | 2.3× | PASS | iterated rank push over CSR (fixed iteration count) |
+| WCC | 374.4 ms | 124 ms | 3.0× | PASS | union-find / label propagation over rels |
+| CDLP | 666.8 ms | 179 ms | 3.7× | PASS | community label propagation (deterministic tie-break) |
+| LCC | 2252.7 ms | 1019 ms | 2.2× | PASS | per-node neighbour-pair triangle counting |
+| SSSP | — | 4 ms | — | n/a here | unit/weighted Dijkstra (no wiki-Talk reference) |
 
 **Reading the table.** No sub-3 ms rows here — every algorithm touches all 2.4 M nodes, so
 the ratios are real work, not call overhead. The iterative whole-graph algorithms cluster
 at a tight **2–4×** (PageRank, WCC, CDLP, LCC): each iteration's hot loop runs over the
 native CSR with a memoryview, so Python's residual cost is the per-iteration orchestration,
 not per-node work — the closest the Python suite gets to Rust on real work outside BI.
-**BFS is the outlier at 9×** — the frontier bookkeeping (visited set, per-level queues)
+**BFS is the outlier at 10×** — the frontier bookkeeping (visited set, per-level queues)
 lives in Python rather than a single native traversal, the same gap the IC short-path
 queries would close with a native BFS primitive exposed to the binding. The headline: all
 five validate **PASS** against the LDBC reference value-for-value, and the bulk-iteration

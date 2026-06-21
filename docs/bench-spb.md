@@ -12,9 +12,8 @@ drove into `rustychickpeas-core`.
 cargo run --release --bin spb_parity
 ```
 
-> **Re-bench pending.** The timings below are from the prior pass, and the Rust SPB suite
-> is currently mid-refactor (uncommitted) — they'll be refreshed once that lands. The
-> **30/30 parity vs Oxigraph** validation is the durable result.
+The **30/30 parity vs Oxigraph** validation is the durable result; the per-query timings
+below are a fresh `spb_parity` run (median of 5).
 
 ## Scale & validation — 30/30 value-identical vs Oxigraph
 
@@ -24,13 +23,13 @@ extract and diffs row-for-row against our results — every query (q1–q9, a1�
 **MATCHES**. This is the strongest correctness signal in the suite: value-identity against
 an independent SPARQL engine, not a shape check.
 
-Indicative timings (single run, M3 Max):
+Indicative timings (median of 5, M3 Max):
 
 | Query | Time | Rows | | Query | Time | Rows |
 |-------|-----:|-----:|-|-------|-----:|-----:|
 | q1 minute histogram | 1.0 ms | 9457 | | a5 about-entity | 21 ms | 108476 |
-| q9 fulltext union | 4.5 ms | 9462 | | a13 tag pairs | 40 ms | 336315 |
-| q5 date window | 5.9 ms | 7898 | | a25 relatedness | 8.6 ms | 47499 |
+| q9 fulltext union | 3.8 ms | 9462 | | a13 tag pairs | 45 ms | 336315 |
+| q5 date window | 5.8 ms | 7898 | | a25 relatedness | 7.2 ms | 47499 |
 
 (full 30-query table: the parity-script output + `results/spb.parity.rust.json`.)
 

@@ -11,22 +11,20 @@ showcase of CSR adjacency (no properties to scan, no optimizer needed).
 cargo run --release --bin graphalytics [dir] [name]
 ```
 
-> **Re-bench pending.** The timings below are from the prior pass, and the Rust
-> Graphalytics suite is currently mid-refactor (uncommitted) — they'll be refreshed once
-> that lands. The **PASS/FAIL** column is real validation and is not in question; the
-> runner also reports deterministic allocation counts, the reliable signal since
-> wall-clock is noisy on a shared box.
+The **PASS/FAIL** column is real validation against the official LDBC reference outputs;
+the runner also reports deterministic allocation counts, the reliable signal since
+wall-clock is noisy on a shared box.
 
 ## Real-scale — wiki-Talk (2.39 M nodes, 5.02 M rels), Apple M3 Max
 
 | Algorithm | Time | Allocations | Validation |
 |-----------|-----:|------------:|------------|
-| BFS | 64 ms | 2 | PASS |
-| PageRank | 54 ms | 513 | PASS |
-| WCC | 133 ms | 18 | PASS |
-| CDLP | 170 ms | 715 | PASS |
-| LCC | 1062 ms | 268 | PASS |
-| SSSP | 6 ms | 4 | PASS¹ |
+| BFS | 56 ms | 2 | PASS |
+| PageRank | 55 ms | 513 | PASS |
+| WCC | 124 ms | 18 | PASS |
+| CDLP | 179 ms | 717 | PASS |
+| LCC | 1019 ms | 268 | PASS |
+| SSSP | 4 ms | 4 | PASS¹ |
 
 ¹ wiki-Talk is unweighted, so SSSP runs unit-weight with no reference there; it validates
 PASS on the weighted `example-directed`/`example-undirected` sets. The near-constant
