@@ -1,23 +1,71 @@
+Loading LDBC graph from data/bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot ...
 
 === LDBC SNB BI — SF1 (real data) ===
 Loaded 2887110 nodes (10295 persons, 1121226 posts, 1739438 comments, 16080 tags, 71 tagclasses)
-       6042860 edges in 2.9s
+       17041206 rels in 8.2s
 
 Faithful LDBC BI queries:
-  Q1 posting summary: 12 groups over 691085 messages before 2011-12-01
+  Q1 posting summary: 12 groups over 691085 messages before 2011-12-01  [3.4 ms]
      2011 Post    lenCat=2  count=70448  avgLen=105.4
      2011 Post    lenCat=3  count=8632  avgLen=204.5
      2011 Comment lenCat=0  count=112566  avgLen=4.2
      2011 Comment lenCat=1  count=16659  avgLen=76.5
-  Q2 tag evolution (MusicalArtist, 2012-06-01): 100 tags
+  Q2 tag evolution (MusicalArtist, 2012-06-01): 100 tags  [7.3 ms]
      Rick_Springfield               w1=6 w2=1106 diff=1100
      Enrique_Iglesias               w1=581 w2=932 diff=351
      Freddie_Mercury                w1=883 w2=1191 diff=308
+  Q7 related topics (Enrique_Iglesias): 100 related tags
+     Poland                         comments=11
+     Saddam_Hussein                 comments=11
+     Arnold_Schwarzenegger          comments=10
+  Q12 message counts (len<20, after 2010-07-22, lang ar/hu): 86 buckets
+     messageCount=0 -> persons=6379
+     messageCount=1 -> persons=625
+     messageCount=2 -> persons=453
+  Q5 active posters (Abbas_I_of_Persia): 100 persons
+     msgs=143 replies=316 likes=783 score=8605
+     msgs=73 replies=350 likes=170 score=2473
+     msgs=64 replies=371 likes=134 score=2146
+  Q6 authoritative users (Arnold_Schwarzenegger): 100 persons
+     authorityScore=198338
+     authorityScore=133448
+     authorityScore=84204
+  Q8 central person (Che_Guevara, 2011-07-20..25): 100 persons
+     score=100 friendsScore=1101
+     score=100 friendsScore=800
+     score=100 friendsScore=702
+  Q11 friend triangles (India, 2012-09-29..2013-01-01): 805 triangles
+  Q9 thread initiators (2011-10-01..15): 100 persons
+  Q13 zombies (France, before 2013-01-01): 5 zombies
+  bounded-BFS knows-reachability from person[0]: 9538 reachable, eccentricity 4 hops
+  Q19 interaction path (cities 669<->648): 6 pairs over 797017 interaction rels
+     best: person 24015 -> person 22547, total weight 0.1181
+  Q20 recruitment (Falcon_Air -> person 66): 1 candidates over 6866 study rels
+     best: person 22979, total weight 11.0
 
 Timings (median of 5):
-Q1 posting summary                     56.74 ms   (result=12)
-Q2 tag evolution                      153.34 ms   (result=100)
-BI1 tag co-evolution (simpl.)         738.03 ms   (result=3356249)
-BI3 popular topics (simpl.)           216.97 ms   (result=12661)
-BI4 top commenters (simpl.)            20.44 ms   (result=10035)
-BI5 active users (simpl.)              12.71 ms   (result=9592)
+Q1 posting summary                      2.99 ms   (result=12)
+Q2 tag evolution                        8.00 ms   (result=100)
+Q7 related topics                       2.88 ms   (result=100)
+Q12 message counts                      8.91 ms   (result=86)
+Q5 active posters                       0.67 ms   (result=100)
+Q6 authoritative users                144.04 ms   (result=100)
+Q8 central person                       0.38 ms   (result=100)
+Q11 friend triangles                    3.03 ms   (result=805)
+Q9 thread initiators                    9.66 ms   (result=100)
+Q13 zombies                             0.20 ms   (result=5)
+bounded-BFS knows reachability         10.03 ms   (result=9538)
+Q19 interaction path                    7.89 ms   (result=6)
+Q20 recruitment                         0.33 ms   (result=1)
+Q3 popular topics                       2.02 ms   (result=20)
+Q4 top creators                        83.52 ms   (result=100)
+Q10 experts                            13.86 ms   (result=100)
+Q14 international dialog                8.81 ms   (result=7)
+Q15 weighted path                      31.04 ms   (result=1)
+Q16 fake news                           0.38 ms   (result=0)
+Q17 information propagation             3.99 ms   (result=10)
+Q18 friend recommendation             124.93 ms   (result=20)
+BI1 tag co-evolution (simpl.)         449.13 ms   (result=3356249)
+BI3 popular topics (simpl.)            60.31 ms   (result=12661)
+BI4 top commenters (simpl.)            31.99 ms   (result=10133)
+BI5 active users (simpl.)              23.33 ms   (result=10062)
