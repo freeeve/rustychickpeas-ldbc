@@ -14,9 +14,10 @@ millions of nodes is hopeless — the interpreter *is* the floor. But the bindin
 expose the core's native primitives (the parallel `aggregate` kernel, dense-column
 `memoryview`s, a GIL-released `par_fold`, native single-source Dijkstra/BFS, bulk
 rel-property accessors), so the hot loop runs in Rust while the orchestration stays in
-Python. The BI tuning pass below is the payoff: pure-Python baselines ran **3–90×
-slower** than Rust; routed through native primitives, the tuned queries land at
-**0.9–2× of hand-written Rust, three of them faster**.
+Python. The BI tuning pass below is the payoff: the heaviest pure-Python queries ran **24–96×
+slower** than Rust (Q12 946 ms, Q19 652 ms); routed through native primitives they drop
+to **single-digit multiples — three queries faster than (single-threaded) Rust** — and
+the residual gaps are mostly intrinsic to the query shape rather than missing features.
 
 > Honesty caveat, same as the [main README](../README.md): correctness is
 > cross-checked value-for-value; absolute magnitudes are preliminary (laptop,
@@ -79,7 +80,7 @@ in ~3 s. Apple M3 Max, median of 5 after warmup.
 | Q9 thread initiators | 15 ms | 7.4 ms | 2× | native reply-tree primitive (177→15 ms) |
 | Q10 experts in country | 27.4 ms | 8.2 ms | 3.3× | near floor — multi-valued tag grouping |
 | Q11 friend triangles | 14.7 ms | 2.7 ms | 5.4× | bulk `rels_with_props` (aligned neighbor/date arrays) |
-| Q12 message histogram | 946 ms | 38.8 ms | 24× | **deferred** — needs a `where_via` projected filter (task 178) |
+| Q12 message histogram | 17.6 ms | 5.0 ms | 3.5× | native `where_via` projected filter (946→17.6 ms) |
 | Q13 zombies | 2.6 ms | 0.2 ms | 12×† | France: 5 zombies — sub-3 ms |
 | Q14 international dialog | 29.3 ms | 5.1 ms | 5.7× | near floor — per-message creator grouping |
 | Q15 weighted path | ~700 ms | 17.8 ms | 39× | native arrays (1344→700 ms); residual scan-bound |
@@ -93,29 +94,28 @@ in ~3 s. Apple M3 Max, median of 5 after warmup.
 trivial amount of work, not by the query doing real work slowly. Ignore the ratio.
 
 **Reading the table.** Strip the sub-3 ms rows (†, where the ratio is noise) and the
-20 queries fall into five groups:
+20 queries fall into four groups:
 
 - **Faster than hand-written Rust** — Q1, Q2, Q17. The bindings call the *parallel*
   `aggregate` / native kernels (GIL released) where `bi.rs` is single-threaded, so
   Python wins outright. Not magic — a fairer Rust baseline would multi-thread these.
 - **At parity (≤ 1.2×)** — Q4, Q18. The native primitive does essentially all the
   compute; Python just drives it.
-- **Native win, residual gap (2–9×)** — Q6, Q9, Q11, Q15, Q19. A native primitive cut
-  2–12× off the pure-Python baseline (Q19 652→59 ms, Q15 1344→700 ms); what remains is
-  a scan or fan-out the current primitives don't cover.
+- **Native win, residual gap (2–9×)** — Q6, Q9, Q11, Q12, Q15, Q19. A native primitive
+  cut 2–54× off the pure-Python baseline (Q12 946→17.6 ms via the just-shipped
+  `where_via`, Q19 652→59 ms, Q15 1344→700 ms); what remains is a residual scan the
+  current primitives don't cover.
 - **Near floor, intrinsic (3–8×)** — Q3, Q7, Q10, Q14. These group by a node's
   *multi-valued* tags, which can't collapse into a membership-style native kernel; the
   Python baseline is already close to the achievable floor.
-- **Deferred (24×)** — Q12 alone is blocked on a missing core primitive: a `where_via`
-  projected-property filter for the `aggregate` kernel (the reply-chain root-language
-  check). It's the one BI query whose path to Rust-class is a known, not-yet-built
-  feature (task 178).
 
-The headline: with the native primitives in place, **Python-driven BI is within ~2× of
-hand-coded Rust on every query that does real work** — except the four intrinsic
-multi-valued-grouping cases and the one deferred primitive. Making that possible was
-the whole point of the binding's primitive surface and the upstream
-`rustychickpeas-core` work that built it.
+The headline: with the native primitives in place — including the just-shipped
+`where_via`, which closed the last deferred query — **every BI query that does real work
+is served by a native kernel**, landing within single-digit multiples of hand-coded Rust
+(three of them faster). The residual gaps are intrinsic multi-valued-tag grouping (3–8×)
+and one scan-bound query (Q15, 39×), not missing features. Making that possible was the
+whole point of the binding's primitive surface and the upstream `rustychickpeas-core`
+work that built it.
 
 ## Extending the comparison
 
