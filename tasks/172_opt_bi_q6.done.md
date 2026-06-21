@@ -9,3 +9,10 @@ Approach: already only ~2x (memoization helps a lot). Candidate: a native "sum i
 
 ## Result
 (pending)
+
+## Result (2026-06-21) — DONE (near floor, ~2x)
+Already memoized (each liker's "likes received across their own messages" computed
+once). That memo + degree being O(1) (CSR) put it at ~2x. The per-liker scan
+(neighbor_ids over the liker's messages + degree per message) is intrinsic; a native
+"sum incoming-likes degree over a person's created messages" kernel would be the only
+further lever — low ROI at 2x. Left as-is.
