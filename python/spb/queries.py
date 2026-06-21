@@ -800,23 +800,29 @@ def a24(g, uri_map, uri_a, uri_b, date_from=None, date_to=None):
 
 
 def a25(g, uri_map, uri_a, limit):
-    """a25 — entities co-occurring with A by distinct co-mention days, ranked."""
+    """a25 — entities co-occurring with A by distinct co-mention days, ranked.
+    Native seeded co-occurrence: A's incoming-`about` works (the shared centers) ->
+    their other `about` targets, weighted by the distinct ``day`` (the loader's
+    YYYY-MM-DD of dateCreated) — `g.co_occurring(A, "about", Incoming, distinct,
+    "day")`. Falls back to the Python day-set scan if the binding lacks it."""
     a = uri_map.get(uri_a)
     if a is None:
         return []
-    days = {}
-    for cw in g.neighbor_ids(a, Direction.Incoming, ["about"]):
-        if not g.has_label(cw, "CreativeWork"):
-            continue
-        created = _dc(g, cw)
-        if not created or len(created) < 10:
-            continue
-        day = created[:10]
-        for who in g.neighbor_ids(cw, Direction.Outgoing, ["about"]):
-            if who != a:
-                days.setdefault(who, set()).add(day)
-    rows = [(who, len(s)) for who, s in days.items()]
-    rows.sort(key=lambda r: (-r[1], r[0]))  # days desc, node id asc (uri-order proxy)
+    co = getattr(g, "co_occurring", None)
+    if co is not None:
+        weights = co(a, "about", Direction.Incoming, "distinct", "day")
+    else:
+        days = {}
+        for cw in g.neighbor_ids(a, Direction.Incoming, ["about"]):
+            created = _dc(g, cw)
+            if not created or len(created) < 10:
+                continue
+            day = created[:10]
+            for who in g.neighbor_ids(cw, Direction.Outgoing, ["about"]):
+                if who != a:
+                    days.setdefault(who, set()).add(day)
+        weights = {who: len(s) for who, s in days.items()}
+    rows = sorted(weights.items(), key=lambda r: (-r[1], r[0]))  # days desc, node asc
     rows = rows[:limit] if limit < len(rows) else rows
     return [[_uri(g, who), n] for who, n in rows]
 

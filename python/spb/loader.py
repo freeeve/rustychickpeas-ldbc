@@ -322,6 +322,11 @@ def _load_ntriples(paths):
                 seen_props.add(pk)
                 b.set_prop(subj, key, _literal_value(o))
                 stats["literals"] += 1
+                # Day-granular key (YYYY-MM-DD) for distinct-day co-occurrence — lets
+                # a25 run on the native co_occurring(distinct, "day") kernel (distinct
+                # over the full dateCreated timestamp would over-count same-day works).
+                if key == "dateCreated" and len(o[1]) >= 10:
+                    b.set_prop(subj, "day", o[1][:10])
 
     # uri -> node id (free from uri_of) so queries can resolve param uris without a
     # label-free property lookup (the binding only exposes node_with_label_property).
