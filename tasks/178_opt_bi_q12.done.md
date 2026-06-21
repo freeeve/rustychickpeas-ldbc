@@ -41,3 +41,14 @@ OPEN DECISIONS for sign-off (Eve paused the AskUserQuestion to clarify): (1) ext
 
 ## Result
 (pending — deferred, NOT done)
+
+## Result (2026-06-21) — DONE (946ms -> 17.6ms via native aggregate.where_via)
+Built the settled design: `Aggregation::filter_via` (Rust) / `Aggregation.where_via`
+(Python) — a projected-property population filter on the parallel aggregate kernel
+(core c3cc945). Q12 now runs the whole 2.8M-message scan natively:
+`aggregate("Post","Comment").where(day>min).where(content==1).where(len<thr)
+.where_via(roots_via("replyOf",Out), "lang", langs).through("hasCreator",Incoming)`,
+then a small Python histogram + zero-bucket + sort. SF1 median: **946ms -> 17.6ms
+(~54x), faster than Rust's 38.8ms** (Rust q12 is single-threaded; aggregate is
+parallel). Parity ok (86 rows). Sign-off decisions: extend aggregate (not a
+standalone select); name where_via/filter_via.
