@@ -55,16 +55,28 @@ the `where_via` projected-property filter landed in the core `aggregate` kernel.
 
 ## Kùzu head-to-head
 
-> **Re-bench pending.** The previously-published Kùzu comparison predates this
-> optimization pass (e.g. it listed rustychickpeas Q1 at 57 ms / Q12 at 322 ms vs the
-> 2.8 ms / 5.1 ms above), so its win/loss calls are stale. Refresh by running the
-> reference side on the *same* SF1 data:
-> ```bash
-> .venv-kuzu/bin/python kuzu/run.py <initial_snapshot> sf1
-> ```
-> against `kuzu/db-sf1-faithful`, then diff with `kuzu/compare.py`. Kùzu is
-> multi-threaded and ships a real optimizer; our queries are single-threaded — an
-> asymmetry to state alongside any magnitude.
+Re-benched on the *same* SF1 data: `.venv-kuzu/bin/python kuzu/run.py <initial_snapshot>
+sf1` (Kùzu 0.11.3, median of 5) against the rustychickpeas numbers above. The Kùzu
+harness covers the six faithful queries it can express on its `Message`/`Person` schema
+projection (Q1, Q2, Q5, Q6, Q7, Q12); the other 14 are rustychickpeas-only here and are
+omitted.
+
+| Query | rustychickpeas | Kùzu | winner |
+|-------|---------------:|-----:|--------|
+| Q1 posting summary | 2.8 ms | 3.66 ms | rustychickpeas |
+| Q2 tag evolution | 6.5 ms | 75.78 ms | rustychickpeas (12×) |
+| Q5 active posters | 0.4 ms | 29.11 ms | rustychickpeas |
+| Q6 authoritative users | 137 ms | 1373.70 ms | rustychickpeas (10×) |
+| Q7 related topics | 2.2 ms | 91.19 ms | rustychickpeas (41×) |
+| Q12 message histogram | 5.1 ms | 62905.57 ms | rustychickpeas (12000×) |
+
+Q12 is the outlier: Kùzu's naive recursive-path translation (`replyOf*0..30`) explodes,
+where our `where_via` projected-property filter walks the reply chain directly.
+
+> **Honesty caveat.** Kùzu is multi-threaded and ships a real query optimizer; our
+> queries are single-threaded hand-coded scans. Both runs were taken on the same Apple
+> M3 Max with **~3–4 cores of background load**, so absolute magnitudes drift run-to-run
+> — read the comparison as order-of-magnitude, not to two significant figures.
 
 ## Validation
 
