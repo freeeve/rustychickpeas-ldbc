@@ -50,3 +50,25 @@ kernel + binding, wire IC6/cr10/q9/a24/a25.
 
 ## Result
 (pending)
+
+## Result (2026-06-21) — PRIMITIVE BUILT (core 86077da); wiring pending
+Primitive exercise done + Eve sign-off (count + distinct now; q9's rel-type-pair
+weight stays bespoke as a documented future variant). Shipped
+`GraphSnapshot::co_occurring(seed, rel, direction, weight)` in core
+(graph_snapshot.rs, next to fold_via) with a declarative `CoWeight` enum:
+`Count` (shared-center count) and `Distinct(key)` (distinct values of a center
+property). Thin PyO3 wrapper `g.co_occurring(seed, rel, direction,
+weight='count'|'distinct', distinct_key=None)` (GIL released). 1 core + 1 binding
+test (count + distinct + unknown-rel/key).
+
+REMAINING — wire the consumers (each needs its suite reload to re-verify parity, so
+do on a quiet machine):
+  * IC6  -> co_occurring(tag, "hasTag", Incoming) [count]  (no loader change)
+  * FinBench cr10 -> co_occurring(person, invest-rel, ...) [count]
+  * SPB a25 -> co_occurring(A, "about", Incoming, "distinct", "day") — NEEDS the SPB
+    loader to store a day-granular "day" prop on works (dateCreated[:10]); distinct
+    over the full dateCreated timestamp would over-count (same-day, different-time).
+  * SPB a24 stays bespoke (per-day histogram for ONE pair, not a per-other row).
+  * SPB q9 stays bespoke (rel-type-pair weighted; the documented future variant).
+NOTE: BI Q7 is NOT a co_occurring consumer (it's reply-mediated, 3-hop) — earlier
+note corrected.
