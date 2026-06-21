@@ -35,3 +35,12 @@ case where each node has one parent; "same thread?" for replyOf is exactly
 
 ## Result
 (pending)
+
+## Result (2026-06-21) — DONE (provided by native wcc)
+Native `GraphSnapshot::wcc` (analytics.rs, core d4a1d36) returns the materialized
+`node -> component representative` (smallest node id) array — exactly this index for
+the all-rels/undirected case. `component_of(n) = wcc()[n]`; `same_component(a,b) =
+wcc()[a] == wcc()[b]` (O(1) after one build), usable for the Q19/Q20 reachability
+pre-check. The remaining generalization (per-arbitrary-rel-set union-find index,
+shared labeling surface with roots_via) is deferred — wcc covers the demand seen so
+far; revisit if a per-rel-set component index is actually needed.

@@ -41,3 +41,12 @@ Coordinate with the other session (graphalytics owner). Primitive exercise + sig
 
 ## Result
 (pending)
+
+## Result (2026-06-21) — DONE (primary consumer satisfied by native lcc)
+The Graphalytics LCC consumer is now the native `GraphSnapshot::lcc` (analytics.rs,
+core d4a1d36) — the sorted forward-CSR + bitset-mark + scan/gallop intersection,
+parallel. That was the primary motivation. The only other consumer, BI Q11, counts
+triangles in a DATE-FILTERED knows subgraph (a rel predicate LCC doesn't have), so a
+shared general `triangle_count` would only partly serve it; Q11 stays its (already
+acceptable) bespoke count. General-primitive extraction deferred (sole remaining
+consumer is date-filtered, low marginal value).
