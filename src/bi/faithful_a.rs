@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rustychickpeas_core::{Col, Direction, GraphSnapshot};
+use rustychickpeas_core::{AggOp, Col, Direction, GraphSnapshot, ValueId};
 
 use super::{bool_or_false, i64_or_zero, Q1Row};
 use crate::props::*;
@@ -230,69 +230,39 @@ pub(crate) fn q12_message_counts(
     len_thr: i64,
     langs: &[&str],
 ) -> Vec<(u64, u64)> {
-    // Root-post language: the forest-root array maps each message to its thread's
-    // terminal (root Post) via the functional `replyOf` chain; index it (built
-    // once) and read the root's language. A Post has no `replyOf` parent, so its
-    // terminal is itself.
-    let reply_roots = g
-        .rel_type("replyOf")
-        .map(|rt| g.chain_roots(Direction::Outgoing, rt));
-    let root_lang = |start: u32| -> Option<&str> {
-        let root = match &reply_roots {
-            Some(roots) => roots[start as usize],
-            None => start,
-        };
-        g.prop(root, "lang").str()
+    // Thread-root language as a projection: map each message to its replyOf-chain
+    // terminal (a Post is its own root), built once. The `filter_via` step keeps a
+    // message only when its root's `lang` is in `langs`; resolve those to value ids
+    // once (an un-interned lang can't match anything).
+    let roots = match g.rel_type("replyOf") {
+        Some(rt) => g.chain_roots(Direction::Outgoing, rt),
+        None => (0..g.node_count()).collect::<Vec<u32>>().into(),
     };
+    let lang_ids: Vec<ValueId> = langs
+        .iter()
+        .filter_map(|l| g.atoms.get_id(l).map(ValueId::Str))
+        .collect();
 
-    // Read day/content/len from dense column slices (index by node id) instead of
-    // re-resolving the property key on every one of millions of rows.
-    let day_s = g.col("day").map(Col::i64).and_then(|c| c.as_slice());
-    let len_s = g.col("len").map(Col::i64).and_then(|c| c.as_slice());
-    let content_s = g.col("content").map(Col::bool).and_then(|c| c.as_slice());
-
-    let mut per_person: HashMap<u32, u64> = HashMap::new();
-    for label in ["Post", "Comment"] {
-        if let Some(nodes) = g.nodes_with_label(label) {
-            for msg in nodes.iter() {
-                let i = msg as usize;
-                let day = match day_s {
-                    Some(s) => s[i],
-                    None => g.prop(msg, "day").i64_or(0),
-                };
-                if day <= min_day {
-                    continue;
-                }
-                let content = match content_s {
-                    Some(s) => s[i],
-                    None => g.prop(msg, "content").bool_or(false),
-                };
-                if !content {
-                    continue;
-                }
-                let len = match len_s {
-                    Some(s) => s[i],
-                    None => g.prop(msg, "len").i64_or(0),
-                };
-                if len >= len_thr {
-                    continue;
-                }
-                if !matches!(root_lang(msg), Some(l) if langs.contains(&l)) {
-                    continue;
-                }
-                for creator in g.neighbors_by_type(msg, Direction::Incoming, &["hasCreator"]) {
-                    *per_person.entry(creator).or_insert(0) += 1;
-                }
-            }
-        }
-    }
+    // The whole 2.8M-message scan runs in the parallel `aggregate` kernel: the
+    // scalar day/content/len population filters, the projected root-language filter,
+    // and a per-creator count via `through(hasCreator)`. Only the small histogram +
+    // zero-bucket + sort stay here. (Same kernel/path the Python q12 drives.)
+    let res = g
+        .aggregate(["Post", "Comment"])
+        .filter("day", AggOp::Gt, min_day)
+        .filter("content", AggOp::Eq, 1)
+        .filter("len", AggOp::Lt, len_thr)
+        .filter_via(&roots, "lang", lang_ids)
+        .through("hasCreator", Direction::Incoming)
+        .run()
+        .expect("q12 aggregate over dense day/content/len columns");
 
     let total_persons = g.nodes_with_label("Person").map(|p| p.len()).unwrap_or(0) as u64;
     let mut hist: HashMap<u64, u64> = HashMap::new();
-    for &c in per_person.values() {
-        *hist.entry(c).or_insert(0) += 1;
+    for row in &res.rows {
+        *hist.entry(row.count).or_insert(0) += 1;
     }
-    hist.insert(0, total_persons.saturating_sub(per_person.len() as u64));
+    hist.insert(0, total_persons.saturating_sub(res.rows.len() as u64));
     let mut rows: Vec<(u64, u64)> = hist.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
     rows
