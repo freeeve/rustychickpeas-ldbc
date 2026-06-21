@@ -45,5 +45,8 @@ pub fn reset() {
 
 /// Read the `(allocations, bytes)` tallied since the last [`reset`].
 pub fn read() -> (u64, u64) {
-    (ALLOCS.load(Ordering::Relaxed), BYTES.load(Ordering::Relaxed))
+    (
+        ALLOCS.load(Ordering::Relaxed),
+        BYTES.load(Ordering::Relaxed),
+    )
 }

@@ -24,7 +24,11 @@ pub fn parse_reference(text: &str) -> HashMap<u32, String> {
 
 /// Exact integer agreement (BFS depths, CDLP labels). Returns the first
 /// disagreeing vertex, if any.
-pub fn check_exact_i64(ds: &Dataset, out: &[i64], reference: &HashMap<u32, String>) -> Result<(), String> {
+pub fn check_exact_i64(
+    ds: &Dataset,
+    out: &[i64],
+    reference: &HashMap<u32, String>,
+) -> Result<(), String> {
     for (node, &mine) in out.iter().enumerate() {
         let vertex = ds.vertex_of_node[node];
         let want = parse_ref::<i64>(reference, vertex)?;
@@ -52,7 +56,9 @@ pub fn check_epsilon(
             (mine - want).abs() <= eps
         };
         if !ok {
-            return Err(format!("vertex {vertex}: got {mine}, want {want} (eps {eps})"));
+            return Err(format!(
+                "vertex {vertex}: got {mine}, want {want} (eps {eps})"
+            ));
         }
     }
     Ok(())
@@ -61,7 +67,11 @@ pub fn check_epsilon(
 /// Relabel-invariant agreement (WCC): the partition `out` induces over vertices
 /// must equal the reference's, regardless of the actual label values. Enforces a
 /// consistent bijection between our labels and the reference's.
-pub fn check_relabel(ds: &Dataset, out: &[u32], reference: &HashMap<u32, String>) -> Result<(), String> {
+pub fn check_relabel(
+    ds: &Dataset,
+    out: &[u32],
+    reference: &HashMap<u32, String>,
+) -> Result<(), String> {
     let mut ours_to_ref: HashMap<u32, String> = HashMap::new();
     let mut ref_to_ours: HashMap<String, u32> = HashMap::new();
     for (node, &mine) in out.iter().enumerate() {
@@ -72,12 +82,16 @@ pub fn check_relabel(ds: &Dataset, out: &[u32], reference: &HashMap<u32, String>
             .clone();
         if let Some(prev) = ours_to_ref.get(&mine) {
             if prev != &want {
-                return Err(format!("vertex {vertex}: our label {mine} maps to both {prev} and {want}"));
+                return Err(format!(
+                    "vertex {vertex}: our label {mine} maps to both {prev} and {want}"
+                ));
             }
         } else {
             if let Some(&other) = ref_to_ours.get(&want) {
                 if other != mine {
-                    return Err(format!("vertex {vertex}: ref label {want} maps to both {other} and {mine}"));
+                    return Err(format!(
+                        "vertex {vertex}: ref label {want} maps to both {other} and {mine}"
+                    ));
                 }
             }
             ours_to_ref.insert(mine, want.clone());
@@ -88,9 +102,15 @@ pub fn check_relabel(ds: &Dataset, out: &[u32], reference: &HashMap<u32, String>
 }
 
 /// Look up a vertex in the reference and parse its value, with descriptive errors.
-fn parse_ref<T: std::str::FromStr>(reference: &HashMap<u32, String>, vertex: u32) -> Result<T, String> {
-    let raw = reference.get(&vertex).ok_or_else(|| format!("vertex {vertex} missing from reference"))?;
-    raw.parse::<T>().map_err(|_| format!("vertex {vertex}: unparseable reference value {raw:?}"))
+fn parse_ref<T: std::str::FromStr>(
+    reference: &HashMap<u32, String>,
+    vertex: u32,
+) -> Result<T, String> {
+    let raw = reference
+        .get(&vertex)
+        .ok_or_else(|| format!("vertex {vertex} missing from reference"))?;
+    raw.parse::<T>()
+        .map_err(|_| format!("vertex {vertex}: unparseable reference value {raw:?}"))
 }
 
 #[cfg(test)]

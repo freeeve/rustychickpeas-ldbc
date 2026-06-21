@@ -120,7 +120,12 @@ pub fn load_str(v_text: &str, e_text: &str, props: &str) -> Dataset {
     }
 
     let graph = b.finalize(None);
-    Dataset { graph, params, vertex_of_node, node_of_vertex }
+    Dataset {
+        graph,
+        params,
+        vertex_of_node,
+        node_of_vertex,
+    }
 }
 
 /// Parse the subset of LDBC `.properties` keys the six algorithms need, matching

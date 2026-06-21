@@ -28,10 +28,12 @@ LIMIT = 10_000
 
 
 def _max_out_degree(g, label, rel):
+    # Rust's max_by_key returns the LAST element on ties, so use >= (keep the
+    # highest-id node among equal max degree) to pick the same seed.
     best, best_d = 0, -1
     for n in g.nodes_with_label(label):
         d = g.degree(n, Direction.Outgoing, rel)
-        if d > best_d:
+        if d >= best_d:
             best_d, best = d, n
     return best
 
@@ -68,6 +70,8 @@ def main():
     investor = _max_out_degree(g, "Person", "invest")
     owner = _max_out_degree(g, "Person", "own")
     cr1_seed = next((a for a in top500 if fb.cr1(g, a, WS, WE, LIMIT, False)), seed)
+    print(f"seeds: account={seed} cr1={cr1_seed} person={seed_person} owner={owner} "
+          f"card={card} loan={loan_seed} investor={investor} cycle={cyc_seed} dst={dst}")
 
     specs = [
         ("CR1", "blocked-medium", lambda: len(fb.cr1(g, cr1_seed, WS, WE, LIMIT, False))),

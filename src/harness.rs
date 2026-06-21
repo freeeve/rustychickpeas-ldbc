@@ -84,4 +84,3 @@ pub fn time_query(name: &str, runs: usize, mut q: impl FnMut() -> usize) {
     let median_ms = samples[samples.len() / 2] as f64 / 1000.0;
     println!("{name:<34} {median_ms:>9.2} ms   (result={warm})");
 }
-

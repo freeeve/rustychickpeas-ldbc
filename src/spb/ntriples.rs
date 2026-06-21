@@ -241,7 +241,9 @@ mod tests {
         )
         .unwrap();
         match t.object {
-            Term::Literal { value, datatype, .. } => {
+            Term::Literal {
+                value, datatype, ..
+            } => {
                 assert_eq!(value, "51.5");
                 assert_eq!(local_name(datatype.as_deref().unwrap()), "double");
             }
@@ -284,7 +286,10 @@ mod tests {
 
     #[test]
     fn local_name_handles_hash_and_slash() {
-        assert_eq!(local_name("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"), "type");
+        assert_eq!(
+            local_name("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            "type"
+        );
         assert_eq!(local_name("http://dbpedia.org/ontology/Place"), "Place");
         assert_eq!(local_name("http://ex/geo#long"), "long");
     }

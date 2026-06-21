@@ -37,7 +37,14 @@ fn measure<T>(f: impl FnOnce() -> T) -> (T, f64, u64, u64) {
 }
 
 /// Print one algorithm's time, allocations, result size, and validation verdict.
-fn row(algo: &str, ms: f64, allocs: u64, bytes: u64, n: usize, check: Option<std::result::Result<(), String>>) {
+fn row(
+    algo: &str,
+    ms: f64,
+    allocs: u64,
+    bytes: u64,
+    n: usize,
+    check: Option<std::result::Result<(), String>>,
+) {
     let status = match check {
         None => "(no ref)".to_string(),
         Some(Ok(())) => "PASS".to_string(),
@@ -48,14 +55,25 @@ fn row(algo: &str, ms: f64, allocs: u64, bytes: u64, n: usize, check: Option<std
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let dir = Path::new(args.get(1).map(String::as_str).unwrap_or("data/graphalytics"));
-    let name = args.get(2).map(String::as_str).unwrap_or("example-directed");
+    let dir = Path::new(
+        args.get(1)
+            .map(String::as_str)
+            .unwrap_or("data/graphalytics"),
+    );
+    let name = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or("example-directed");
 
     let t = Instant::now();
     let ds = ga::load(dir, name)?;
     let g = &ds.graph;
     let d = ds.params.directed;
-    println!("Loaded {name}: {} nodes, directed={d}  [{:.2}s]", ds.len(), t.elapsed().as_secs_f64());
+    println!(
+        "Loaded {name}: {} nodes, directed={d}  [{:.2}s]",
+        ds.len(),
+        t.elapsed().as_secs_f64()
+    );
     println!("Graphalytics algorithms:");
 
     // BFS — exact depths.
@@ -65,7 +83,8 @@ fn main() -> Result<()> {
     row("BFS", ms, a, b, r.len(), chk);
 
     // PageRank — tolerance.
-    let (r, ms, a, b) = measure(|| ga::pagerank(g, d, ds.params.pr_damping, ds.params.pr_iterations));
+    let (r, ms, a, b) =
+        measure(|| ga::pagerank(g, d, ds.params.pr_damping, ds.params.pr_iterations));
     let chk = reference(dir, name, "PR").map(|rf| ga::validate::check_epsilon(&ds, &r, &rf, 1e-6));
     row("PR", ms, a, b, r.len(), chk);
 
@@ -75,9 +94,11 @@ fn main() -> Result<()> {
     row("WCC", ms, a, b, r.len(), chk);
 
     // CDLP — exact labels; seed with vertex ids so labels match the reference.
-    let (r, ms, a, b) = measure(|| ga::cdlp_seeded(g, d, ds.params.cdlp_iterations, &ds.vertex_of_node));
+    let (r, ms, a, b) =
+        measure(|| ga::cdlp_seeded(g, d, ds.params.cdlp_iterations, &ds.vertex_of_node));
     let r_i64: Vec<i64> = r.iter().map(|&x| x as i64).collect();
-    let chk = reference(dir, name, "CDLP").map(|rf| ga::validate::check_exact_i64(&ds, &r_i64, &rf));
+    let chk =
+        reference(dir, name, "CDLP").map(|rf| ga::validate::check_exact_i64(&ds, &r_i64, &rf));
     row("CDLP", ms, a, b, r.len(), chk);
 
     // LCC — tolerance.
@@ -88,7 +109,8 @@ fn main() -> Result<()> {
     // SSSP — tolerance (weighted).
     let src = ds.params.sssp_source.and_then(|v| ds.node(v)).unwrap_or(0);
     let (r, ms, a, b) = measure(|| ga::sssp(g, src, d, true));
-    let chk = reference(dir, name, "SSSP").map(|rf| ga::validate::check_epsilon(&ds, &r, &rf, 1e-6));
+    let chk =
+        reference(dir, name, "SSSP").map(|rf| ga::validate::check_epsilon(&ds, &r, &rf, 1e-6));
     row("SSSP", ms, a, b, r.len(), chk);
 
     Ok(())

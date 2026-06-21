@@ -25,7 +25,10 @@ pub fn run(g: &GraphSnapshot) -> usize {
     };
     works
         .iter()
-        .map(|w| g.neighbors_by_type(w, Direction::Outgoing, "mentions").count())
+        .map(|w| {
+            g.neighbors_by_type(w, Direction::Outgoing, "mentions")
+                .count()
+        })
         .max()
         .unwrap_or(0)
 }
