@@ -72,3 +72,20 @@ do on a quiet machine):
   * SPB q9 stays bespoke (rel-type-pair weighted; the documented future variant).
 NOTE: BI Q7 is NOT a co_occurring consumer (it's reply-mediated, 3-hop) — earlier
 note corrected.
+
+## Result (2026-06-21) — DONE (primitive shipped + a25 wired; survey reassessed)
+Primitive built (core 86077da) + wired into SPB a25 (ldbc b064354): a25 now uses
+`co_occurring(A,"about",Incoming,"distinct","day")` (loader derives a YYYY-MM-DD
+"day" prop) — 142ms->50.6ms, 30/30 parity.
+
+REASSESSMENT of the 5 surveyed consumers: only **a25** cleanly fits the basic kernel.
+The others each need a filter the basic co_occurring (count/distinct, no center/leg
+filter) does NOT express:
+  * IC6  — centers restricted to the seed's friends'/FoF Posts (knows 1..2 hops).
+  * cr10 — centers (invested companies) restricted to an invest-rel TIME WINDOW.
+  * q9   — rel-type-PAIR weight (about/mentions combos), a 2-rel-type shape.
+  * a24  — per-DAY histogram for ONE pair (different output, not per-other).
+So the "5 consumers" were co-occurrence-SHAPED but filtered; the basic primitive
+serves 1. A future **center-set / rel-property-window** extension would unlock IC6 +
+cr10 (2 consumers — clears the bar); q9/a24 stay bespoke. Not built now (separate
+design + each its own suite). co_occurring stands on a25 + the extension path.
