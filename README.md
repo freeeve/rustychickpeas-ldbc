@@ -76,13 +76,11 @@ benchmark page):
 All five families are implemented and validating, exposed to both the Rust binaries and
 the Python bindings. Open threads:
 
-1. **Refresh the reference-engine head-to-heads** — the Kùzu / Oxigraph columns on the
-   benchmark pages predate the latest optimization pass and are being re-run.
-2. **SPB editorial workload** — the insert/update/delete (write) queries; blocked on a
+1. **SPB editorial workload** — the insert/update/delete (write) queries; blocked on a
    core mutation/delta API (`GraphSnapshot` is currently immutable).
-3. **SF10 across families** to line up with single-node academic numbers (already
+2. **SF10 across families** to line up with single-node academic numbers (already
    feasible for BI/IC; the data is present).
-4. **Unloaded-machine timing pass** — every magnitude here is provisional until taken on a
+3. **Unloaded-machine timing pass** — every magnitude here is provisional until taken on a
    quiet box, with the single-threaded-vs-multi-threaded asymmetry settled.
 
 ## Layout
