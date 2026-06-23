@@ -235,7 +235,7 @@ pub(crate) fn q12_message_counts(
     // message only when its root's `lang` is in `langs`; resolve those to value ids
     // once (an un-interned lang can't match anything).
     let roots = match g.rel_type("replyOf") {
-        Some(rt) => g.chain_roots(Direction::Outgoing, rt),
+        Some(rt) => g.roots_via(rt, Direction::Outgoing),
         None => (0..g.node_count()).collect::<Vec<u32>>().into(),
     };
     let lang_ids: Vec<ValueId> = langs

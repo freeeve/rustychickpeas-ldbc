@@ -462,7 +462,7 @@ pub fn ic8_recent_replies(g: &GraphSnapshot, person: u32) -> Vec<(u32, i64)> {
         .collect()
 }
 
-/// IS6 — (forum, moderator) for a message. `roots` is the `chain_roots` array
+/// IS6 — (forum, moderator) for a message. `roots` is the `roots_via` array
 /// for `replyOf` (hoisted once by the caller); index it to get the message's
 /// root Post, then one `containerOf` hop to the forum.
 pub fn is6_forum_of_message(g: &GraphSnapshot, message: u32, roots: &[u32]) -> Option<(u32, u32)> {
@@ -929,7 +929,7 @@ pub fn run() -> Result<()> {
         .max_by_key(|&m| graph.prop(m, "ms").i64_or(0));
     let reply_roots = graph
         .rel_type("replyOf")
-        .map(|rt| graph.chain_roots(Direction::Outgoing, rt));
+        .map(|rt| graph.roots_via(rt, Direction::Outgoing));
     // IC11/IC12 params: the seed's home country and the seed_tag's TagClass.
     let seed_country = graph
         .neighbors_by_type(seeds.person, Direction::Outgoing, "isLocatedIn")

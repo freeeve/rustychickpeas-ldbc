@@ -303,7 +303,7 @@ pub(crate) fn q15_weighted_path(
             // Forest-root array for replyOf, built once; indexed lock-free in the
             // parallel fold below, so it replaces the per-worker root cache with no
             // per-node synchronization.
-            let reply_roots = g.chain_roots(Direction::Outgoing, t_reply);
+            let reply_roots = g.roots_via(t_reply, Direction::Outgoing);
             comments.par_fold(
                 FastMap::<(u32, u32), f64>::new,
                 |mut acc, c| {
@@ -369,7 +369,7 @@ pub(crate) fn q17_information_propagation(
     // takes one containerOf hop to the forum.
     let reply_roots = g
         .rel_type("replyOf")
-        .map(|rt| g.chain_roots(Direction::Outgoing, rt));
+        .map(|rt| g.roots_via(rt, Direction::Outgoing));
     let forum_of = |g: &GraphSnapshot, m: u32| -> Option<u32> {
         let root = match &reply_roots {
             Some(roots) => roots[m as usize],
