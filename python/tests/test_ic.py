@@ -260,7 +260,7 @@ def test_ic11_job_referral():
     b.add_relationship(3, 4, "isPartOf")
     b.add_relationship(2, 3, "orgPlace")
     b.add_relationship(1, 2, "workAt")
-    b.set_relationship_prop_i64(1, 2, "workAt", "wf", 2010)
+    b.set_relationship_prop(1, 2, "workAt", "wf", 2010)
     g = b.finalize()
     assert ic11.ic11_job_referral(g, 0, "X", 2030) == [(1, 2, 2010)]
 
@@ -275,7 +275,7 @@ def test_ic5_new_groups():
     b.add_node(["Post"], node_id=3)
     b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
     b.add_relationship(2, 1, "hasMember")
-    b.set_relationship_prop_i64(2, 1, "hasMember", "hd", 15)
+    b.set_relationship_prop(2, 1, "hasMember", "hd", 15)
     b.add_relationship(2, 3, "containerOf")
     b.add_relationship(1, 3, "hasCreator")
     g = b.finalize()
@@ -292,8 +292,8 @@ def test_ic7_recent_likers():
     b.add_node(["Post"], node_id=2)
     b.add_relationship(0, 1, "knows"); b.add_relationship(1, 0, "knows")
     b.add_relationship(0, 2, "hasCreator")
-    b.add_relationship(1, 2, "likes"); b.set_relationship_prop_i64(1, 2, "likes", "ld", 1000)
-    b.add_relationship(3, 2, "likes"); b.set_relationship_prop_i64(3, 2, "likes", "ld", 2000)
+    b.add_relationship(1, 2, "likes"); b.set_relationship_prop(1, 2, "likes", "ld", 1000)
+    b.add_relationship(3, 2, "likes"); b.set_relationship_prop(3, 2, "likes", "ld", 2000)
     g = b.finalize()
     assert ic7.ic7_recent_likers(g, 0) == [(3, 2000, 2, True), (1, 1000, 2, False)]
 

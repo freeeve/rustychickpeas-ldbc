@@ -324,7 +324,7 @@ def test_q11_friend_triangles():
     def knows(u, v, kd):
         for s, t in ((u, v), (v, u)):
             b.add_relationship(s, t, "knows")
-            b.set_relationship_prop_i64(s, t, "knows", "kd", kd)
+            b.set_relationship_prop(s, t, "knows", "kd", kd)
 
     knows(2, 3, 150)  # A-B
     knows(3, 4, 160)  # B-C
@@ -550,7 +550,7 @@ def test_q20_recruitment():
         b.add_relationship(u, v, rel)
     for person, year in [(2, 2010), (3, 2007), (4, 2012)]:
         b.add_relationship(person, 1, "studyAt")
-        b.set_relationship_prop_i64(person, 1, "studyAt", "cy", year)
+        b.set_relationship_prop(person, 1, "studyAt", "cy", year)
     g = b.finalize()
 
     studyat = q20.build_studyat(g)

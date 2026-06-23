@@ -133,6 +133,6 @@ def _build(v_text, e_path, props, params):
             b.add_relationship(su, du, "e")
             if params.weighted and len(parts) >= 3:
                 w = _try_float(parts[2], 1.0)
-                b.set_relationship_prop_f64(su, du, "e", "weight", w)
+                b.set_relationship_prop(su, du, "e", "weight", w)
 
     return Dataset(b.finalize(), params, vertex_of_node, node_of_vertex)

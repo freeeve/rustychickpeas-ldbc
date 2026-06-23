@@ -27,12 +27,12 @@ def _fixture():
 
     def amt(u, w, rel, ts, a):
         b.add_relationship(u, w, rel)
-        b.set_relationship_prop_i64(u, w, rel, "ts", ts)
-        b.set_relationship_prop_f64(u, w, rel, "amt", a)
+        b.set_relationship_prop(u, w, rel, "ts", ts)
+        b.set_relationship_prop(u, w, rel, "amt", a)
 
     def ts(u, w, rel, t):
         b.add_relationship(u, w, rel)
-        b.set_relationship_prop_i64(u, w, rel, "ts", t)
+        b.set_relationship_prop(u, w, rel, "ts", t)
 
     amt(A_MID, A_HUB, "transfer", 300, 800.0)   # reverse chain into the hub
     amt(A_UP, A_MID, "transfer", 200, 800.0)
