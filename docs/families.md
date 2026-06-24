@@ -4,25 +4,33 @@ Why these families, in what order, and how they fit rustychickpeas — a CSR /
 RoaringBitmap property-graph engine with **no query optimizer**, where every
 query is a hand-coded scan + traversal + aggregation.
 
-> **Status.** This is the original planning + rationale doc. All of it has shipped:
-> tasks **001–013 are implemented and validating** (IC 20/20 vs Kùzu, Graphalytics
-> 6/6 PASS vs reference, SPB 30/30 vs Oxigraph, FinBench TCR1–12 vs Kùzu) — see the
-> [README](../README.md) results tables. Remaining open work is the SPB **editorial
-> writes** (049–051, needs a core mutation API) and exposing the read primitives to
-> the **Python / wasm** surfaces (143/144).
+> **Status.** This is the original planning + rationale doc — kept for the *why*, not
+> the numbers. All of it has shipped: tasks **001–013 are implemented and validating**
+> (IC 20/20 vs Kùzu, Graphalytics 6/6 PASS vs reference, SPB 30/30 vs Oxigraph, FinBench
+> TCR1–12 vs Kùzu), and the read primitives are now exposed to the **Python** and
+> **wasm** surfaces too. For current numbers see the per-family benchmark pages
+> ([bench-bi](bench-bi.md) · [bench-interactive](bench-interactive.md) ·
+> [bench-graphalytics](bench-graphalytics.md) · [bench-spb](bench-spb.md) ·
+> [bench-finbench](bench-finbench.md)) — not the figures below, which predate the
+> query-optimization pass. Remaining open work is the SPB **editorial writes** (049–051,
+> needs a core mutation API).
 
-## Rationale (read from the SF1 head-to-head)
+## Rationale (the *early* SF1 head-to-head)
 
-The BI results split cleanly by query shape:
+> These figures are from the **first** BI head-to-head, before the query-optimization
+> pass — they motivated the family choices, they are not current results. The pass
+> since closed and *reversed* the scan gap: the native `aggregate` kernel now wins Q1
+> and Q2 too. See [bench-bi](bench-bi.md) for current numbers.
 
-- **Kùzu's vectorized columnar engine wins full-scan aggregations** — Q1 (~18×),
-  Q2 (~6×). Our row-at-a-time property scans can't beat a columnar reader here.
-- **Our adjacency index wins targeted traversal** — Q7 (~14×, starts from one
-  tag) and the recursive reply-chain walk Q12 (~130×).
+At the time, the BI results split by query shape:
 
-So the next families are chosen to (a) lean into the traversal strength instead
-of fighting the scan weakness, and (b) add the *standardized validation* the BI
-table currently lacks ("magnitudes preliminary").
+- **Kùzu's vectorized columnar engine won the full-scan aggregations** — Q1, Q2 —
+  where our row-at-a-time property scans couldn't beat a columnar reader.
+- **Our adjacency index won the targeted traversals** — Q7 (starts from one tag) and
+  the recursive reply-chain walk Q12.
+
+So the families were chosen to (a) lean into the traversal strength instead of fighting
+the (then) scan weakness, and (b) add the *standardized validation* the BI table lacked.
 
 ## Families
 
@@ -67,11 +75,11 @@ fix upstream" story as the relationship accessor and `dijkstra`. See `tasks/010`
 
 ## Architecture decision (prerequisite)
 
-`src/main.rs` is **2548 lines** — over our `<1000` worst-case guideline — and is a
-**binary**, so its `load_graph` + property helpers (`pi64`, `pstr`, `parse_ms`,
-`tag_by_name`, the `time_query` harness) cannot be imported by a sibling family.
+The original `src/main.rs` had grown past our `<1000`-line worst-case guideline and was
+a **binary**, so its `load_graph` + property/date helpers and the `time_query` harness
+couldn't be imported by a sibling family.
 
-Before adding families, extract `src/lib.rs`:
+This was resolved by extracting `src/lib.rs` (`tasks/001`):
 
 - `lib.rs` exposes the loader, `Stats`, the property/date helpers, and
   `time_query`.
