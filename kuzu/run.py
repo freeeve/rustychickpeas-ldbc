@@ -174,19 +174,6 @@ ORDER BY cnt DESC, name LIMIT 100
 """
 
 
-def q12_text():
-    d0 = datetime.date(2010, 7, 22)
-    return f"""
-MATCH (person:Person)
-OPTIONAL MATCH (person)-[:hasCreator]->(message:Message)-[:replyOf*0..30]->(post:Message)
-WHERE post.isComment = false AND message.hasContent = true AND message.length < 20
-  AND message.cdate > date('{d0}') AND post.lang IN ['ar', 'hu']
-WITH person, count(message) AS messageCount
-RETURN messageCount, count(person) AS personCount
-ORDER BY personCount DESC, messageCount DESC
-"""
-
-
 Q5 = """
 MATCH (tag:Tag {name: 'Abbas_I_of_Persia'})<-[:hasTag]-(message:Message)<-[:hasCreator]-(person:Person)
 OPTIONAL MATCH (message)<-[l:likes]-(:Person)
@@ -199,11 +186,17 @@ RETURN person.id AS pid, replyCount, likeCount, messageCount,
 ORDER BY score DESC, pid LIMIT 100
 """
 
+# Fair Q6: collapse to DISTINCT (person1, person2) before the 2-hop like expansion.
+# Each liker's received-like set is disjoint, so count(like) per liker summed over a
+# person1's distinct likers equals the original count(DISTINCT like) — value-identical,
+# without re-expanding the like-set once per (person1, message1) row.
 Q6 = """
-MATCH (tag:Tag {name: 'Arnold_Schwarzenegger'})<-[:hasTag]-(message1:Message)<-[:hasCreator]-(person1:Person)
-OPTIONAL MATCH (message1)<-[:likes]-(person2:Person)
-OPTIONAL MATCH (person2)-[:hasCreator]->(message2:Message)<-[like:likes]-(person3:Person)
-RETURN person1.id AS pid, count(DISTINCT like) AS authorityScore
+MATCH (tag:Tag {name: 'Arnold_Schwarzenegger'})<-[:hasTag]-(message1:Message)<-[:hasCreator]-(person1:Person),
+      (message1)<-[:likes]-(person2:Person)
+WITH DISTINCT person1, person2
+MATCH (person2)-[:hasCreator]->(:Message)<-[like:likes]-(:Person)
+WITH person1, count(like) AS auth
+RETURN person1.id AS pid, sum(auth) AS authorityScore
 ORDER BY authorityScore DESC, pid LIMIT 100
 """
 
@@ -259,8 +252,10 @@ def main():
     time_query(conn, "Q1 posting summary", Q1)
     time_query(conn, "Q2 tag evolution", q2_text())
     time_query(conn, "Q7 related topics", Q7)
-    # Q12's naive recursive-path translation is very slow in Kùzu; fewer runs.
-    time_query(conn, "Q12 message counts", q12_text(), runs=2)
+    # Q12's naive recursive replyOf*0..30 translation explodes (~63 s) — a strawman.
+    # The fair WCC reply-forest pipeline needs the Forum/containerOf schema, so it is
+    # timed in the faithful harness instead:  kuzu/time_bi_fair.py (db-sf1-faithful).
+    print("  Q12 message counts     -> fair WCC pipeline timed in kuzu/time_bi_fair.py")
     time_query(conn, "Q5 active posters", Q5)
     time_query(conn, "Q6 authoritative users", Q6)
 

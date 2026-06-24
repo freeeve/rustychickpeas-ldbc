@@ -55,37 +55,40 @@ the `where_via` projected-property filter landed in the core `aggregate` kernel.
 
 ## Kùzu head-to-head
 
-Re-benched on the *same* SF1 data (Kùzu 0.11.3, median of 5) against the rustychickpeas
-numbers above. The Kùzu harness covers the six faithful queries it can express on its
-`Message`/`Person` schema projection (Q1, Q2, Q5, Q6, Q7, Q12); the other 14 are
-rustychickpeas-only here and are omitted. Q1/Q2/Q5/Q6/Q7 are `kuzu/run.py`; Q12 uses the
-*fair* WCC formulation (`kuzu/time_q12_fair.py`) explained below, not the recursive strawman.
+Re-benched in **one process** (`kuzu/time_bi_fair.py`, Kùzu 0.11.3, median of 5) so the
+six queries are internally comparable — same warm cache, one connection — against the
+rustychickpeas numbers above. The harness covers the six faithful queries Kùzu can
+express on its `Message`/`Person` schema projection (Q1, Q2, Q5, Q6, Q7, Q12); the other
+14 are rustychickpeas-only here and are omitted. Q6 and Q12 use Kùzu's *fair* formulations
+(below), not the naive translations.
 
 | Query | rustychickpeas | Kùzu | winner |
 |-------|---------------:|-----:|--------|
-| Q1 posting summary | 2.8 ms | 3.66 ms | rustychickpeas |
-| Q2 tag evolution | 6.5 ms | 75.78 ms | rustychickpeas (12×) |
-| Q5 active posters | 0.4 ms | 29.11 ms | rustychickpeas |
-| Q6 authoritative users | 137 ms | 1373.70 ms | rustychickpeas (10×) |
-| Q7 related topics | 2.2 ms | 91.19 ms | rustychickpeas (41×) |
-| Q12 message histogram | 5.1 ms | ~3 s | rustychickpeas (~600×) |
+| Q1 posting summary | 2.8 ms | 3.1 ms | rustychickpeas |
+| Q2 tag evolution | 6.5 ms | 35 ms | rustychickpeas (~5×) |
+| Q5 active posters | 0.4 ms | 12 ms | rustychickpeas (~29×) |
+| Q6 authoritative users | 137 ms | 723 ms | rustychickpeas (~5×) |
+| Q7 related topics | 2.2 ms | 39 ms | rustychickpeas (~18×) |
+| Q12 message histogram | 5.1 ms | 1204 ms | rustychickpeas (~235×) |
 
-**Q12 is timed with Kùzu's best formulation, not a strawman.** The naive `replyOf*0..30`
-translation explodes to 62,905 ms (a downward-recursive variant is no better at 38,841 ms
-— variable-length path search is the wrong tool here). The ~3 s above (load-dependent,
-2.2–3.6 s; reproducible via `kuzu/time_q12_fair.py`) is Kùzu's fair expression: project
-the reply graph (`PROJECT_GRAPH`, ~5 ms — comparable to our native `roots_via`) and label
-thread-roots with one **WCC** pass (~0.6–1.2 s over 2.86 M messages), then histogram in
-Python — mirroring how our client precomputes the reply-forest. That's ~20–30× faster
-than the strawman; still a few-hundred× slower than our 5.1 ms, but an honest gap. A tuning pass confirmed the other rows aren't strawmen: Q6's 2-hop
-authority expansion is largely inherent (a `DISTINCT (person1, person2)` CTE trims only
-~13%), and Q2/Q7 are already well-planned (rewrites regressed them) — Q12 was the only
+**Q6 and Q12 use Kùzu's best formulation, not strawmen.** Q12's naive `replyOf*0..30`
+translation explodes to 62,905 ms (a downward-recursive variant is no better, 38,841 ms —
+variable-length path search is the wrong tool). The 1,204 ms above is Kùzu's fair
+expression: project the reply graph (`PROJECT_GRAPH`, ~8 ms — comparable to our native
+`roots_via`) and label thread-roots with one **WCC** pass (~340 ms over 2.86 M messages),
+then histogram in Python — mirroring how our client precomputes the reply-forest. WCC
+isn't even the bottleneck; the 1.16 M-row qualifying-message scan + Python reduction
+dominate. That's ~50× faster than the strawman, still ~235× slower than our 5.1 ms, but
+honest. Q6 uses the tuned `DISTINCT (person1, person2)` CTE — its 2-hop authority
+expansion is largely inherent, so the rewrite trims only ~13%. Q2/Q7 are already
+well-planned (rewrites regressed them; `get_execution_time()` ≈ wall). Q12 was the only
 unfairly-naive query.
 
-> **Honesty caveat.** Kùzu is multi-threaded and ships a real query optimizer; our
-> queries are single-threaded hand-coded scans. Both runs were taken on the same Apple
-> M3 Max with **~3–4 cores of background load**, so absolute magnitudes drift run-to-run
-> — read the comparison as order-of-magnitude, not to two significant figures.
+> **Honesty caveat.** Kùzu is multi-threaded and ships a real query optimizer; our queries
+> are single-threaded hand-coded scans. This run was on a heavily-loaded Apple M3 Max
+> (loadavg ~9–10), though run-to-run variance was small — read the comparison as
+> order-of-magnitude, not to two significant figures. Reproduce with
+> `.venv-kuzu/bin/python kuzu/time_bi_fair.py`.
 
 ## Validation
 
