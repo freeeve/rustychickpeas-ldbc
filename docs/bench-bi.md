@@ -69,19 +69,20 @@ express on its `Message`/`Person` schema projection (Q1, Q2, Q5, Q6, Q7, Q12); t
 | Q5 active posters | 0.4 ms | 12 ms | rustychickpeas (~29×) |
 | Q6 authoritative users | 137 ms | 723 ms | rustychickpeas (~5×) |
 | Q7 related topics | 2.2 ms | 39 ms | rustychickpeas (~18×) |
-| Q12 message histogram | 5.1 ms | 1204 ms | rustychickpeas (~235×) |
+| Q12 message histogram | 5.1 ms | ~1.05 s | rustychickpeas (~210×) |
 
 **Q6 and Q12 use Kùzu's best formulation, not strawmen.** Q12's naive `replyOf*0..30`
 translation explodes to 62,905 ms (a downward-recursive variant is no better, 38,841 ms —
-variable-length path search is the wrong tool). The 1,204 ms above is Kùzu's fair
+variable-length path search is the wrong tool). The ~1.05 s above is Kùzu's fair
 expression: project the reply graph (`PROJECT_GRAPH`, ~8 ms — comparable to our native
 `roots_via`) and label thread-roots with one **WCC** pass (~340 ms over 2.86 M messages),
-then histogram in Python — mirroring how our client precomputes the reply-forest. WCC
-isn't even the bottleneck; the 1.16 M-row qualifying-message scan + Python reduction
-dominate. That's ~50× faster than the strawman, still ~235× slower than our 5.1 ms, but
-honest. (Doing the per-person count server-side — a `CompLabel` component-label join
-rather than a pandas reduce — cuts the *warm* steady-state to ~560 ms; the cold figure
-here is at its floor, since the WCC-label round-trip offsets the saving.) Q6 uses the tuned `DISTINCT (person1, person2)` CTE — its 2-hop authority
+then reduce in numpy — mirroring how our client precomputes the reply-forest. WCC isn't
+even the bottleneck; the cold path is dominated by the Kùzu fetch of the 1.16 M-row
+qualifying set (~510 ms) + WCC (~340 ms), with the numpy reduce only ~220 ms (pandas was
+~320). That's ~50× faster than the strawman, still ~210× slower than our 5.1 ms, but
+honest. (Doing the per-person count server-side — a `CompLabel` component-label join —
+cuts the *warm* steady-state to ~560 ms; the cold figure is fetch- and WCC-bound, at its
+floor.) Q6 uses the tuned `DISTINCT (person1, person2)` CTE — its 2-hop authority
 expansion is largely inherent, so the rewrite trims only ~13%. Q2/Q7 are already
 well-planned (rewrites regressed them; `get_execution_time()` ≈ wall). Q12 was the only
 unfairly-naive query.

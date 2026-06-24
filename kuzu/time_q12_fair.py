@@ -7,11 +7,13 @@ pathological ``replyOf*0..30`` recursion (which explodes to ~63 s upward / ~39 s
 downward). Reports two operating points:
 
   (a) apples-to-apples : projection + WCC label pass + reduction, forest rebuilt each
-                         call. The 2.86 M WCC labels are pulled to pandas once and the
-                         per-person reduction over the 1.16 M qualifying messages is
-                         done in pandas. This is WCC + scan bound (~1.1 s) — pushing the
-                         reduction into Kùzu does not help here (the label round-trip
-                         costs as much as it saves), so the cold path stays in pandas.
+                         call. The WCC labels are pulled once and the per-person
+                         reduction over the 1.16 M qualifying messages is done in numpy
+                         (membership via searchsorted into the small ar/hu-thread mid
+                         set + np.unique/np.bincount) — ~1.45x faster than the pandas
+                         hash-join it replaced. This is WCC + scan bound (~1.0 s);
+                         pushing the reduction into Kùzu does not help the cold path
+                         (the label round-trip costs as much as it saves).
   (b) steady-state     : projection / WCC labels cached. The labels live in a Kùzu side
                          table (``CompLabel``) and the reduction runs *inside* Kùzu — a
                          server-side join + GROUP BY that ships only the ~3.9 k per-person
@@ -34,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 if len(sys.argv) < 3:
     sys.argv = [sys.argv[0], "/tmp", "sf1"]  # run_faithful reads argv at import time
+import numpy as np  # noqa: E402
 import kuzu  # noqa: E402
 import run_faithful as rf  # noqa: E402
 
@@ -90,18 +93,38 @@ def histogram(permsg, total):
     return sorted(([mc, pc] for mc, pc in hist.items()), key=lambda r: (-r[1], -r[0]))
 
 
-def steady_pandas(conn, compmap, total):
-    """Cold (a) reduction: pull qualifying rows, join the labels in pandas.
+def _membership(haystack_sorted, probe):
+    """Vectorised ``probe in haystack`` via searchsorted into a small sorted array
+    (far more cache-friendly than probing the full 2.86 M label map)."""
+    idx = np.minimum(np.searchsorted(haystack_sorted, probe), len(haystack_sorted) - 1)
+    return haystack_sorted[idx] == probe
+
+
+def steady_cold(conn, mid_all, comp_all, comp_max, total):
+    """Cold (a) reduction: fetch the (unchanged) sub-queries, reduce in numpy.
+
+    The ar/hu component set comes from the root posts; qualifying messages whose
+    component is in that set are masked via membership against the small (~64 k)
+    ar/hu-thread mid set; per-person counts via ``np.unique`` and the histogram via
+    ``np.bincount`` — no 2.86 M-row pandas hash-join rebuilt on every call.
     Returns (kuzu_ms, python_ms, rows)."""
     tk = time.time()
-    a = conn.execute(SUB_ROOT).get_as_df()
-    b = conn.execute(SUB_QUAL).get_as_df()
+    root_mid = conn.execute(SUB_ROOT).get_as_df()["mid"].to_numpy()
+    bq = conn.execute(SUB_QUAL).get_as_df()
+    qual_mid, qual_pid = bq["mid"].to_numpy(), bq["pid"].to_numpy()
     kuzu_ms = (time.time() - tk) * 1000
+
     tp = time.time()
-    arhu = set(a.merge(compmap, on="mid")["comp"])
-    b = b.merge(compmap, on="mid")
-    permsg = b[b["comp"].isin(arhu)].groupby(b["pid"].astype("int64")).size().to_dict()
-    rows = histogram(permsg, total)
+    is_root = _membership(np.sort(root_mid), mid_all)
+    arhu_mask = np.zeros(comp_max + 1, dtype=bool)
+    arhu_mask[comp_all[is_root]] = True
+    thread_mids = np.sort(mid_all[arhu_mask[comp_all]])      # mids in ar/hu threads
+    keep = _membership(thread_mids, qual_mid)
+    _, counts = np.unique(qual_pid[keep], return_counts=True)
+    hb = np.bincount(counts) if len(counts) else np.zeros(1, dtype=np.int64)
+    hb[0] += total - len(counts)                            # the zero bucket
+    rows = [[int(c), int(hb[c])] for c in range(len(hb)) if hb[c] > 0]
+    rows.sort(key=lambda r: (-r[1], -r[0]))
     return kuzu_ms, (time.time() - tp) * 1000, rows
 
 
@@ -147,10 +170,13 @@ def q12_fair(database, runs=5):
         t = time.time()
         compmap = _wcc_compmap(conn)
         wcc.append((time.time() - t) * 1000)
+    mid_all = compmap["mid"].to_numpy()
+    comp_all = compmap["comp"].to_numpy()
+    comp_max = int(comp_all.max())
 
     ks, ps, rows = [], [], None
     for _ in range(runs):
-        k, p, rows = steady_pandas(conn, compmap, total)
+        k, p, rows = steady_cold(conn, mid_all, comp_all, comp_max, total)
         ks.append(k)
         ps.append(p)
 
@@ -167,15 +193,15 @@ def q12_fair(database, runs=5):
     assert len(rows) == len(rows_b) == 86, f"parity broke: {len(rows)} / {len(rows_b)}"
 
     m_proj, m_wcc = statistics.median(proj), statistics.median(wcc)
-    m_pandas = statistics.median([k + p for k, p in zip(ks, ps)])
+    m_cold = statistics.median([k + p for k, p in zip(ks, ps)])
     m_server = statistics.median(srv)
     return {
         "proj_ms": m_proj, "proj_min": min(proj),
         "wcc_ms": m_wcc, "wcc_min": min(wcc), "n_nodes": len(compmap),
-        "steady_pandas_ms": m_pandas,
+        "steady_cold_ms": m_cold,
         "steady_kuzu_ms": statistics.median(ks), "steady_py_ms": statistics.median(ps),
         "steady_server_ms": m_server, "server_min": min(srv), "n_persons": n_persons,
-        "a_ms": m_proj + m_wcc + m_pandas,   # cold, forest rebuilt, pandas reduce
+        "a_ms": m_proj + m_wcc + m_cold,     # cold, forest rebuilt, numpy reduce
         "b_ms": m_server,                    # warm, labels cached, server-side reduce
         "buckets": len(rows), "rows": rows,
     }
@@ -187,8 +213,8 @@ def main():
     print(f"=== Kùzu {kuzu.__version__}  fair Q12  (db-sf1-faithful, median of {runs}) ===")
     print(f"  PROJECT_GRAPH('rg')                {r['proj_ms']:8.1f} ms  (min {r['proj_min']:.1f})")
     print(f"  WCC -> component map ({r['n_nodes']} nodes) {r['wcc_ms']:8.1f} ms  (min {r['wcc_min']:.1f})")
-    print(f"  cold reduce (pandas)               {r['steady_pandas_ms']:8.1f} ms"
-          f"  [Kùzu {r['steady_kuzu_ms']:.1f} + Python {r['steady_py_ms']:.1f}]")
+    print(f"  cold reduce (numpy)                {r['steady_cold_ms']:8.1f} ms"
+          f"  [Kùzu fetch {r['steady_kuzu_ms']:.1f} + numpy {r['steady_py_ms']:.1f}]")
     print(f"  steady reduce (server-side join)   {r['steady_server_ms']:8.1f} ms"
           f"  (min {r['server_min']:.1f}, {r['n_persons']} persons to Python)")
     print(f"  (a) apples-to-apples (forest rebuilt)    = {r['a_ms']:.1f} ms")
