@@ -17,7 +17,7 @@ per-family numbers, methodology, and reference-engine head-to-heads live in dedi
 | **Interactive (IC/IS)** | IC1–IC14 complex + IS1–IS7 short reads (SF1) | **20/20 value-identical vs Kùzu** | [docs/bench-interactive.md](docs/bench-interactive.md) |
 | **Graphalytics** | BFS · PageRank · WCC · CDLP · LCC · SSSP | **PASS vs official reference outputs** | [docs/bench-graphalytics.md](docs/bench-graphalytics.md) |
 | **SPB** | 30 SPARQL queries hand-translated to traversals (3.85 M triples) | **30/30 value-identical vs Oxigraph** | [docs/bench-spb.md](docs/bench-spb.md) |
-| **FinBench** | 12 Transaction Complex Reads (SF10) | value cross-checked vs Kùzu | [docs/bench-finbench.md](docs/bench-finbench.md) |
+| **FinBench** | 12 Transaction Complex Reads (SF10) | Rust-unit-tested; Kùzu value cross-check in progress | [docs/bench-finbench.md](docs/bench-finbench.md) |
 | **Python suite** | all five families through the Python bindings | parity vs Rust refs | [python/README.md](python/README.md) |
 
 The honesty caveat carries throughout: **correctness is cross-checked; magnitudes are

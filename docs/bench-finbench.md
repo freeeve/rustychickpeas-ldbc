@@ -31,11 +31,13 @@ output in ~13.5 s.
 
 ## Kùzu head-to-head
 
-Re-benched on SF10: `.venv-kuzu/bin/python kuzu/finbench_queries.py kuzu/db-finbench-sf10`
-(Kùzu 0.11.3, median of 7). Both sides pick the highest-degree seeds the same way, so
-every TCR is comparable; the Kùzu driver inlines window bounds as literals and unrolls
-CR2's reverse-reachability into explicit hops (its recursive engine explodes on hub
-accounts — see the harness notes).
+> **⚠ Being rebuilt — the table below is *not* value-comparable.** An audit found the two
+> sides used *different* seeds (Rust a Both-degree account, Kùzu an Outgoing-degree one;
+> several TCRs anchored on different nodes) and the Kùzu Cypher was *over-simplified* for
+> several TCRs (1-hop counts where Rust does a 3-hop trace), plus two recursive strawmen
+> (CR1, CR11). So it compared *different work*. A faithful, seed-aligned, value-verified
+> Kùzu comparison is being built (Rust value-emit + aligned seeds + faithful Cypher +
+> a `compare.py`); treat the numbers below as not comparable until then.
 
 | Query | rustychickpeas | Kùzu | winner |
 |-------|---------------:|-----:|--------|
@@ -59,11 +61,12 @@ rustychickpeas wins every row. CR4 (the 3-cycle) is the widest gap: Kùzu materi
 
 > **Honesty caveat.** Kùzu is multi-threaded with an optimizer; our queries are
 > single-threaded traversals. Both runs are on the same Apple M3 Max with ~3–4 cores of
-> background load, and seeds/windows differ slightly (so result counts differ) — read the
-> times as order-of-magnitude. The durable result is the value-for-value cross-check
-> below.
+> background load. As flagged above, the seeds + Cypher are **not aligned**, so this is
+> not a value-comparable head-to-head — the faithful version is in progress.
 
 ## Validation
 
-All 12 TCRs are implemented and cross-checked value-for-value against Kùzu on SF10 (see
-[finbench-results.md](finbench-results.md) and `tests/finbench_queries.rs`).
+The 12 TCRs are implemented and **Rust-unit-tested** (`tests/finbench_queries.rs`). A
+**value-for-value cross-check against Kùzu is in progress** — an audit found the earlier
+"cross-checked vs Kùzu" claim unsubstantiated (no value cross-check existed, and the two
+sides used different seeds). See [finbench-results.md](finbench-results.md).
