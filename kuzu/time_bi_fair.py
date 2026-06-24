@@ -87,10 +87,11 @@ def main():
         all_ok &= ok
         print(f"  {name:<{w}}   {ms:>10.2f}   {result:<11} {'OK' if ok else 'FAIL'}")
 
-    print(f"\n  Q12 (a) breakdown: projection {q12['proj_ms']:.1f} ms + WCC {q12['wcc_ms']:.1f} ms "
-          f"+ steady {q12['steady_ms']:.1f} ms")
-    print(f"                     steady = Kùzu {q12['steady_kuzu_ms']:.1f} ms + Python {q12['steady_py_ms']:.1f} ms"
-          f" ; (b) steady-only = {q12['b_ms']:.1f} ms")
+    print(f"\n  Q12 (a) cold = projection {q12['proj_ms']:.1f} ms + WCC {q12['wcc_ms']:.1f} ms "
+          f"+ pandas reduce {q12['steady_pandas_ms']:.1f} ms "
+          f"(Kùzu {q12['steady_kuzu_ms']:.1f} + Python {q12['steady_py_ms']:.1f}) = {q12['a_ms']:.1f} ms")
+    print(f"  Q12 (b) steady-state: labels cached in Kùzu, server-side join+GROUP BY "
+          f"({q12['n_persons']} persons to Python) = {q12['steady_server_ms']:.1f} ms")
     print(f"\n  PARITY: {'ALL OK' if all_ok else 'FAILURES PRESENT'}")
     return 0 if all_ok else 1
 

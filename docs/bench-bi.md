@@ -79,7 +79,9 @@ expression: project the reply graph (`PROJECT_GRAPH`, ~8 ms — comparable to ou
 then histogram in Python — mirroring how our client precomputes the reply-forest. WCC
 isn't even the bottleneck; the 1.16 M-row qualifying-message scan + Python reduction
 dominate. That's ~50× faster than the strawman, still ~235× slower than our 5.1 ms, but
-honest. Q6 uses the tuned `DISTINCT (person1, person2)` CTE — its 2-hop authority
+honest. (Doing the per-person count server-side — a `CompLabel` component-label join
+rather than a pandas reduce — cuts the *warm* steady-state to ~560 ms; the cold figure
+here is at its floor, since the WCC-label round-trip offsets the saving.) Q6 uses the tuned `DISTINCT (person1, person2)` CTE — its 2-hop authority
 expansion is largely inherent, so the rewrite trims only ~13%. Q2/Q7 are already
 well-planned (rewrites regressed them; `get_execution_time()` ≈ wall). Q12 was the only
 unfairly-naive query.
