@@ -55,11 +55,11 @@ the `where_via` projected-property filter landed in the core `aggregate` kernel.
 
 ## Kùzu head-to-head
 
-Re-benched on the *same* SF1 data: `.venv-kuzu/bin/python kuzu/run.py <initial_snapshot>
-sf1` (Kùzu 0.11.3, median of 5) against the rustychickpeas numbers above. The Kùzu
-harness covers the six faithful queries it can express on its `Message`/`Person` schema
-projection (Q1, Q2, Q5, Q6, Q7, Q12); the other 14 are rustychickpeas-only here and are
-omitted.
+Re-benched on the *same* SF1 data (Kùzu 0.11.3, median of 5) against the rustychickpeas
+numbers above. The Kùzu harness covers the six faithful queries it can express on its
+`Message`/`Person` schema projection (Q1, Q2, Q5, Q6, Q7, Q12); the other 14 are
+rustychickpeas-only here and are omitted. Q1/Q2/Q5/Q6/Q7 are `kuzu/run.py`; Q12 uses the
+*fair* WCC formulation (`kuzu/time_q12_fair.py`) explained below, not the recursive strawman.
 
 | Query | rustychickpeas | Kùzu | winner |
 |-------|---------------:|-----:|--------|
@@ -68,10 +68,19 @@ omitted.
 | Q5 active posters | 0.4 ms | 29.11 ms | rustychickpeas |
 | Q6 authoritative users | 137 ms | 1373.70 ms | rustychickpeas (10×) |
 | Q7 related topics | 2.2 ms | 91.19 ms | rustychickpeas (41×) |
-| Q12 message histogram | 5.1 ms | 62905.57 ms | rustychickpeas (12000×) |
+| Q12 message histogram | 5.1 ms | ~3 s | rustychickpeas (~600×) |
 
-Q12 is the outlier: Kùzu's naive recursive-path translation (`replyOf*0..30`) explodes,
-where our `where_via` projected-property filter walks the reply chain directly.
+**Q12 is timed with Kùzu's best formulation, not a strawman.** The naive `replyOf*0..30`
+translation explodes to 62,905 ms (a downward-recursive variant is no better at 38,841 ms
+— variable-length path search is the wrong tool here). The ~3 s above (load-dependent,
+2.2–3.6 s; reproducible via `kuzu/time_q12_fair.py`) is Kùzu's fair expression: project
+the reply graph (`PROJECT_GRAPH`, ~5 ms — comparable to our native `roots_via`) and label
+thread-roots with one **WCC** pass (~0.6–1.2 s over 2.86 M messages), then histogram in
+Python — mirroring how our client precomputes the reply-forest. That's ~20–30× faster
+than the strawman; still a few-hundred× slower than our 5.1 ms, but an honest gap. A tuning pass confirmed the other rows aren't strawmen: Q6's 2-hop
+authority expansion is largely inherent (a `DISTINCT (person1, person2)` CTE trims only
+~13%), and Q2/Q7 are already well-planned (rewrites regressed them) — Q12 was the only
+unfairly-naive query.
 
 > **Honesty caveat.** Kùzu is multi-threaded and ships a real query optimizer; our
 > queries are single-threaded hand-coded scans. Both runs were taken on the same Apple
