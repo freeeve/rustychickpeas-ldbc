@@ -16,14 +16,17 @@ per-family numbers, methodology, and reference-engine head-to-heads live in dedi
 | **BI** | 20 faithful analytical queries + 5 simplified patterns (SF1) | value-identical vs Kùzu on the cross-checkable subset | [docs/bench-bi.md](docs/bench-bi.md) |
 | **Interactive (IC/IS)** | IC1–IC14 complex + IS1–IS7 short reads (SF1) | **20/20 value-identical vs Kùzu** | [docs/bench-interactive.md](docs/bench-interactive.md) |
 | **Graphalytics** | BFS · PageRank · WCC · CDLP · LCC · SSSP | **PASS vs official reference outputs** | [docs/bench-graphalytics.md](docs/bench-graphalytics.md) |
-| **SPB** | 30 SPARQL queries hand-translated to traversals (3.85 M triples) | **30/30 value-identical vs Oxigraph** | [docs/bench-spb.md](docs/bench-spb.md) |
+| **SPB** | 30 SPARQL queries hand-translated to traversals (3.85 M triples) | **30/30 vs Oxigraph** (hand-adapted SPARQL) | [docs/bench-spb.md](docs/bench-spb.md) |
 | **FinBench** | 12 Transaction Complex Reads (SF10) | Rust-unit-tested; Kùzu value cross-check in progress | [docs/bench-finbench.md](docs/bench-finbench.md) |
 | **Python suite** | all five families through the Python bindings | parity vs Rust refs | [python/README.md](python/README.md) |
 
 The honesty caveat carries throughout: **correctness is cross-checked; magnitudes are
 preliminary** — single-threaded, often on a loaded machine, vs multi-threaded reference
-engines. Graphalytics and SPB are the strongest: they validate value-for-value against an
-independent reference (LDBC reference outputs / Oxigraph SPARQL), not just result shape.
+engines. Validation strength varies by family (each was audited): **Graphalytics** is the gold
+standard — the *standardized* LDBC reference outputs; **BI** and **IC** value-cross-check
+against Kùzu with faithful, query-by-query-verified Cypher (20/20 each); **SPB** matches
+Oxigraph 30/30 but on hand-*adapted* SPARQL co-designed to mirror our modeling; **FinBench**
+is Rust-tested with its Kùzu comparison being rebuilt (it was timing-only). Per-page detail.
 Each query is hand-coded — there is no query optimizer, so the timings reflect
 rustychickpeas doing the actual scan + traversal + aggregation.
 

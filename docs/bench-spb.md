@@ -17,18 +17,26 @@ below are a fresh `spb_parity` run (median of 5).
 
 ## Scale & validation — 30/30 value-identical vs Oxigraph
 
-`scripts/spb_parity.py` runs the original SPARQL against a local
+`scripts/spb_parity.py` runs **hand-adapted** SPARQL (mirroring our hand-translation's
+modeling — *not* the verbatim LDBC SPB templates) against a local
 [Oxigraph](https://github.com/oxigraph/oxigraph) store over the *same* 3.85 M-triple
-extract and diffs row-for-row against our results — every query (q1–q9, a1–a25)
-**MATCHES**. This is the strongest correctness signal in the suite: value-identity against
-an independent SPARQL engine, not a shape check.
+extract and diffs row-for-row — **30/30 MATCH**. Oxigraph independently recomputes every
+join / GROUP BY / aggregation with the same parameters, so this is a strong, params-aligned
+second-engine check of the **query mechanics**. Two honest limits: because the SPARQL was
+co-designed to match our modeling, *shared* modeling choices (e.g. `tag → about ∪ mentions`,
+and a whole-word full-text approximation of SPB's true `CONTAINS`/Lucene) aren't
+independently validated; and the two signature core-driver queries — **q6 (geo)** and
+**q8 (full-text)** — are *not* in the Oxigraph 30, but cross-checked by a separate Python
+reference (`scripts/spb_crosscheck.py`). The 30/30 is recorded in the run output but is
+**not yet reproducible from committed artifacts** (the Oxigraph store + result dumps are
+gitignored).
 
 Indicative timings (median of 5, M3 Max):
 
 | Query | Time | Rows | | Query | Time | Rows |
 |-------|-----:|-----:|-|-------|-----:|-----:|
 | q1 minute histogram | 1.0 ms | 9457 | | a5 about-entity | 21 ms | 108476 |
-| q9 fulltext union | 3.8 ms | 9462 | | a13 tag pairs | 45 ms | 336315 |
+| q9 shared-tag relatedness | 3.8 ms | 9462 | | a13 tag pairs | 45 ms | 336315 |
 | q5 date window | 5.8 ms | 7898 | | a25 relatedness | 7.2 ms | 47499 |
 
 (full 30-query table: the parity-script output + `results/spb.parity.rust.json`.)
