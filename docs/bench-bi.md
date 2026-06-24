@@ -55,12 +55,15 @@ the `where_via` projected-property filter landed in the core `aggregate` kernel.
 
 ## Kùzu head-to-head
 
-Re-benched in **one process** (`kuzu/time_bi_fair.py`, Kùzu 0.11.3, median of 5) so the
-six queries are internally comparable — same warm cache, one connection — against the
-rustychickpeas numbers above. The harness covers the six faithful queries Kùzu can
-express on its `Message`/`Person` schema projection (Q1, Q2, Q5, Q6, Q7, Q12); the other
-14 are rustychickpeas-only here and are omitted. Q6 and Q12 use Kùzu's *fair* formulations
-(below), not the naive translations.
+**Kùzu expresses and matches all 20 faithful BI queries value-for-value** (see
+[Validation](#validation)) — this is not a cherry-picked subset. The six below are an
+*indicative speed sample*, re-benched in one warm process (`kuzu/time_bi_fair.py`, Kùzu
+0.11.3, median of 5) at moderate load, with Q6 and Q12 in Kùzu's *fair* formulations
+(below), not the naive translations. The full 20-query fair speed table (harness
+`kuzu/time_bi_all.py`, all five reply-tree queries WCC-rewritten — Q17 alone went
+161 s → 2.2 s) awaits an *unloaded* run: every window this session sat at loadavg ~9–11,
+which inflates Kùzu's multi-threaded numbers ~2× and is no basis for precise per-query
+speed.
 
 | Query | rustychickpeas | Kùzu | winner |
 |-------|---------------:|-----:|--------|
@@ -95,11 +98,14 @@ unfairly-naive query.
 
 ## Validation
 
-The faithful Q1–Q20 are cross-checked **value-identical vs Kùzu** on the
-cross-checkable subset; Q8/Q11/Q19/Q20 are rustychickpeas-only in the head-to-head
-(Neo4j pattern comprehensions / schema not loaded on the Kùzu side). Q1 was recently
-restored to its 12-group result after a loader/reader type mismatch (`content` stored
-as i64 but read as bool) silently emptied it — fixed in `01a320b`.
+**All 20 faithful Q1–Q20 are value-identical vs Kùzu** — every query expressed and
+cross-checked row-for-row against the rustychickpeas reference dumps
+(`python/refs/q*.rust.json`), no exceptions. 13 run as a single Cypher query; the five
+reply-tree queries (Q3/Q4/Q9/Q12/Q17) plus Q13/Q14/Q16 have Kùzu do the graph work and a
+small host step do what Kùzu 0.11 Cypher can't express. (Earlier docs called
+Q8/Q11/Q19/Q20 "rustychickpeas-only"; that's resolved — Kùzu matches all four.) Q1 was
+recently restored to its 12-group result after a loader/reader type mismatch (`content`
+stored as i64 but read as bool) silently emptied it — fixed in `01a320b`.
 
 ## What these queries drove into core
 
