@@ -208,7 +208,9 @@ def main():
         for name, q in queries.items():
             rows = project(name, run(q))
             with open(f"{emit}/{name}.kuzu.json", "w") as f:
-                json.dump(rows, f, default=int)  # coerce Kùzu Decimal aggregates to int
+                # compact, canonical separators keep the committed dumps small and
+                # byte-stable across re-runs; default=int coerces Kùzu Decimal aggregates.
+                json.dump(rows, f, separators=(",", ":"), default=int)
             print(f"  emitted {name}.kuzu.json ({len(rows)} rows)")
         return
 

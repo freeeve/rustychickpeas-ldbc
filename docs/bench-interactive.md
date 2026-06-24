@@ -88,6 +88,21 @@ are direct adjacency iteration with no plan to build.
 with the matching rels — additive, so BI stays 20/20 identical. Only IS4 (content text,
 kept out of the shared faithful import to keep BI loads lean) is not cross-checked.
 
+**Reproduce from committed artifacts (no DB, no engine).** Both sides of every pair are
+committed under `python/refs/` — the Rust reference (`icN.rust.json`) and the matching
+Kùzu dump (`icN.kuzu.json`, regenerable via `kuzu/run_ic.py --emit-json python/refs`
+against `db-sf1-faithful`). Re-verify the full 20/20 with a single file-only diff:
+
+```sh
+python3 kuzu/compare.py python/refs \
+  ic1 ic2 ic3 ic4 ic5 ic6 ic7 ic8 ic9 ic10 ic11 ic12 ic13 ic14 \
+  is1 is2 is3 is5 is6 is7
+# -> ALL PASS (20/20)
+```
+
+`compare.py` only reads JSON (sorts rows canonically, so ordering never matters); it
+touches no database and loads no engine, so the cross-check runs anywhere the repo does.
+
 ## What these queries drove into core
 
 IC mostly reused capabilities BI had already driven (IC13/IC14 ≈ the `dijkstra` from
