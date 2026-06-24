@@ -17,6 +17,49 @@ use rustychickpeas_ldbc::{finbench, harness};
 static GLOBAL: rustychickpeas_ldbc::alloc_count::CountingAlloc =
     rustychickpeas_ldbc::alloc_count::CountingAlloc;
 
+/// Re-read the `id` column of every `.csv` in `dir` (sorted, matching the loader's
+/// file order) so the emit can map dense internal NodeIds back to original FinBench
+/// ids. Additive helper for the cross-check emit only — not on the timing path.
+fn read_ids(dir: &std::path::Path) -> Vec<i64> {
+    let mut ids = Vec::new();
+    if !dir.exists() {
+        return ids;
+    }
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    files.retain(|p| p.extension().and_then(|s| s.to_str()) == Some("csv"));
+    files.sort();
+    for path in files {
+        if let Ok(mut rdr) = csv::ReaderBuilder::new()
+            .delimiter(b'|')
+            .has_headers(true)
+            .flexible(true)
+            .from_path(&path)
+        {
+            let i = rdr
+                .headers()
+                .ok()
+                .and_then(|h| h.iter().position(|c| c == "id"))
+                .unwrap_or(0);
+            for rec in rdr.records().flatten() {
+                ids.push(rec.get(i).and_then(|s| s.parse().ok()).unwrap_or(0));
+            }
+        }
+    }
+    ids
+}
+
+/// Build the flat `nid -> originalId` map by re-reading the node CSVs in the exact
+/// order `load_finbench` assigns ids (account, person, company, medium, loan).
+fn orig_id_map(raw: &std::path::Path) -> Vec<i64> {
+    let mut m = Vec::new();
+    for t in ["account", "person", "company", "medium", "loan"] {
+        m.extend(read_ids(&raw.join(t)));
+    }
+    m
+}
+
 fn main() {
     // Optional flags mirror the IC bin: --only <id> (e.g. cr5), --repeat <n>,
     // --alloc. The first non-flag arg is the raw/ data dir.
@@ -68,13 +111,13 @@ fn main() {
         }
     }
 
-    run_queries(&g);
+    run_queries(&g, Path::new(&dir));
 }
 
 /// Pick representative seeds (highest transfer degree / guarantee degree) and run
 /// + time the four transaction-tracing queries (timing-only — no published
 /// comparison implied).
-fn run_queries(g: &GraphSnapshot) {
+fn run_queries(g: &GraphSnapshot, raw: &Path) {
     let win = 90 * 86_400_000i64;
 
     // Accounts sorted by transfer degree (descending) — the seed pool.
@@ -162,6 +205,67 @@ fn run_queries(g: &GraphSnapshot) {
         finbench::guarantee_exposure(g, seed_person),
         finbench::cr12(g, owner, ws, we, 10_000, to).len(),
     );
+
+    // Cross-check emit (additive; mirrors BI's LDBC_EMIT_JSON). Dumps each TCR's
+    // full result as canonical JSON in *original* FinBench ids, plus the seeds /
+    // windows used, so the Kùzu side can anchor on the same instances and
+    // kuzu/finbench_compare.py can diff sorted rows. Skips the timing block.
+    if let Ok(dir) = std::env::var("FINBENCH_EMIT_JSON") {
+        let id = orig_id_map(raw);
+        let oid = |n: u32| *id.get(n as usize).unwrap_or(&-1);
+        let r3 = |x: f64| {
+            let v = (x * 1000.0).round() / 1000.0;
+            format!("{v:.3}")
+        };
+        let arr = |v: Vec<String>| format!("[{}]", v.join(","));
+        let idseq = |p: &[u32]| {
+            p.iter()
+                .map(|&n| oid(n).to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+
+        let c1 = finbench::cr1(g, cr1_seed, ws, we, 10_000, false);
+        harness::emit_json(&dir, "cr1.rust.json", arr(c1.iter()
+            .map(|&(o, d, m, t)| format!("[{},{},{},{}]", oid(o), d, oid(m), harness::jstr(t))).collect()));
+        let c2 = finbench::cr2(g, owner, ws, we, 10_000, false);
+        harness::emit_json(&dir, "cr2.rust.json", arr(c2.iter()
+            .map(|&(a, x, y)| format!("[{},{},{}]", oid(a), r3(x), r3(y))).collect()));
+        let c3 = finbench::shortest_transfer_path(g, seed, dst, ws, we);
+        harness::emit_json(&dir, "cr3.rust.json", format!("[[{c3}]]"));
+        let c4 = finbench::transfer_cycles(g, cyc_seed, 1000.0, win);
+        harness::emit_json(&dir, "cr4.rust.json", arr(c4.iter()
+            .map(|cy| format!("[{}]", idseq(cy))).collect()));
+        let c5 = finbench::cr5(g, owner, ws, we, 10_000, "desc");
+        harness::emit_json(&dir, "cr5.rust.json", arr(c5.iter()
+            .map(|p| format!("[{}]", idseq(p))).collect()));
+        let c6 = finbench::cr6(g, card, 0.0, 0.0, ws, we, 10_000, "desc");
+        harness::emit_json(&dir, "cr6.rust.json", arr(c6.iter()
+            .map(|&(s, a, b)| format!("[{},{},{}]", oid(s), r3(a), r3(b))).collect()));
+        let c7 = finbench::cr7(g, seed, 0.0, ws, we, 10_000, to);
+        harness::emit_json(&dir, "cr7.rust.json", format!("[[{},{},{}]]", c7.0, c7.1, r3(c7.2)));
+        let c8 = finbench::cr8(g, loan_seed, 0.0, ws, we, 10_000, "desc");
+        harness::emit_json(&dir, "cr8.rust.json", arr(c8.iter()
+            .map(|&(d, r, dist)| format!("[{},{},{}]", oid(d), r3(r), dist)).collect()));
+        let c9 = finbench::cr9(g, seed, 0.0, ws, we, 10_000, false);
+        harness::emit_json(&dir, "cr9.rust.json",
+            format!("[[{},{},{}]]", r3(c9.0 as f64), r3(c9.1 as f64), r3(c9.2 as f64)));
+        let c10 = finbench::cr10(g, investor, ws, we);
+        harness::emit_json(&dir, "cr10.rust.json", arr(c10.iter()
+            .map(|&(o, c)| format!("[{},{}]", oid(o), c)).collect()));
+        let c11 = finbench::guarantee_exposure(g, seed_person);
+        harness::emit_json(&dir, "cr11.rust.json", format!("[[{}]]", r3(c11)));
+        let c12 = finbench::cr12(g, owner, ws, we, 10_000, to);
+        harness::emit_json(&dir, "cr12.rust.json", arr(c12.iter()
+            .map(|&(a, x)| format!("[{},{}]", oid(a), r3(x))).collect()));
+
+        harness::emit_json(&dir, "seeds.json", format!(
+            "{{\"account\":{},\"cr1\":{},\"person\":{},\"owner\":{},\"card\":{},\"loan\":{},\"investor\":{},\"cycle\":{},\"dst\":{},\"ws\":{},\"we\":{},\"cycle_window\":{},\"cr4_minamt\":1000.0}}",
+            oid(seed), oid(cr1_seed), oid(seed_person), oid(owner), oid(card), oid(loan_seed),
+            oid(investor), oid(cyc_seed), oid(dst), ws, we, win));
+        println!("emitted finbench rust cross-check JSON to {dir}");
+        return;
+    }
 
     let runs = 30;
     harness::time_query("CR1 blocked-medium", runs, || {
